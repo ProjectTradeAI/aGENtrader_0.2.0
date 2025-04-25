@@ -1,0 +1,39 @@
+'] * (current_price - position['entry_price'])
+        equity_curve.append({"timestamp": timestamp, "equity": equity})
+        
+        # Update max/min balance
+        max_balance = max(max_balance, equity)
+        min_balance = min(min_balance, equity)
+        
+        # Calculate indicators
+        short_ma = sum(data[i + j]['close'] for j in range(short_window)) / short_window
+        long_ma = sum(data[i + j]['close'] for j in range(long_window)) / long_window
+        
+        # Trading logic
+        if position is None:  # No position, look for entry
+            if short_ma > long_ma:  # Bullish crossover
+                risk_amount = balance * risk_per_trade
+                position_size = risk_amount / (current_price * 0.02)  # Assume 2% stop loss
+                cost = position_size * current_price
+                
+                if cost <= balance:  # Ensure we have enough balance
+                    position = {
+                        "type": "long",
+                        "entry_price": current_price,
+                        "size": position_size,
+                        "entry_time": timestamp,
+                        "stop_loss": current_price * 0.98,  # 2% stop loss
+                        "take_profit": current_price * 1.04  # 4% take profit
+                    }
+                    balance -= cost
+                    logger.info(f"Opened LONG position at ${current_price:.2f}, size: {position_size:.4f}, balance: ${balance:.2f}")
+        
+        else:  # We have a position, check for exit
+            if position['type'] == 'long':
+                # Check stop loss or take profit
+                if current_price <= position['stop_loss'] or current_price >= position['take_profit'] or short_ma < long_ma:
+                    # Close position
+                    exit_value = position['size'] * current_price
+                    profit_loss = exit_value - (position['size'] * position['entry_price'])
+                    balance += exit_value
+             

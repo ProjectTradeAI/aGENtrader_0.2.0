@@ -1,0 +1,6 @@
+{
+  "timestamp": "2025-03-11T23:46:51.931721",
+  "market_analysis": "=== Trading Strategy ===  \nStrategy Name: Bullish Breakout  \nType: Momentum  \nRisk Profile: Medium  \nConfidence: 80%  \n\nTrade Parameters:  \n- Entry Zone: $27,500 - $27,800  \n- Stop Loss: $27,200  \n- Take Profit:  \n  - Target 1: $28,500  \n  - Target 2: $29,000  \n\nPosition Management:  \n- Size: 0.5 BTC  \n- Portfolio %: 5%  \n- Risk per Trade: 1%  \n\nImplementation:  \n- Required Indicators: RSI, MACD, 50-day MA  \n- Entry Conditions: Enter when price crosses above $27,800 with volume confirmation.  \n- Exit Rules:  \n  - Exit at Target 1 ($28,500) for partial profit, moving the stop loss to breakeven.  \n  - Exit at Target 2 ($29,000) for remaining position, or if RSI hits overbought (>70) and shows divergence.  \n\nThis strategy utilizes current market conditions indicating a bullish trend supported by volume and technical indicators, ensuring a well-defined risk management approach and clear profit targets for an optimal trading outcome.",
+  "strategy": null,
+  "duration": 5.482592
+}

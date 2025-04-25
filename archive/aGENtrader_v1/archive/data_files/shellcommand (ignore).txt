@@ -1,0 +1,5 @@
+bash -c 'KEY_CONTENT=$(echo "$EC2_SSH_KEY" | sed "s///" | sed "s/-----END RSA PRIVATE KEY-----//"); FORMATTED_KEY="-----BEGIN RSA PRIVATE KEY-----"; for ((i=0; i<${#KEY_CONTENT}; i+=64)); do FORMATTED_KEY="$FORMATTED_KEY\n${KEY_CONTENT:$i:64}"; done; FORMATTED_KEY="$FORMATTED_KEY\n-----END RSA PRIVATE KEY-----"; SSH_KEY_PATH="/tmp/ec2_key.pem"; echo -e "$FORMATTED_KEY" > "$SSH_KEY_PATH"; chmod 600 "$SSH_KEY_PATH"; ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no ec2-user@$EC2_PUBLIC_IP; rm -f "$SSH_KEY_PATH"'
+
+./ec2-multi-agent-backtest.sh --type multi-agent --symbol BTCUSDT --interval 4h --start_date 2025-03-01 --end_date 2025-04-01 --balance 10000 --risk 0.02 --decision_interval 2 --min_confidence 75
+
+./smart-backtest-runner.sh

@@ -1,0 +1,28 @@
+Running collaborative decision test for BTCUSDT...
+2025-03-25 21:54:16,765 - agents.database_retrieval_tool - INFO - Database retrieval tool initialized successfully
+2025-03-25 21:54:16,766 - agents.trading_agents - INFO - Registered database functions with Market Analyst
+2025-03-25 21:54:16,766 - agents.trading_agents - INFO - Registered database functions with Strategy Manager
+2025-03-25 21:54:16,767 - agents.trading_agents - INFO - Agent capabilities set up successfully
+2025-03-25 21:54:16,767 - agents.trading_agents - INFO - Trading agent system initialized successfully
+2025-03-25 21:54:16,767 - agents.trading_agents - INFO - Running collaborative trading session with specialized agents
+2025-03-25 21:54:16,767 - agents.trading_agents - INFO - Starting market analysis for BTCUSDT
+
+================================================================================
+------------------ Testing Collaborative Decision for BTCUSDT ------------------
+================================================================================
+Starting collaborative trading session for BTCUSDT...
+UserProxy (to MarketAnalyst):
+
+
+        You are a MarketAnalyst for BTCUSDT. Your task is to:
+        
+        1. Retrieve current market data for BTCUSDT using the available functions
+        2. Analyze price patterns, trends, and key technical indicators 
+        3. Identify support and resistance levels
+        4. Evaluate overall market sentiment and conditions
+        5. Provide a detailed analysis with your assessment of the current market state
+        
+        Use the database functions like get_market_summary("BTCUSDT", "1h") to retrieve real data.
+        
+
+--------------------------------------------------------------------------------

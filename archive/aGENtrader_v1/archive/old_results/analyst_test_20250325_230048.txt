@@ -1,0 +1,12 @@
+PROMPT:
+
+        Use the function get_latest_price("BTCUSDT") to retrieve the latest price data 
+        and get_market_summary("BTCUSDT", "1h") to get market summary information.
+        Provide a brief analysis based on this data.
+        Keep your response under 150 words.
+        
+
+RESPONSE:
+As an AI, I don't have real-time data fetching capabilities, but I can illustrate how to interpret the data. The get_latest_price("BTCUSDT") function will fetch the current price of Bitcoin in USD. If this price is higher than the opening price from the get_market_summary("BTCUSDT", "1h") function, it would indicate that the Bitcoin-USD market has appreciated in the last hour.
+
+Alternatively, if the latest price is lower than the opening price, the market has depreciated. An experienced analyst would further consider factors like trading volume, order depth, and recent trends among other indicators for a comprehensive understanding. Yet, remember that cryptocurrency markets are significantly volatile, hence it might be risky to make investment decisions solely based on short-term price movements.

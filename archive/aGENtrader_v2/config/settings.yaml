@@ -1,0 +1,137 @@
+# aGENtrader v2 Configuration File
+
+# LLM Configuration
+llm:
+  # LLM Backend Provider (mock, ollama, openai)
+  provider: mock
+  # Default model to use
+  model: tinyllama
+  # Default temperature for generation
+  temperature: 0.2
+  # Maximum tokens to generate
+  max_tokens: 1000
+
+# Agent Configuration
+agents:
+  # List of active agents
+  active_agents:
+    - LiquidityAnalyst
+    - TechnicalAnalyst
+    - SentimentAnalyst
+    - PortfolioManager
+    - RiskGuard
+  
+  # Individual agent settings
+  liquidity_analyst:
+    enabled: true
+    confidence_threshold: 60
+  
+  technical_analyst:
+    enabled: true
+    confidence_threshold: 70
+    
+  sentiment_analyst:
+    enabled: true
+    data_mode: mock  # or api or scrape
+    api_source: lunarcrush  # placeholder
+    confidence_threshold: 65
+    confidence_map:
+      Bullish: 0.7
+      Neutral: 0.5
+      Bearish: 0.6
+
+  market_analyst:
+    enabled: false
+    confidence_threshold: 65
+  
+  portfolio_manager:
+    enabled: true
+    starting_balance: 10000
+    base_currency: USDT
+    max_total_exposure_pct: 85
+    max_per_asset_exposure_pct: 35
+    max_open_trades: 10
+    snapshot_interval_minutes: 60
+    validation_required: true
+    snapshot_dir: portfolio
+    
+  risk_guard:
+    enabled: true
+    max_volatility_pct: 5.0
+    min_liquidity_score: 0.7
+    min_confidence_threshold: 0.65
+    max_market_movement_pct: 3.0
+    max_spread_pct: 1.0
+
+# Trading Configuration
+trading:
+  default_pair: BTC/USDT
+  default_interval: 1h
+  fallback_decision_enabled: true
+  min_confidence_threshold: 75
+
+# Market Data Configuration
+market_data:
+  market_data_source: coinapi
+  live_mode_enabled: true
+  poll_interval_seconds: 300
+  default_pair: BTC/USDT
+  default_interval: 1h
+  history_days: 30
+  save_fetched_data: true
+
+# Position Sizing Configuration
+position_sizing:
+  enabled: true
+  base_position_usdt: 1000
+  min_position_usdt: 100
+  max_position_usdt: 5000
+  confidence_multiplier: 1.0
+  volatility_lookback_period: 24h
+  max_volatility_cap: 10.0
+  min_volatility_floor: 0.5
+  volatility_sensitivity: 1.0
+
+# Trade Execution Configuration
+trade_execution:
+  execution_mode: dry_run  # Options: disabled, dry_run, live
+  confidence_threshold: 75
+  risk_percentage: 2.0
+  take_profit_multiplier: 2.0
+  starting_balance: 10000
+
+# Performance Tracker Configuration
+performance_tracker:
+  enabled: true
+  check_interval_seconds: 60
+  stale_trade_minutes: 240
+  max_trade_hold_hours: 48
+  report_dir: reports
+
+# Agent Weights Configuration
+# These weights influence how much each agent's analysis impacts the final decision
+agent_weights:
+  LiquidityAnalystAgent: 1.0
+  TechnicalAnalystAgent: 1.2
+  SentimentAnalystAgent: 0.8
+  # FundamentalAnalystAgent: 1.1  # Uncomment when implemented
+
+# Database Configuration
+database:
+  host: localhost
+  port: 5432
+  db_name: market_data
+  connect_timeout: 10
+  max_retries: 3
+
+# Error Handling Configuration
+error_handling:
+  max_api_retries: 3
+  retry_backoff_seconds: 2
+  allow_mock_fallback: false
+  log_failed_trades: true
+  log_level_default: INFO
+  log_level_api_error: ERROR
+  log_level_trade_error: CRITICAL
+  failed_trades_log: logs/failed_trades.jsonl
+  error_logs_dir: logs/errors

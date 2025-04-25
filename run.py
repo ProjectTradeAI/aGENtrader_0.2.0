@@ -1,0 +1,559 @@
+#!/usr/bin/env python3
+"""
+aGENtrader v2.1 Main Application
+
+This script serves as the main entry point for the aGENtrader v2.1 trading system
+with real technical analysis and sentiment analysis via Grok API.
+"""
+import os
+import sys
+import logging
+import argparse
+import json
+import time
+from datetime import datetime
+
+# Add the current directory to the Python path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# Try to import dotenv for environment variables
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    print("Warning: python-dotenv not installed. Environment variables must be set manually.")
+
+# Import the data providers
+from agents.data_providers.binance_data_provider import BinanceDataProvider
+
+# Import the analyst agents
+from agents.base_agent import BaseAnalystAgent
+from agents.technical_analyst_agent import TechnicalAnalystAgent
+from agents.sentiment_aggregator_agent import SentimentAggregatorAgent
+
+# Import the decision logger
+from core.logging.decision_logger import DecisionLogger, decision_logger
+
+def setup_logging(log_level=None):
+    """Set up logging configuration."""
+    if log_level is None:
+        log_level = os.getenv("LOG_LEVEL", "INFO")
+    
+    numeric_level = getattr(logging, log_level.upper(), None)
+    if not isinstance(numeric_level, int):
+        numeric_level = logging.INFO
+    
+    # Create logs directory if it doesn't exist
+    os.makedirs("logs", exist_ok=True)
+    
+    logging.basicConfig(
+        level=numeric_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler("logs/agentrader.log"),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger("aGENtrader")
+
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="aGENtrader v2.1 Trading System")
+    parser.add_argument("--mode", type=str, default=os.getenv("MODE", "demo"), 
+                        choices=["demo", "test", "live_simulation", "live"],
+                        help="Trading mode (demo, test, live_simulation, or live)")
+    parser.add_argument("--symbol", type=str, default=os.getenv("DEFAULT_SYMBOL", "BTC/USDT"),
+                        help="Trading symbol (e.g., BTC/USDT)")
+    parser.add_argument("--interval", type=str, default=os.getenv("DEFAULT_INTERVAL", "1h"),
+                        help="Time interval for market data (e.g., 1h, 4h, 1d)")
+    parser.add_argument("--sentiment", action="store_true",
+                        help="Run sentiment analysis demo")
+    
+    return parser.parse_args()
+
+class TradeBookManager:
+    """
+    Manages trade recording and performance tracking.
+    """
+    
+    def __init__(self, log_dir="logs"):
+        self.log_dir = log_dir
+        self.trade_book_path = os.path.join(log_dir, "trade_book.jsonl")
+        self.trade_performance_path = os.path.join(log_dir, "trade_performance.jsonl")
+        self.rejected_trades_path = os.path.join(log_dir, "rejected_trades.jsonl")
+        
+        # Ensure log directory exists
+        os.makedirs(log_dir, exist_ok=True)
+        
+        self.open_trades = []
+        self.closed_trades = []
+        self.rejected_trades = []
+        
+        logging.info(f"TradeBookManager initialized with log dir: {log_dir}")
+    
+    def record_trade(self, trade_data):
+        """Record a new trade."""
+        if not isinstance(trade_data, dict):
+            logging.error("Trade data must be a dictionary")
+            return False
+        
+        # Add timestamp if not present
+        if "timestamp" not in trade_data:
+            trade_data["timestamp"] = datetime.now().isoformat()
+        
+        # Add to open trades
+        self.open_trades.append(trade_data)
+        
+        # Record to trade book
+        with open(self.trade_book_path, "a") as f:
+            f.write(json.dumps(trade_data) + "\n")
+        
+        logging.info(f"Trade recorded: {trade_data['type']} {trade_data.get('symbol')} @ {trade_data.get('price')}")
+        return True
+    
+    def record_performance(self, performance_data):
+        """Record trade performance."""
+        if not isinstance(performance_data, dict):
+            logging.error("Performance data must be a dictionary")
+            return False
+        
+        # Add timestamp if not present
+        if "timestamp" not in performance_data:
+            performance_data["timestamp"] = datetime.now().isoformat()
+        
+        # Record to performance log
+        with open(self.trade_performance_path, "a") as f:
+            f.write(json.dumps(performance_data) + "\n")
+        
+        logging.info(f"Performance recorded: {performance_data}")
+        return True
+    
+    def record_rejected_trade(self, trade_data, rejection_reason):
+        """Record a rejected trade."""
+        if not isinstance(trade_data, dict):
+            logging.error("Trade data must be a dictionary")
+            return False
+        
+        # Add rejection information
+        trade_data["rejected"] = True
+        trade_data["rejection_reason"] = rejection_reason
+        
+        # Add timestamp if not present
+        if "timestamp" not in trade_data:
+            trade_data["timestamp"] = datetime.now().isoformat()
+        
+        # Add to rejected trades
+        self.rejected_trades.append(trade_data)
+        
+        # Record to rejected trades log
+        with open(self.rejected_trades_path, "a") as f:
+            f.write(json.dumps(trade_data) + "\n")
+        
+        logging.info(f"Trade rejected: {trade_data['type']} {trade_data.get('symbol')} - Reason: {rejection_reason}")
+        return True
+
+
+class DecisionTriggerScheduler:
+    """
+    Manages scheduled decision triggers for different timeframes.
+    """
+    
+    def __init__(self):
+        self.scheduled_triggers = {}
+        self.last_execution = {}
+        
+    def schedule_trigger(self, interval, callback, symbol=None):
+        """Schedule a trigger for a specific interval."""
+        if interval not in self.scheduled_triggers:
+            self.scheduled_triggers[interval] = []
+        
+        trigger = {
+            "callback": callback,
+            "symbol": symbol
+        }
+        
+        self.scheduled_triggers[interval].append(trigger)
+        self.last_execution[interval] = 0
+        
+        logging.info(f"Scheduled trigger for interval {interval}")
+        
+    def check_triggers(self):
+        """Check if any triggers should be executed."""
+        current_time = time.time()
+        
+        for interval, triggers in self.scheduled_triggers.items():
+            interval_seconds = self._interval_to_seconds(interval)
+            
+            if current_time - self.last_execution.get(interval, 0) >= interval_seconds:
+                # Execute all triggers for this interval
+                for trigger in triggers:
+                    callback = trigger["callback"]
+                    symbol = trigger["symbol"]
+                    
+                    try:
+                        if symbol:
+                            callback(symbol=symbol, interval=interval)
+                        else:
+                            callback(interval=interval)
+                    except Exception as e:
+                        logging.error(f"Error executing trigger for {interval}: {str(e)}")
+                
+                self.last_execution[interval] = current_time
+                logging.info(f"Executed triggers for interval {interval}")
+                
+    def _interval_to_seconds(self, interval):
+        """Convert interval string to seconds."""
+        unit = interval[-1]
+        value = int(interval[:-1])
+        
+        if unit == 'm':
+            return value * 60
+        elif unit == 'h':
+            return value * 60 * 60
+        elif unit == 'd':
+            return value * 24 * 60 * 60
+        else:
+            raise ValueError(f"Unsupported interval unit: {unit}")
+
+
+class RiskGuardAgent:
+    """
+    Agent that evaluates trade risks and may reject trades based on risk parameters.
+    """
+    
+    def __init__(self, config=None):
+        self.name = "RiskGuardAgent"
+        self.config = config or {}
+        
+        # Default risk parameters
+        self.max_position_size = self.config.get("max_position_size", 0.1)  # 10% of capital
+        self.max_open_positions = self.config.get("max_open_positions", 3)
+        self.max_drawdown = self.config.get("max_drawdown", 0.05)  # 5% drawdown limit
+        
+        logging.info(f"RiskGuardAgent initialized with max position size: {self.max_position_size}, "
+                  f"max open positions: {self.max_open_positions}")
+    
+    def evaluate_trade(self, trade_proposal, current_portfolio=None):
+        """
+        Evaluate a trade proposal and determine if it should be approved or rejected.
+        
+        Args:
+            trade_proposal: The proposed trade
+            current_portfolio: Current portfolio state
+            
+        Returns:
+            Dictionary with approval status and reason
+        """
+        # Default to empty portfolio
+        current_portfolio = current_portfolio or {"open_positions": [], "capital": 10000.0}
+        
+        # Check number of open positions
+        if len(current_portfolio["open_positions"]) >= self.max_open_positions:
+            return {
+                "approved": False,
+                "reason": f"Maximum number of open positions ({self.max_open_positions}) reached"
+            }
+        
+        # Check position size
+        position_size = trade_proposal.get("position_size", 0)
+        if position_size > self.max_position_size:
+            return {
+                "approved": False,
+                "reason": f"Position size ({position_size:.2%}) exceeds maximum allowed ({self.max_position_size:.2%})"
+            }
+        
+        # More risk checks could be added here
+        
+        return {
+            "approved": True,
+            "reason": "Trade proposal meets risk parameters"
+        }
+
+
+def run_sentiment_demo(symbol="BTC/USDT"):
+    """Run a demo of the sentiment analysis functionality."""
+    print("=" * 60)
+    print("aGENtrader v2.1 - Sentiment Analysis Demo")
+    print("=" * 60)
+    
+    # Check for XAI API key
+    api_key = os.getenv("XAI_API_KEY")
+    if not api_key:
+        print("Error: XAI_API_KEY environment variable not found.")
+        print("Sentiment analysis requires a valid API key for Grok API.")
+        return
+    
+    print(f"Running sentiment analysis for {symbol}...")
+    
+    # Create and run the SentimentAggregatorAgent
+    sentiment_agent = SentimentAggregatorAgent()
+    
+    result = sentiment_agent.analyze(symbol=symbol)
+    
+    # Display results
+    if result.get("status") == "error":
+        print("⚠️ Error in sentiment analysis:")
+        print(f"  Type: {result.get('error_type')}")
+        print(f"  Message: {result.get('message')}")
+        return
+    
+    print(f"📊 Sentiment Analysis for {result['symbol']}:")
+    
+    # Calculate sentiment tier based on score
+    sentiment_score = result["sentiment_score"]
+    if sentiment_score >= 4.5:
+        sentiment_tier = "Extremely Bullish"
+    elif sentiment_score >= 4:
+        sentiment_tier = "Bullish"
+    elif sentiment_score >= 3.5:
+        sentiment_tier = "Slightly Bullish"
+    elif sentiment_score >= 2.5:
+        sentiment_tier = "Neutral"
+    elif sentiment_score >= 2:
+        sentiment_tier = "Slightly Bearish"  
+    elif sentiment_score >= 1.5:
+        sentiment_tier = "Bearish"
+    else:
+        sentiment_tier = "Extremely Bearish"
+    
+    print(f"  Sentiment Score: {sentiment_score} ({sentiment_tier})")
+    print(f"  Confidence: {result['confidence']}%")
+    print(f"  Analysis: {result['analysis_summary']}")
+    
+    if "sentiment_signals" in result:
+        print("\n🔑 Key Signals:")
+        for signal in result["sentiment_signals"]:
+            print(f"  • {signal}")
+    
+    print("\nDemo completed successfully!")
+
+def run_technical_analysis(symbol, interval, data_provider):
+    """Run technical analysis and log the results."""
+    try:
+        # Initialize the technical analyst agent
+        tech_agent = TechnicalAnalystAgent(data_fetcher=data_provider)
+        
+        # Perform analysis
+        result = tech_agent.analyze(symbol=symbol, interval=interval)
+        
+        # Log the decision
+        decision_logger.create_summary_from_result("TechnicalAnalystAgent", result, symbol)
+        
+        return result
+    except Exception as e:
+        logging.error(f"Error in technical analysis: {str(e)}", exc_info=True)
+        return {"error": str(e), "status": "error"}
+
+def run_sentiment_analysis(symbol, interval, data_provider=None):
+    """Run sentiment analysis and log the results."""
+    try:
+        # Check for xAI API key
+        if not os.environ.get("XAI_API_KEY"):
+            logging.warning("XAI_API_KEY not found, sentiment analysis will be skipped")
+            return {"status": "skipped", "reason": "XAI_API_KEY not found"}
+        
+        # Initialize the sentiment agent
+        sentiment_agent = SentimentAggregatorAgent()
+        
+        # Perform analysis
+        result = sentiment_agent.analyze(symbol=symbol, interval=interval)
+        
+        # Log the decision
+        decision_logger.create_summary_from_result("SentimentAggregatorAgent", result, symbol)
+        
+        return result
+    except Exception as e:
+        logging.error(f"Error in sentiment analysis: {str(e)}", exc_info=True)
+        return {"error": str(e), "status": "error"}
+
+def process_trading_decision(symbol, interval, data_provider, trade_book_manager, risk_guard):
+    """Process trading decisions from all agents and execute trades if approved."""
+    try:
+        # Get current price
+        current_price = data_provider.get_current_price(symbol.replace("/", ""))
+        
+        # Run technical analysis
+        ta_result = run_technical_analysis(symbol, interval, data_provider)
+        
+        # Run sentiment analysis
+        sentiment_result = run_sentiment_analysis(symbol, interval, data_provider)
+        
+        # Create trade proposal
+        trade_proposal = {
+            "timestamp": datetime.now().isoformat(),
+            "symbol": symbol,
+            "interval": interval,
+            "price": current_price,
+            "type": ta_result.get("signal", "NEUTRAL"),
+            "confidence": ta_result.get("confidence", 50),
+            "position_size": ta_result.get("confidence", 50) / 100 * 0.1,  # Scale position size by confidence
+            "technical_signals": ta_result.get("indicators", []),
+            "sentiment_score": sentiment_result.get("sentiment_score", 3),
+            "sentiment_signals": sentiment_result.get("sentiment_signals", [])
+        }
+        
+        # Evaluate trade with risk guard
+        risk_evaluation = risk_guard.evaluate_trade(trade_proposal)
+        
+        if risk_evaluation["approved"]:
+            # Record approved trade
+            trade_book_manager.record_trade(trade_proposal)
+            
+            # Generate simulated performance (for demonstration)
+            performance_data = {
+                "trade_id": str(int(time.time())),
+                "symbol": symbol,
+                "entry_price": current_price,
+                "entry_time": trade_proposal["timestamp"],
+                "position_size": trade_proposal["position_size"],
+                "simulated_exit_price": current_price * (1.01 if trade_proposal["type"] == "BUY" else 0.99),
+                "simulated_profit_loss": 0.01 if trade_proposal["type"] == "BUY" else -0.01,
+                "technical_confidence": ta_result.get("confidence", 50),
+                "sentiment_score": sentiment_result.get("sentiment_score", 3),
+            }
+            
+            trade_book_manager.record_performance(performance_data)
+            
+            logging.info(f"Trade executed: {trade_proposal['type']} {symbol} @ {current_price}")
+            
+        else:
+            # Record rejected trade
+            trade_book_manager.record_rejected_trade(trade_proposal, risk_evaluation["reason"])
+            logging.info(f"Trade rejected: {trade_proposal['type']} {symbol} - Reason: {risk_evaluation['reason']}")
+            
+        return {
+            "trade_proposal": trade_proposal,
+            "risk_evaluation": risk_evaluation,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        logging.error(f"Error processing trading decision: {str(e)}", exc_info=True)
+        return {"error": str(e), "status": "error"}
+
+def main():
+    """Initialize and run the trading system."""
+    # Set up logging
+    logger = setup_logging()
+    
+    # Parse command-line arguments
+    args = parse_arguments()
+    
+    logger.info(f"Starting aGENtrader v2.1 in {args.mode} mode")
+    
+    # Run sentiment analysis demo if requested
+    if args.sentiment:
+        run_sentiment_demo(symbol=args.symbol)
+        return
+    
+    # Regular system startup
+    logger.info(f"Trading pair: {args.symbol}, Interval: {args.interval}")
+    
+    try:
+        # Check API keys
+        binance_key = os.getenv("BINANCE_API_KEY")
+        binance_secret = os.getenv("BINANCE_API_SECRET")
+        xai_key = os.getenv("XAI_API_KEY")
+        
+        # Handle missing keys
+        if not binance_key or not binance_secret:
+            logger.error("BINANCE_API_KEY and BINANCE_API_SECRET are required")
+            return
+        
+        if not xai_key:
+            logger.warning("XAI_API_KEY not found. Sentiment analysis will be disabled.")
+        
+        # Initialize components
+        logger.info("Initializing system components...")
+        
+        # Initialize data provider
+        data_provider = BinanceDataProvider()
+        logger.info("Binance Data Provider initialized")
+        
+        # Initialize trade book manager
+        trade_book_manager = TradeBookManager()
+        logger.info("Trade Book Manager initialized")
+        
+        # Initialize risk guard
+        risk_guard = RiskGuardAgent()
+        logger.info("Risk Guard Agent initialized")
+        
+        # Initialize scheduler
+        scheduler = DecisionTriggerScheduler()
+        
+        # Schedule triggers for the trading interval
+        def trigger_callback(symbol=args.symbol, interval=args.interval):
+            return process_trading_decision(
+                symbol, 
+                interval, 
+                data_provider, 
+                trade_book_manager, 
+                risk_guard
+            )
+        
+        scheduler.schedule_trigger(args.interval, trigger_callback, args.symbol)
+        logger.info(f"Decision trigger scheduled for {args.symbol} at {args.interval} interval")
+        
+        # Print system status
+        logger.info("System initialization complete")
+        logger.info(f"Running in {args.mode} mode with {args.symbol} at {args.interval} interval")
+        
+        # Main loop
+        if args.mode == "demo":
+            # In demo mode, run once and exit
+            logger.info("Demo mode active. Running one trading cycle.")
+            result = process_trading_decision(
+                args.symbol, 
+                args.interval, 
+                data_provider, 
+                trade_book_manager, 
+                risk_guard
+            )
+            logger.info(f"Demo cycle completed with status: {result['status']}")
+        else:
+            # In all other modes, keep the system running
+            logger.info(f"System running in {args.mode} mode. Press Ctrl+C to stop.")
+            
+            runtime_start = time.time()
+            check_interval = 30  # seconds
+            
+            # Parse test duration
+            duration_str = os.getenv("TEST_DURATION", "2h")
+            duration_unit = duration_str[-1]
+            duration_value = int(duration_str[:-1])
+            
+            if duration_unit == 'm':
+                duration_seconds = duration_value * 60
+            elif duration_unit == 'h':
+                duration_seconds = duration_value * 60 * 60
+            elif duration_unit == 'd':
+                duration_seconds = duration_value * 24 * 60 * 60
+            else:
+                logger.warning(f"Unsupported duration unit: {duration_unit}. Using default of 2 hours.")
+                duration_seconds = 2 * 60 * 60
+                
+            logger.info(f"Test will run for {duration_str} ({duration_seconds} seconds)")
+            
+            while time.time() - runtime_start < duration_seconds:
+                # Check scheduled triggers
+                scheduler.check_triggers()
+                
+                # Sleep
+                time.sleep(check_interval)
+                
+                # Log activity
+                elapsed = time.time() - runtime_start
+                remaining = duration_seconds - elapsed
+                logger.info(f"System active - elapsed: {int(elapsed/60)}m, remaining: {int(remaining/60)}m")
+            
+            logger.info(f"Test duration of {duration_str} completed")
+                
+    except KeyboardInterrupt:
+        logger.info("Shutting down aGENtrader v2.1...")
+    except Exception as e:
+        logger.error(f"Error in main loop: {str(e)}", exc_info=True)
+    finally:
+        logger.info("aGENtrader v2.1 shutdown complete")
+
+if __name__ == "__main__":
+    main()

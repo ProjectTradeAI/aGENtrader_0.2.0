@@ -1,0 +1,10 @@
+PROMPT:
+
+        Use the function get_latest_price("BTCUSDT") to retrieve the latest price data 
+        and get_market_summary("BTCUSDT", "1h") to get market summary information.
+        Provide a brief analysis based on this data.
+        Keep your response under 150 words.
+        
+
+RESPONSE:
+None

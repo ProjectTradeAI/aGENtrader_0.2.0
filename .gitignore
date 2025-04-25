@@ -1,0 +1,107 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Environment
+.env
+.env.*
+.venv
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# Docker
+.docker/
+docker-compose.override.yml
+
+# Log files
+logs/*
+!logs/.gitkeep
+!logs/__init__.py
+!logs/decisions/__init__.py
+!logs/performance/__init__.py
+!logs/api_calls/__init__.py
+
+# Data files
+data/feed/*
+!data/feed/__init__.py
+data/live/*
+!data/live/__init__.py
+data/simulated/*
+!data/simulated/__init__.py
+*.csv
+*.json
+!config/*.json
+
+# Secrets
+*.pem
+*.key
+*.crt
+api_keys.txt
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Miscellaneous
+.replit/
+.replit_cache/
+.nix/
+*.tar.gz
+config/secrets.yaml
+
+# Large backup files
+archive/**/*.tar.gz
+archive/**/*.zip
+.backup_before_separation/
+.cache/
+
+# Credentials and sensitive files
+**/credentials.json
+**/*.pem
+private_keys/
+*_private.*
+
+# Temp files
+**/.tmp/
+**/temp/
+**/.temp/
+**/*.bak
+
+# System files
+.pyc
+.DS_Store

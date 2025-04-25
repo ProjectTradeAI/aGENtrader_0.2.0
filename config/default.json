@@ -1,0 +1,43 @@
+{
+  "risk_tolerance": "moderate",
+  "max_position_size_pct": 10.0,
+  "stop_loss_pct": 5.0,
+  "take_profit_pct": 10.0,
+  "api": {
+    "coinapi": {
+      "key": ""
+    }
+  },
+  "agents": {
+    "technical": {
+      "confidence_threshold": 60,
+      "indicators": {
+        "macd": {
+          "enabled": true,
+          "weight": 1.5
+        },
+        "rsi": {
+          "enabled": true,
+          "weight": 1.2
+        },
+        "ma_crossover": {
+          "enabled": true,
+          "weight": 1.4
+        },
+        "bollinger": {
+          "enabled": true,
+          "weight": 1.0
+        },
+        "ema_crossover": {
+          "enabled": true,
+          "weight": 1.5
+        }
+      }
+    },
+    "risk_guard": {
+      "max_risk_score": 80,
+      "max_daily_trades": 5,
+      "max_concurrent_positions": 3
+    }
+  }
+}

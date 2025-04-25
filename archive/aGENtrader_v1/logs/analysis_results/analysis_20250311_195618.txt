@@ -1,0 +1,24 @@
+=== Market Analysis ===
+
+Trading Strategy:  
+- Name: **Bullish Pullback Strategy**  
+- Period: **4-hour timeframe**  
+- Entry: **Long position on price retracement to $26,500 or $25,000 support levels, confirmed by bullish candlestick patterns (such as engulfing or hammer) and a MACD crossover above the signal line.**  
+- Exit: **Target at $30,000 for partial profit-taking; if the price breaks above this level, set a trailing stop to capture further gains, with an additional target at $32,500.**  
+- Risk: **Use a maximum risk of 1% of the trading capital per trade. Place stop-loss orders 2% below the entry point to hedge against unexpected price movements, ideally below the support levels of $26,500 or $25,000.**  
+
+Implementation Steps:  
+1. **Identify and Monitor Key Support Levels:** Regularly analyze the market for Bitcoin price approaching either $26,500 or $25,000 levels.  
+2. **Confirm Entry Conditions:** Wait for a bullish candlestick pattern to form at the support level and ensure MACD confirms an upward trend.  
+3. **Set Entry and Stop-Loss Orders:** Once entry conditions are met, place long orders with a stop-loss set below the identified support levels.  
+4. **Set Price Targets:** Establish your profit targets at $30,000 and $32,500 based on resistance analysis.  
+5. **Utilize Risk Management Tools:** Adhere to the 1% maximum risk rule by computing position size relative to total trading capital.  
+6. **Monitor Market Sentiment:** Continuously track external factors influencing Bitcoin, including news and sentiment shifts that may impact price movements.  
+7. **Adjust Trailing Stop on Breakouts:** Upon reaching $30,000, adjust the stop-loss to safeguard profits and allow for upside capture if ascending momentum continues.  
+8. **Review and Document:** After closing positions, review your trades, document the outcomes and refine strategies based on lessons learned to improve future trading performance.  
+
+This strategy leverages market analysis while integrating effective risk management to optimize potential returns on Bitcoin trades in the current bullish landscape.
+
+=== Trading Strategy ===
+
+None

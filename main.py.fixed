@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""
+Simple trading script for aGENtrader v2
+
+This script demonstrates using CoinAPI to fetch market data and log it.
+"""
+
+import os
+import sys
+import json
+import time
+import logging
+import argparse
+import requests
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler("logs/trading.log"),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger("aGENtrader")
+
+def verify_api_key():
+    """Verify the CoinAPI key is set and valid"""
+    api_key = os.environ.get("COINAPI_KEY")
+    if not api_key:
+        logger.error("No CoinAPI key found in environment variables")
+        return False
+    
+    # Test API key with a simple request
+    url = "https://rest.coinapi.io/v1/exchanges"
+    headers = {
+        'X-CoinAPI-Key': api_key,
+        'Accept': 'application/json'
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            logger.info("API key verified successfully")
+            return True
+        else:
+            logger.error(f"API key verification failed with status code {response.status_code}")
+            logger.error(f"Response: {response.text}")
+            return False
+    
+    except Exception as e:
+        logger.error(f"Error verifying API key: {str(e)}")
+        return False
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(description='Simple trading script')
+    parser.add_argument('--symbol', type=str, default='BTC/USDT',
+                      help='Trading symbol')
+    parser.add_argument('--interval', type=str, default='1h',
+                      help='Trading interval')
+    return parser.parse_args()
+
+def fetch_market_data(symbol, interval="1h", limit=10):
+    """Fetch market data from CoinAPI"""
+    api_key = os.environ.get("COINAPI_KEY")
+    if not api_key:
+        logger.error("No CoinAPI key found in environment variables")
+        return None
+    
+    # Format symbol and interval for CoinAPI
+    if "/" in symbol:
+        base, quote = symbol.split("/")
+        symbol_fmt = f"BITSTAMP_SPOT_{base}_{quote}"
+    else:
+        symbol_fmt = symbol
+    
+    interval_map = {
+        "1m": "1MIN", 
+        "5m": "5MIN",
+        "15m": "15MIN",
+        "30m": "30MIN",
+        "1h": "1HRS",
+        "4h": "4HRS",
+        "1d": "1DAY"
+    }
+    period = interval_map.get(interval, "1HRS")
+    
+    # Calculate date range (last 3 days)
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=3)
+    
+    # Format dates for CoinAPI
+    start_date_str = start_date.strftime('%Y-%m-%dT%H:%M:%S')
+    end_date_str = end_date.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    # Endpoint URL for OHLCV data
+    url = f"https://rest.coinapi.io/v1/ohlcv/{symbol_fmt}/history?period_id={period}&time_start={start_date_str}&time_end={end_date_str}&limit={limit}"
+    
+    headers = {
+        'X-CoinAPI-Key': api_key,
+        'Accept': 'application/json'
+    }
+    
+    try:
+        logger.info(f"Fetching data for {symbol} at {interval} interval")
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            data = response.json()
+            logger.info(f"Successfully fetched {len(data)} OHLCV records")
+            return data
+        else:
+            logger.error(f"API request failed with status code {response.status_code}")
+            logger.error(f"Response: {response.text}")
+            return None
+    
+    except Exception as e:
+        logger.error(f"Error fetching market data: {str(e)}")
+        return None
+
+def save_market_data(data, symbol, interval):
+    """Save market data to file"""
+    if not data:
+        return False
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"reports/{symbol.replace('/', '_')}_{interval}_{timestamp}.json"
+    
+    try:
+        with open(filename, 'w') as f:
+            json.dump(data, f, indent=2)
+        logger.info(f"Saved market data to {filename}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving market data: {str(e)}")
+        return False
+
+def simulate_trading_decision(data, symbol, interval):
+    """Simulate a basic trading decision based on recent market data"""
+    if not data or len(data) < 2:
+        logger.warning("Not enough data to make a trading decision")
+        return {"action": "HOLD", "confidence": 0, "reason": "Insufficient data"}
+    
+    # Extract the last two candles
+    current = data[-1]
+    previous = data[-2]
+    
+    # Simple strategy: If price went up, buy; if down, sell
+    current_close = float(current["price_close"])
+    previous_close = float(previous["price_close"])
+    
+    price_change = (current_close - previous_close) / previous_close * 100
+    
+    if price_change > 1.0:  # Up more than 1%
+        action = "BUY"
+        confidence = min(int(price_change * 10), 90)  # Scale confidence with price change
+        reason = f"Price increased by {price_change:.2f}%"
+    elif price_change < -1.0:  # Down more than 1%
+        action = "SELL"
+        confidence = min(int(abs(price_change) * 10), 90)
+        reason = f"Price decreased by {abs(price_change):.2f}%"
+    else:
+        action = "HOLD"
+        confidence = 50
+        reason = f"Price change ({price_change:.2f}%) within threshold"
+    
+    decision = {
+        "timestamp": datetime.now().isoformat(),
+        "symbol": symbol,
+        "interval": interval,
+        "action": action,
+        "confidence": confidence,
+        "reason": reason,
+        "price": current_close
+    }
+    
+    logger.info(f"Decision: {action} {symbol} with {confidence}% confidence")
+    return decision
+
+def save_trading_decision(decision):
+    """Save trading decision to file"""
+    if not decision:
+        return False
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"trades/decision_{timestamp}.json"
+    
+    try:
+        with open(filename, 'w') as f:
+            json.dump(decision, f, indent=2)
+        logger.info(f"Saved trading decision to {filename}")
+        return True
+    except Exception as e:
+        logger.error(f"Error saving trading decision: {str(e)}")
+        return False
+
+def main():
+    """Main function to run the trading simulation"""
+    # Load environment variables
+    load_dotenv()
+    
+    # Parse arguments
+    args = parse_arguments()
+    symbol = args.symbol
+    interval = args.interval
+    
+    logger.info(f"Starting aGENtrader v2 with {symbol} at {interval} interval")
+    
+    # Verify API key before proceeding
+    if not verify_api_key():
+        logger.error("API key verification failed, exiting")
+        return
+    
+    try:
+        while True:
+            # Fetch market data
+            market_data = fetch_market_data(symbol, interval)
+            
+            if market_data:
+                # Save market data
+                save_market_data(market_data, symbol, interval)
+                
+                # Generate trading decision
+                decision = simulate_trading_decision(market_data, symbol, interval)
+                
+                # Save trading decision
+                save_trading_decision(decision)
+            else:
+                logger.warning("Could not fetch market data, skipping cycle")
+            
+            # Wait for next cycle (5 minutes)
+            logger.info(f"Sleeping for 5 minutes until next cycle")
+            time.sleep(300)
+    
+    except KeyboardInterrupt:
+        logger.info("Trading interrupted by user")
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}")
+    
+    logger.info("Trading simulation ended")
+
+if __name__ == "__main__":
+    main()

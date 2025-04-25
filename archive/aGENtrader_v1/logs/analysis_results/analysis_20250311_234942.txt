@@ -1,0 +1,6 @@
+{
+  "timestamp": "2025-03-11T23:49:51.555837",
+  "market_analysis": "=== Trading Strategy ===  \nStrategy Overview:  \n- Name: Bullish Momentum Strategy  \n- Type: Trend  \n- Risk Profile: Medium  \n- Confidence: 80%  \n\nTrade Parameters:  \n- Entry Zone: $27,800 - $28,000  \n- Stop Loss: $27,500  \n- Take Profit:  \n  \u2022 Target 1: $28,500  \n  \u2022 Target 2: $29,200  \n\nPosition Management:  \n- Size: 0.5 BTC  \n- Portfolio Allocation: 5%  \n- Risk per Trade: 1%  \n\nImplementation:  \n- Required Indicators: RSI, MACD, 50-day Moving Average, Volume Analysis  \n- Entry Conditions: Enter when the price reaches $27,800 or higher with confirmation from the bullish MACD crossover and volume spike.  \n- Exit Rules: Close at Target 1 ($28,500) to secure partial profits; set a trailing stop at $28,000 after hitting Target 1. Close all positions at Target 2 ($29,200) or if the price falls back to $27,500 below the stop loss level.",
+  "strategy": null,
+  "duration": 4.219883
+}

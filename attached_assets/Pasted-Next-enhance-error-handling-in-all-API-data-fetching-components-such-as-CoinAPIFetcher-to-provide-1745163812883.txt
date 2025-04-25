@@ -1,0 +1,56 @@
+Next, enhance error handling in all API data-fetching components (such as CoinAPIFetcher) to provide detailed, specific, and helpful error messages based on API HTTP response codes.
+
+### 🚦 Goals:
+- Clearly differentiate API errors such as rate-limiting (429), authentication issues (401, 403), client errors (400), and server errors (500+).
+- Provide explicit and actionable error logs for each type of API error.
+
+### 📌 Detailed Tasks:
+
+#### 1. Explicitly Handle Common HTTP Response Codes
+Implement clear, distinct handling for at least these response codes:
+
+- **400 (Bad Request)**:  
+  Log clearly that the request parameters or formatting are invalid. Suggest reviewing request parameters.
+
+- **401 & 403 (Unauthorized & Forbidden)**:  
+  Log explicitly that the API authentication has failed. Recommend checking API key validity or permissions.
+
+- **429 (Too Many Requests)**:  
+  Clearly log rate-limiting, including any provided `Retry-After` header. Suggest appropriate wait time before retrying.
+
+- **500–503 (Server Errors)**:  
+  Log clearly that the API server encountered errors. Suggest waiting briefly before retrying, and document clearly as an external issue.
+
+#### 2. Logging Structure
+Use clear, standardized error log messages, for example:
+
+```python
+logger.error(f"API Error {response.status_code}: {response.reason}. Recommended action: {recommendation}")
+Example logs:
+
+API Error 401: Unauthorized. Recommended action: Check your API key and permissions.
+
+API Error 429: Too Many Requests. Recommended action: Retry after 60 seconds.
+
+API Error 500: Internal Server Error. Recommended action: Wait briefly and retry later.
+
+3. Retry & Recovery Logic
+Clearly define retry logic for recoverable errors (429, 500+):
+
+Implement exponential backoff (already in place), with recommended wait durations from API headers if provided.
+
+Do not retry immediately for permanent errors like 400, 401, 403—log clearly and halt further attempts.
+
+4. Error Documentation & Testing
+Update API_ERROR_HANDLING.md with clear definitions of how each response code is handled and recommended actions.
+
+Provide thorough test cases in tests/test_api_error_handling.py that simulate each error type and verify that the logs and retry behaviors match expectations.
+
+📌 Acceptance Criteria:
+Each common API HTTP error code is handled explicitly.
+
+Error logs provide clear, actionable messages with suggested actions.
+
+Retry logic is robust and correctly applied only to recoverable errors.
+
+Documentation and tests validate that error handling is thorough and effective.

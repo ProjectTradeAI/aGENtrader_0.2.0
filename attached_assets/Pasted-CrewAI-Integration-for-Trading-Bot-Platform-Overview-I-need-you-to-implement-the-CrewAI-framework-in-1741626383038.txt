@@ -1,0 +1,37 @@
+CrewAI Integration for Trading Bot Platform
+Overview
+I need you to implement the CrewAI framework into our existing trading bot platform to enhance our multi-agent system. The goal is to leverage CrewAI's collaborative agent capabilities to improve decision-making and communication between our specialized trading agents.
+
+Current Implementation
+We've created a prototype in agents/crewai_prototype.py that demonstrates how CrewAI can work with our trading system. I need your help to:
+
+Build upon this prototype to create a production-ready implementation
+Integrate it with our existing agent architecture
+Enable agent "meetings" where specialized agents can collaborate on trading decisions
+Key Requirements
+Initially focus only on the BTCUSDT trading pair
+Use the existing specialized agents (market analysis, liquidity analysis, strategy manager, trade execution)
+Implement a structured meeting process where agents share analysis, debate options, and reach consensus
+Ensure the implementation is compatible with our web interface for displaying agent communications
+Create a clear, modular design that can be easily extended later
+Integrate with our existing data sources and storage
+Structure Needed
+A central CrewAI manager class that handles agent creation and orchestration
+Integration with our agent_controller.py to replace or enhance the existing meeting functionality
+Methods to translate agent outputs into standardized formats for our UI
+Proper error handling and fallback mechanisms
+Clear documentation of the new architecture
+Technical Guidelines
+Build on the prototype in agents/crewai_prototype.py
+Follow the multi-agent meeting approach shown in orchestration/agent_meeting.py
+Make the system work with minimal external API usage (fallback to local models when possible)
+Maintain compatibility with our existing data structures and logging
+Ensure the implementation can be tested in isolation before full integration
+Expected Deliverables
+Updated CrewAI implementation that integrates with our platform
+Modifications to necessary orchestration files
+Tests demonstrating the functionality
+Documentation explaining the architecture and how to use it
+Please help implement this integration in a way that preserves our existing functionality while enhancing our agent collaboration capabilities.
+
+Assistant mode

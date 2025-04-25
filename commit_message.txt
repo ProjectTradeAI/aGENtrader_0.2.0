@@ -1,0 +1,15 @@
+Repository reorganization for v2.2 release
+
+- Implemented standardized directory structure (agents, core, data, etc.)
+- Moved documentation files to docs directory with symbolic links
+- Created proper deployment scripts and configurations
+- Relocated key Python files to appropriate modules
+- Updated import paths in main.py and run.py
+- Added comprehensive .gitignore and placeholder files
+- Created detailed REPOSITORY_STRUCTURE.md documentation
+- Organized deployment, scripts, and Docker files
+- Created symbolic links for backward compatibility
+
+This change follows the guidelines in v2.2.0-RC1-RELEASE.md to ensure
+a cleaner, more maintainable repository structure while preserving
+backward compatibility.

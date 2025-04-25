@@ -1,0 +1,56 @@
+You are working under the `v2.2-cleanup` branch of the aGENtrader repository.
+
+Your task is to clean up and restructure the repository to follow a professional-grade project layout. This will improve maintainability, ease of collaboration, and reduce confusion for future tasks.
+
+---
+
+### 🎯 Objective:
+Organize all existing code, scripts, data, agents, and Docker files into a clear, modular directory structure while preserving any useful legacy content.
+
+---
+
+### 📁 Target Directory Structure:
+
+Restructure the repo as follows:
+aGENtrader/ ├── agents/ # All agent classes and logic ├── analytics/ # Trade tracking, performance scoring, dataset exports ├── core/ # Orchestrators, triggers, routers, system coordination ├── config/ # YAML config files, .env.example ├── data/ # Market data utilities and providers (Binance, CoinAPI, etc.) ├── docker/ # Dockerfiles, Docker build scripts ├── datasets/ # Training-ready or exported datasets ├── deployment/ # EC2 deployment scripts and setup instructions ├── logs/ # All runtime and strategy logs ├── scripts/ # CLI utilities, tests, and validators ├── tests/ # Unit or integration tests ├── main.py # System entry point ├── docker-compose.yml ├── requirements.txt ├── README.md
+
+yaml
+Copy
+Edit
+
+---
+
+### 🗃️ Legacy Code Handling:
+- Move unused, redundant, or deprecated files into:
+archive/aGENtrader_v2.1/
+
+markdown
+Copy
+Edit
+- Tag this cleanup point as `v2.1.legacy` before starting, then push to `v2.2-cleanup`.
+
+---
+
+### ✅ Implementation Tasks:
+1. Move all current agent files into `agents/`
+2. Move performance and export logic into `analytics/`
+3. Move market data modules into `data/`
+4. Move all config and settings files into `config/`
+5. Move Dockerfiles, build scripts into `docker/`
+6. Move reusable CLI scripts into `scripts/`
+7. Preserve logs and output files into `logs/`
+8. Create `datasets/` folder for exports
+9. Keep `main.py`, `docker-compose.yml`, and `README.md` at the root level
+
+---
+
+### ✅ Acceptance Criteria:
+- Repo follows the new structure and is free from unorganized legacy clutter
+- All current functionality is preserved
+- Legacy code and deprecated scripts are moved to `archive/aGENtrader_v2.1/`
+- Git history is preserved; commit and push changes to `v2.2-cleanup`
+- Tag the pre-cleanup state as `v2.1.legacy`
+
+---
+
+⚠️ DO NOT delete any files. Everything must be either moved to its new location or preserved in the `archive/` directory.

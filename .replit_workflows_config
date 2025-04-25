@@ -1,0 +1,2 @@
+Start application
+python main.py --mode=test --symbol=BTC/USD --interval=1h

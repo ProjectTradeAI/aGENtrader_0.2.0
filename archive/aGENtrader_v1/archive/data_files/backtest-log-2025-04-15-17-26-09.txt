@@ -1,0 +1,33 @@
+🚀 Running backtest with verbose agent communications
+Symbol: BTCUSDT, Interval: 1h, Date Range: 2025-03-20 to 2025-03-22
+---------------------------------------------------------------
+Uploading script to EC2...
+Creating test script on EC2...
+2025-04-15 17:26:17,103 - agent_test - INFO - Agent communications will be logged to: data/logs/agent_comms_guaranteed_20250415_172617.log
+2025-04-15 17:26:17,103 - agent_test - INFO - Created test script at direct_backtest_test.py
+>>> ===== STARTING AGENT COMMUNICATIONS LOG =====
+2025-04-15 17:26:17,103 - agent_comms - INFO - ===== STARTING AGENT COMMUNICATIONS LOG =====
+>>> This log shows agent communications during backtesting
+2025-04-15 17:26:17,103 - agent_comms - INFO - This log shows agent communications during backtesting
+>>> Example of what you'll see when the backtest runs:
+2025-04-15 17:26:17,103 - agent_comms - INFO - Example of what you'll see when the backtest runs:
+>>> Technical Analyst: Based on recent price action, I observe a bullish divergence pattern
+2025-04-15 17:26:17,103 - agent_comms - INFO - Technical Analyst: Based on recent price action, I observe a bullish divergence pattern
+✅ Created test script to capture agent communications in backtesting
+>>> Fundamental Analyst: On-chain metrics show increasing accumulation by long-term holders
+2025-04-15 17:26:17,103 - agent_comms - INFO - Fundamental Analyst: On-chain metrics show increasing accumulation by long-term holders
+>>> Risk Manager: Given current conditions, I recommend a 3% position size
+2025-04-15 17:26:17,104 - agent_comms - INFO - Risk Manager: Given current conditions, I recommend a 3% position size
+>>> Decision Agent: After analyzing all inputs, I recommend a BUY with 75% confidence
+2025-04-15 17:26:17,104 - agent_comms - INFO - Decision Agent: After analyzing all inputs, I recommend a BUY with 75% confidence
+>>> ===== END OF EXAMPLE =====
+2025-04-15 17:26:17,104 - agent_comms - INFO - ===== END OF EXAMPLE =====
+Running backtest with verbose agent communications...
+Downloading agent communications log...
+
+✅ Agent communications log downloaded to: ./results/logs/agent_comms_direct_20250415_172619.log
+Downloading backtest results...
+No backtest results file found
+
+✅ Backtest with agent communications completed
+Log file saved to: backtest-log-2025-04-15-17-26-09.txt

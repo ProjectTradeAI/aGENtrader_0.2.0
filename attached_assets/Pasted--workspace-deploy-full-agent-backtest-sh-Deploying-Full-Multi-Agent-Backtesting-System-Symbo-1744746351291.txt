@@ -1,0 +1,50 @@
+~/workspace$ ./deploy-full-agent-backtest.sh 
+🚀 Deploying Full Multi-Agent Backtesting System
+Symbol: BTCUSDT, Interval: 1h, Date Range: 2025-04-01 to 2025-04-10
+---------------------------------------------------
+Testing EC2 connection...
+✅ EC2 connection successful
+Uploading files to EC2...
+Running full agent backtest on EC2...
+This may take a few minutes. Please be patient...
+PYTHONPATH set to: :/home/ec2-user/aGENtrader
+Starting full agent backtest...
+2025-04-15 19:45:06,418 - full_agent_backtest - INFO - Setting up agent communications logging
+2025-04-15 19:45:06,427 - agent_log_patch - INFO - Agent communications will be logged to: data/logs/full_agent_comms_20250415_194506.log
+2025-04-15 19:45:06,427 - agent_log_patch - INFO - Found DecisionSession class for patching
+2025-04-15 19:45:06,427 - agent_log_patch - INFO - Successfully patched DecisionSession.run_session
+/home/ec2-user/.local/lib/python3.9/site-packages/flaml/__init__.py:20: UserWarning: flaml.automl is not available. Please install flaml[automl] to enable AutoML functionalities.
+  warnings.warn("flaml.automl is not available. Please install flaml[automl] to enable AutoML functionalities.")
+2025-04-15 19:45:07,608 - agent_log_patch - INFO - Found AutoGen module, patching AutoGen components
+2025-04-15 19:45:07,608 - agent_log_patch - INFO - Successfully patched autogen.GroupChatManager.initiate_chat
+2025-04-15 19:45:07,608 - agent_log_patch - INFO - Successfully patched autogen.ConversableAgent.generate_reply
+2025-04-15 19:45:07,608 - agent_log_patch - INFO - Successfully patched at least one component of the agent framework
+2025-04-15 19:45:07,608 - agent_log_patch - INFO - Patched components: DecisionSession, AutoGen
+2025-04-15 19:45:07,608 - full_agent_backtest - INFO - Agent logging setup successful, communications will be logged to: data/logs/full_agent_comms_20250415_194506.log
+2025-04-15 19:45:07,608 - full_agent_backtest - INFO - Agent communications will be logged to: data/logs/full_agent_comms_20250415_194506.log
+2025-04-15 19:45:07,609 - full_agent_backtest - INFO - Running full agent backtest for BTCUSDT 1h
+2025-04-15 19:45:07,609 - full_agent_backtest - INFO - Period: 2025-04-01 to 2025-04-10
+2025-04-15 19:45:07,640 - full_agent_backtest - INFO - Successfully imported authentic_backtest module
+2025-04-15 19:45:07,640 - full_agent_backtest - INFO - Running authentic_backtest.main()
+usage: authentic_backtest.py [-h] [--symbol SYMBOL] [--interval INTERVAL]
+                             [--start_date START_DATE] [--end_date END_DATE]
+                             [--initial_balance INITIAL_BALANCE]
+                             [--output_dir OUTPUT_DIR]
+authentic_backtest.py: error: unrecognized arguments: --output_file results/full_agent_backtest_BTCUSDT_1h_20250415_194507.json
+Checking for result files...
+No result file found.
+Checking for agent communications log...
+Found agent communications log: data/logs/full_agent_comms_20250415_194506.log
+Agent communications excerpt (first 20 lines):
+(... more content in data/logs/full_agent_comms_20250415_194506.log ...)
+Checking for agent communications logs on EC2...
+Found agent communications logs:
+/home/ec2-user/aGENtrader/data/logs/full_agent_comms_20250415_194506.log
+Downloading most recent agent communications log...
+✅ Agent communications log downloaded to: ./results/logs/full_agent_comms_20250415_194506.log
+Checking for result files on EC2...
+No recent result files found
+
+✅ Full-scale multi-agent backtest completed
+Log file saved to: full-agent-backtest-2025-04-15-19-44-49.log
+ Environment updated. Reloading shell...

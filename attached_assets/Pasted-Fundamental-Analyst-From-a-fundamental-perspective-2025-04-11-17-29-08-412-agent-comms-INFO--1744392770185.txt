@@ -1,0 +1,20 @@
+Fundamental Analyst: From a fundamental perspective:
+2025-04-11 17:29:08,412 - agent_comms - INFO - Fundamental Analyst: From a fundamental perspective:
+2025-04-11 17:29:08,412 - agent_comms - INFO - Fundamental Analyst: 1. On-chain metrics show accumulation by large holders (whales)
+2025-04-11 17:29:08,412 - agent_comms - INFO - Fundamental Analyst: 1. On-chain metrics show accumulation by large holders (whales)
+2025-04-11 17:29:08,412 - agent_comms - INFO - Fundamental Analyst: 2. Exchange reserves have decreased by 3.2% over the past week
+2025-04-11 17:29:08,412 - agent_comms - INFO - Fundamental Analyst: 2. Exchange reserves have decreased by 3.2% over the past week
+2025-04-11 17:29:08,413 - agent_comms - INFO - Fundamental Analyst: 3. Network hash rate is at an all-time high, indicating strong security
+2025-04-11 17:29:08,413 - agent_comms - INFO - Fundamental Analyst: 3. Network hash rate is at an all-time high, indicating strong security
+2025-04-11 17:29:08,413 - agent_comms - INFO - Fundamental Analyst: 4. Recent regulatory developments in EU markets are positive
+2025-04-11 17:29:08,413 - agent_comms - INFO - Fundamental Analyst: 4. Recent regulatory developments in EU markets are positive
+2025-04-11 17:29:08,913 - agent_comms - INFO - Sentiment Analyst: Sentiment analysis indicates:
+2025-04-11 17:29:08,913 - agent_comms - INFO - Sentiment Analyst: Sentiment analysis indicates:
+2025-04-11 17:29:08,913 - agent_comms - INFO - Sentiment Analyst: 1. Social media sentiment is 68% positive, up 5% from last week
+2025-04-11 17:29:08,913 - agent_comms - INFO - Sentiment Analyst: 1. Social media sentiment is 68% positive, up 5% from last week
+2025-04-11 17:29:08,913 - agent_comms - INFO - Sentiment Analyst: 2. Trading forum activity shows increased interest in BTC
+2025-04-11 17:29:08,913 - agent_comms - INFO - Sentiment Analyst: 2. Trading forum activity shows increased interest in BTC
+2025-04-11 17:29:08,914 - agent_comms - INFO - Sentiment Analyst: 3. Fear & Greed Index is at 74, in the 'Greed' zone
+2025-04-11 17:29:08,914 - agent_comms - INFO - Sentiment Analyst: 3. Fear & Greed Index is at 74, in the 'Greed' zone
+2025-04-11 17:29:08,914 - agent_comms - INFO - Sentiment Analyst: 4. News sentiment analysis shows positive coverage increasing
+2025-04-11 17:29:08,914 - agent_comms - INFO - Sentiment Analyst: 4. News sentiment analysis shows positive coverage increasing

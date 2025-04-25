@@ -1,0 +1,244 @@
+~/workspace$ ./deploy-full-agent-backtest.sh
+[2025-04-15 14:13:03] 🚀 Deploying Full Multi-Agent Backtesting Framework to EC2
+[2025-04-15 14:13:03] ============================================================
+[2025-04-15 14:13:03] Step 1: Getting database URL...
+[2025-04-15 14:13:03] INFO: Got database URL: postgresql...de=require
+[2025-04-15 14:13:03] Step 2: Setting up EC2 connection...
+[2025-04-15 14:13:03] INFO: Creating EC2 key file...
+[2025-04-15 14:13:03] Testing connection to EC2 instance at 51.20.250.135...
+Connection successful!
+[2025-04-15 14:13:05] INFO: ✅ Connection to EC2 established successfully.
+[2025-04-15 14:13:05] Step 3: Creating directory structure on EC2...
+[2025-04-15 14:13:07] INFO: ✅ Created directory structure on EC2.
+[2025-04-15 14:13:07] Step 4: Creating database adapter script...
+[2025-04-15 14:13:07] Step 5: Creating patch for authentic_backtest.py...
+[2025-04-15 14:13:07] Step 6: Creating wrapper script for running with environment variables...
+[2025-04-15 14:13:07] Step 7: Uploading files to EC2...
+[2025-04-15 14:13:07] INFO: Finding essential Python files to upload...
+[2025-04-15 14:13:09] INFO: Uploading files to EC2...
+sentiment_analysis.py                                        100% 6486    39.8KB/s   00:00    
+historical_data.py                                           100% 8423    52.2KB/s   00:00    
+on_chain_analysis.py                                         100%   38KB 121.6KB/s   00:00    
+quantum_optimizer.py                                         100% 4653    27.8KB/s   00:00    
+trade_execution.py                                           100%   21KB 135.4KB/s   00:00    
+meeting_recorder.py                                          100% 5446    33.9KB/s   00:00    
+market_analysis.py                                           100%   39KB 247.7KB/s   00:00    
+liquidity_analysis.py                                        100%   45KB 284.2KB/s   00:00    
+strategy_manager.py                                          100%   47KB 297.3KB/s   00:00    
+shell_executor.py                                            100% 8909    55.4KB/s   00:00    
+market_data_manager.py                                       100%   17KB 109.1KB/s   00:00    
+__init__.py                                                  100%  452     2.8KB/s   00:00    
+trading_agents.py                                            100%   27KB 169.9KB/s   00:00    
+database_retrieval_tool.py                                   100%   28KB 177.0KB/s   00:00    
+portfolio_management.py                                      100%   44KB 277.3KB/s   00:00    
+global_market_analyst.py                                     100%   11KB  67.5KB/s   00:00    
+global_market_data.py                                        100%   13KB  81.8KB/s   00:00    
+liquidity_data.py                                            100%   24KB 154.6KB/s   00:00    
+liquidity_analyst.py                                         100%   28KB 177.7KB/s   00:00    
+paper_trading.py                                             100%   28KB 177.0KB/s   00:00    
+database_integration.py                                      100%   35KB 221.0KB/s   00:00    
+database_query_agent.py                                      100%   58KB 185.9KB/s   00:00    
+collaborative_decision_agent.py                              100%   20KB 124.7KB/s   00:00    
+structured_decision_agent.py                                 100%   20KB 128.5KB/s   00:00    
+trading_agent_framework.py                                   100%   31KB 200.5KB/s   00:00    
+autogen_db_integration.py                                    100%   15KB  92.8KB/s   00:00    
+structured_decision_extractor.py                             100%   12KB  76.9KB/s   00:00    
+collaborative_trading_framework.py                           100%   16KB  99.8KB/s   00:00    
+alpaca_data_agent.py                                         100% 9523    59.3KB/s   00:00    
+alpaca_query_agent.py                                        100% 5893    36.7KB/s   00:00    
+query_market_data.py                                         100%   14KB  89.3KB/s   00:00    
+register_market_data_functions.py                            100% 8850    55.2KB/s   00:00    
+query_advanced_data.py                                       100%   29KB 182.0KB/s   00:00    
+register_advanced_data_functions.py                          100%   14KB  90.6KB/s   00:00    
+modify_agent_data_sources.py                                 100%   11KB  69.5KB/s   00:00    
+data_integrity.py                                            100%   13KB  79.6KB/s   00:00    
+simplified_working_backtest.py                               100%   11KB  71.3KB/s   00:00    
+run_simplified_backtest.py                                   100%   15KB  95.7KB/s   00:00    
+authentic_backtest.py                                        100%   19KB 119.2KB/s   00:00    
+data_integrity_checker.py                                    100% 8758    54.5KB/s   00:00    
+market_data.py                                               100%   17KB 109.1KB/s   00:00    
+check_env.py                                                 100% 1602    10.0KB/s   00:00    
+analyze_backtest_performance.py                              100%   14KB  87.9KB/s   00:00    
+analyze_backtest_results.py                                  100%   14KB  88.9KB/s   00:00    
+visualize_backtest.py                                        100%   23KB 147.4KB/s   00:00    
+simplified_working_backtest.py                               100%   11KB  71.4KB/s   00:00    
+run_simplified_backtest.py                                   100%   15KB  95.7KB/s   00:00    
+authentic_backtest.py                                        100%   19KB 119.2KB/s   00:00    
+data_integrity_checker.py                                    100% 8758    54.6KB/s   00:00    
+market_data.py                                               100%   17KB 109.4KB/s   00:00    
+check_env.py                                                 100% 1602    10.0KB/s   00:00    
+analyze_backtest_performance.py                              100%   14KB  87.9KB/s   00:00    
+analyze_backtest_results.py                                  100%   14KB  88.9KB/s   00:00    
+visualize_backtest.py                                        100%   23KB 148.0KB/s   00:00    
+ec2_config.json                                              100%  237     1.5KB/s   00:00    
+settings.json                                                100% 1026     6.4KB/s   00:00    
+decision_session.json                                        100% 2519    15.7KB/s   00:00    
+agent_config.json                                            100% 2763    17.2KB/s   00:00    
+initialize_agent_backtest.sh                                 100% 1830    11.4KB/s   00:00    
+market_data_adapter.py                                       100%   10KB  65.5KB/s   00:00    
+task_scheduler.py                                            100% 9803    60.6KB/s   00:00    
+agent_meeting.py                                             100%   18KB 115.5KB/s   00:00    
+output_schema.py                                             100% 9995    61.7KB/s   00:00    
+workflow_orchestrator.py                                     100%   14KB  86.6KB/s   00:00    
+task_definition.py                                           100%   11KB  67.6KB/s   00:00    
+agent_controller.py                                          100% 6982    43.4KB/s   00:00    
+autogen_manager.py                                           100%   17KB 109.5KB/s   00:00    
+__init__.py                                                  100%  152     0.9KB/s   00:00    
+risk_optimizer.py                                            100% 8460    52.6KB/s   00:00    
+decision_session_updated.py                                  100%   15KB  98.0KB/s   00:00    
+decision_session.py                                          100%   34KB 218.0KB/s   00:00    
+fix_script.py                                                100%  676     4.2KB/s   00:00    
+decision_session_new.py                                      100%   34KB 217.9KB/s   00:00    
+decision_session_fixed.py                                    100%   34KB 218.0KB/s   00:00    
+simple_decision_session.py                                   100%   11KB  67.2KB/s   00:00    
+temporary_fix.py                                             100% 5986    37.3KB/s   00:00    
+fix_indentation.py                                           100% 2612    16.3KB/s   00:00    
+patch_authentic_backtest.py                                  100% 7846    48.8KB/s   00:00    
+run_full_backtest.sh                                         100% 1192     7.4KB/s   00:00    
+run_with_env.sh                                              100%  346     2.2KB/s   00:00    
+macd_strategy.py                                             100% 6322    39.0KB/s   00:00    
+rsi_strategy.py                                              100% 4014    24.9KB/s   00:00    
+test_output_formatter.py                                     100% 3311    20.6KB/s   00:00    
+logging_utils.py                                             100% 4709    29.3KB/s   00:00    
+agent_performance.py                                         100%   28KB 176.6KB/s   00:00    
+decision_tracker.py                                          100%   17KB 106.4KB/s   00:00    
+agent_prompt_optimizer.py                                    100%   26KB 166.9KB/s   00:00    
+llm_router.py                                                100% 6138    38.3KB/s   00:00    
+__init__.py                                                  100%  157     1.0KB/s   00:00    
+autogen_integration.py                                       100% 9206    57.4KB/s   00:00    
+local_llm.py                                                 100%   11KB  69.1KB/s   00:00    
+aws_config.py                                                100%  628     3.9KB/s   00:00    
+monitor_llm.py                                               100% 6139    38.2KB/s   00:00    
+performance_tracker.py                                       100%   14KB  89.4KB/s   00:00    
+market_data.py                                               100%   21KB 133.8KB/s   00:00    
+trading_simulator.py                                         100%   22KB 140.0KB/s   00:00    
+database_manager.py                                          100% 8893    55.2KB/s   00:00    
+test_logging.py                                              100% 6306    39.2KB/s   00:00    
+alpaca_market_data.py                                        100%   42KB 270.3KB/s   00:00    
+database_market_data.py                                      100%   19KB 121.1KB/s   00:00    
+integrated_market_data.py                                    100%   19KB 120.7KB/s   00:00    
+advanced_data_schema.py                                      100%   13KB  83.1KB/s   00:00    
+alternative_me.py                                            100%   13KB  83.5KB/s   00:00    
+santiment.py                                                 100%   32KB 201.3KB/s   00:00    
+integrated_advanced_data.py                                  100%   30KB 191.6KB/s   00:00    
+[2025-04-15 14:14:27] Step 8: Initializing the environment on EC2...
+[2025-04-15 14:14:27] INFO: Installing required Python packages on EC2...
+Requirement already satisfied: psycopg2-binary in ./.local/lib/python3.9/site-packages (2.9.10)
+Requirement already satisfied: pandas in ./.local/lib/python3.9/site-packages (2.2.3)
+Requirement already satisfied: matplotlib in ./.local/lib/python3.9/site-packages (3.9.4)
+Collecting autogen-agentchat
+  Downloading autogen_agentchat-0.2.40-py3-none-any.whl.metadata (30 kB)
+Requirement already satisfied: numpy>=1.22.4 in ./.local/lib/python3.9/site-packages (from pandas) (2.0.2)
+Requirement already satisfied: python-dateutil>=2.8.2 in ./.local/lib/python3.9/site-packages (from pandas) (2.9.0.post0)
+Requirement already satisfied: pytz>=2020.1 in /usr/lib/python3.9/site-packages (from pandas) (2022.7.1)
+Requirement already satisfied: tzdata>=2022.7 in ./.local/lib/python3.9/site-packages (from pandas) (2025.2)
+Requirement already satisfied: contourpy>=1.0.1 in ./.local/lib/python3.9/site-packages (from matplotlib) (1.3.0)
+Requirement already satisfied: cycler>=0.10 in ./.local/lib/python3.9/site-packages (from matplotlib) (0.12.1)
+Requirement already satisfied: fonttools>=4.22.0 in ./.local/lib/python3.9/site-packages (from matplotlib) (4.57.0)
+Requirement already satisfied: kiwisolver>=1.3.1 in ./.local/lib/python3.9/site-packages (from matplotlib) (1.4.7)
+Requirement already satisfied: packaging>=20.0 in ./.local/lib/python3.9/site-packages (from matplotlib) (24.2)
+Requirement already satisfied: pillow>=8 in ./.local/lib/python3.9/site-packages (from matplotlib) (11.1.0)
+Requirement already satisfied: pyparsing>=2.3.1 in ./.local/lib/python3.9/site-packages (from matplotlib) (3.2.3)
+Requirement already satisfied: importlib-resources>=3.2.0 in ./.local/lib/python3.9/site-packages (from matplotlib) (6.5.2)
+Requirement already satisfied: diskcache in ./.local/lib/python3.9/site-packages (from autogen-agentchat) (5.6.3)
+Requirement already satisfied: docker in ./.local/lib/python3.9/site-packages (from autogen-agentchat) (7.1.0)
+Collecting flaml (from autogen-agentchat)
+  Downloading FLAML-2.3.4-py3-none-any.whl.metadata (16 kB)
+Collecting numpy>=1.22.4 (from pandas)
+  Downloading numpy-1.26.4-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (61 kB)
+Collecting openai>=1.3 (from autogen-agentchat)
+  Downloading openai-1.74.0-py3-none-any.whl.metadata (25 kB)
+Requirement already satisfied: pydantic!=2.6.0,<3,>=1.10 in ./.local/lib/python3.9/site-packages (from autogen-agentchat) (2.11.2)
+Requirement already satisfied: python-dotenv in ./.local/lib/python3.9/site-packages (from autogen-agentchat) (1.1.0)
+Requirement already satisfied: termcolor in ./.local/lib/python3.9/site-packages (from autogen-agentchat) (3.0.1)
+Requirement already satisfied: tiktoken in ./.local/lib/python3.9/site-packages (from autogen-agentchat) (0.9.0)
+Requirement already satisfied: zipp>=3.1.0 in ./.local/lib/python3.9/site-packages (from importlib-resources>=3.2.0->matplotlib) (3.21.0)
+Requirement already satisfied: anyio<5,>=3.5.0 in ./.local/lib/python3.9/site-packages (from openai>=1.3->autogen-agentchat) (4.9.0)
+Collecting distro<2,>=1.7.0 (from openai>=1.3->autogen-agentchat)
+  Downloading distro-1.9.0-py3-none-any.whl.metadata (6.8 kB)
+Requirement already satisfied: httpx<1,>=0.23.0 in ./.local/lib/python3.9/site-packages (from openai>=1.3->autogen-agentchat) (0.28.1)
+Collecting jiter<1,>=0.4.0 (from openai>=1.3->autogen-agentchat)
+  Downloading jiter-0.9.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (5.2 kB)
+Requirement already satisfied: sniffio in ./.local/lib/python3.9/site-packages (from openai>=1.3->autogen-agentchat) (1.3.1)
+Requirement already satisfied: tqdm>4 in ./.local/lib/python3.9/site-packages (from openai>=1.3->autogen-agentchat) (4.67.1)
+Requirement already satisfied: typing-extensions<5,>=4.11 in ./.local/lib/python3.9/site-packages (from openai>=1.3->autogen-agentchat) (4.13.1)
+Requirement already satisfied: annotated-types>=0.6.0 in ./.local/lib/python3.9/site-packages (from pydantic!=2.6.0,<3,>=1.10->autogen-agentchat) (0.7.0)
+Requirement already satisfied: pydantic-core==2.33.1 in ./.local/lib/python3.9/site-packages (from pydantic!=2.6.0,<3,>=1.10->autogen-agentchat) (2.33.1)
+Requirement already satisfied: typing-inspection>=0.4.0 in ./.local/lib/python3.9/site-packages (from pydantic!=2.6.0,<3,>=1.10->autogen-agentchat) (0.4.0)
+Requirement already satisfied: six>=1.5 in /usr/lib/python3.9/site-packages (from python-dateutil>=2.8.2->pandas) (1.15.0)
+Requirement already satisfied: requests>=2.26.0 in ./.local/lib/python3.9/site-packages (from docker->autogen-agentchat) (2.32.3)
+Requirement already satisfied: urllib3>=1.26.0 in ./.local/lib/python3.9/site-packages (from docker->autogen-agentchat) (2.3.0)
+Requirement already satisfied: regex>=2022.1.18 in ./.local/lib/python3.9/site-packages (from tiktoken->autogen-agentchat) (2024.11.6)
+Requirement already satisfied: exceptiongroup>=1.0.2 in ./.local/lib/python3.9/site-packages (from anyio<5,>=3.5.0->openai>=1.3->autogen-agentchat) (1.2.2)
+Requirement already satisfied: idna>=2.8 in /usr/lib/python3.9/site-packages (from anyio<5,>=3.5.0->openai>=1.3->autogen-agentchat) (2.10)
+Requirement already satisfied: certifi in ./.local/lib/python3.9/site-packages (from httpx<1,>=0.23.0->openai>=1.3->autogen-agentchat) (2025.1.31)
+Requirement already satisfied: httpcore==1.* in ./.local/lib/python3.9/site-packages (from httpx<1,>=0.23.0->openai>=1.3->autogen-agentchat) (1.0.7)
+Requirement already satisfied: h11<0.15,>=0.13 in ./.local/lib/python3.9/site-packages (from httpcore==1.*->httpx<1,>=0.23.0->openai>=1.3->autogen-agentchat) (0.14.0)
+Requirement already satisfied: charset-normalizer<4,>=2 in ./.local/lib/python3.9/site-packages (from requests>=2.26.0->docker->autogen-agentchat) (3.4.1)
+Downloading autogen_agentchat-0.2.40-py3-none-any.whl (382 kB)
+Downloading numpy-1.26.4-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (18.2 MB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 18.2/18.2 MB 146.9 MB/s eta 0:00:00
+Downloading openai-1.74.0-py3-none-any.whl (644 kB)
+   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 644.8/644.8 kB 36.7 MB/s eta 0:00:00
+Downloading FLAML-2.3.4-py3-none-any.whl (314 kB)
+Downloading distro-1.9.0-py3-none-any.whl (20 kB)
+Downloading jiter-0.9.0-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (354 kB)
+Installing collected packages: numpy, jiter, distro, flaml, openai, autogen-agentchat
+  Attempting uninstall: numpy
+    Found existing installation: numpy 2.0.2
+    Uninstalling numpy-2.0.2:
+      Successfully uninstalled numpy-2.0.2
+ERROR: pip's dependency resolver does not currently take into account all the packages that are installed. This behaviour is the source of the following dependency conflicts.
+awscli 2.17.18 requires distro<1.9.0,>=1.5.0, but you have distro 1.9.0 which is incompatible.
+awscli 2.17.18 requires python-dateutil<=2.8.2,>=2.1, but you have python-dateutil 2.9.0.post0 which is incompatible.
+awscli 2.17.18 requires urllib3<1.27,>=1.25.4, but you have urllib3 2.3.0 which is incompatible.
+Successfully installed autogen-agentchat-0.2.40 distro-1.9.0 flaml-2.3.4 jiter-0.9.0 numpy-1.26.4 openai-1.74.0
+[2025-04-15 14:14:36] INFO: Running initialization script on EC2...
+Setting up market data adapter...
+2025-04-15 14:14:38,401 - market_data_adapter - INFO - Initializing with database URL: postgresql...de=require
+2025-04-15 14:14:39,927 - market_data_adapter - INFO - Connected to PostgreSQL: PostgreSQL 16.8 on x86_64-pc-linux-gnu, compiled by gcc (Debian 10.2.1-6) 10.2.1 20210110, 64-bit
+2025-04-15 14:14:40,090 - market_data_adapter - INFO - market_data table exists
+2025-04-15 14:14:40,253 - market_data_adapter - INFO - market_data columns: id, symbol, interval, timestamp, open, high, low, close, volume, source, metadata
+2025-04-15 14:14:40,402 - market_data_adapter - INFO - market_data contains 6007 rows
+2025-04-15 14:14:40,524 - market_data_adapter - INFO - Available intervals: 4h, 15m, 1m, 1h, D, 30m
+2025-04-15 14:14:40,655 - market_data_adapter - INFO - Sample data: ('BTCUSDT', '1h', datetime.datetime(2025, 3, 24, 19, 0), Decimal('88464.38'), Decimal('88508.0'), Decimal('87967.82'), Decimal('88081.87'), Decimal('1027.7028899999998'))
+2025-04-15 14:14:41,446 - market_data_adapter - INFO - Creating function get_market_data_by_interval
+2025-04-15 14:14:41,573 - market_data_adapter - ERROR - Failed to create data access functions: syntax error at or near "timestamp"
+LINE 9:                 timestamp TIMESTAMP,
+                        ^
+
+Traceback (most recent call last):
+  File "/home/ec2-user/aGENtrader/market_data_adapter.py", line 118, in create_data_access_functions
+    cursor.execute("""
+psycopg2.errors.SyntaxError: syntax error at or near "timestamp"
+LINE 9:                 timestamp TIMESTAMP,
+                        ^
+
+2025-04-15 14:14:41,574 - market_data_adapter - ERROR - Failed to set up data access functions
+❌ Market data adapter setup failed
+Patching authentic_backtest.py...
+2025-04-15 14:14:41,627 - patch_script - INFO - Patching backtesting/core/authentic_backtest.py
+2025-04-15 14:14:41,629 - patch_script - INFO - Created backup at backtesting/core/authentic_backtest.py.bak
+2025-04-15 14:14:41,629 - patch_script - WARNING - Failed to replace get_historical_market_data method using regex pattern
+2025-04-15 14:14:41,629 - patch_script - INFO - Trying alternative approach...
+2025-04-15 14:14:41,629 - patch_script - ERROR - Could not find get_historical_market_data method
+❌ Failed to patch backtesting/core/authentic_backtest.py
+Verifying installation...
+/home/ec2-user/.local/lib/python3.9/site-packages/flaml/__init__.py:20: UserWarning: flaml.automl is not available. Please install flaml[automl] to enable AutoML functionalities.
+  warnings.warn("flaml.automl is not available. Please install flaml[automl] to enable AutoML functionalities.")
+Python version: 3.9.20 (main, Jan 25 2025, 00:00:00) 
+[GCC 11.4.1 20230605 (Red Hat 11.4.1-2)]
+DATABASE_URL set: Yes
+ALPACA_API_KEY set: Yes
+OPENAI_API_KEY set: Yes
+AutoGen available: Yes
+DecisionSession available: Yes
+AuthenticBacktest available: No
+Initialization complete. Run ./run_full_backtest.sh to execute a backtest.
+[2025-04-15 14:14:43] Step 9: Creating local run script...
+[2025-04-15 14:14:43] INFO: Cleaning up temporary files...
+[2025-04-15 14:14:43] ✅ Full multi-agent backtesting framework deployed successfully to EC2!
+[2025-04-15 14:14:43] You can now run a backtest with:
+[2025-04-15 14:14:43]   ./run-agent-backtest.sh --symbol BTCUSDT --interval 1h --start 2025-03-15 --end 2025-03-25 --balance 10000
+ Environment updated. Reloading shell...
+~/workspace$ 

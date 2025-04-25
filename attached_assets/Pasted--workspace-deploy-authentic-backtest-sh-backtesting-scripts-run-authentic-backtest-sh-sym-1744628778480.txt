@@ -1,0 +1,46 @@
+~/workspace$ ./deploy-authentic-backtest.sh && ./backtesting/scripts/run_authentic_backtest.sh --symbol BTCUSDT --interval 1h --start 2025-04-01 --end 2025-04-10 --ec2
+[2025-04-14 11:01:19] ERROR: No EC2 SSH key found. Please set EC2_SSH_KEY or EC2_PRIVATE_KEY environment variable.
+ Environment updated. Reloading shell...
+~/workspace$ ./deploy-authentic-backtest.sh && ./backtesting/scripts/run_authentic_backtest.sh --symbol BTCUSDT --interval 1h --start 2025-04-01 --end 2025-04-10 --ec2
+[2025-04-14 11:05:03] INFO: Using EC2_KEY from environment variable
+[2025-04-14 11:05:03] Creating directories on EC2...
+Load key "/tmp/ec2_key.pem": error in libcrypto
+ec2-user@51.20.250.135: Permission denied (publickey,gssapi-keyex,gssapi-with-mic).
+[2025-04-14 11:05:04] Deploying authentic backtesting framework to EC2...
+[2025-04-14 11:05:04] Uploading package to EC2...
+scp: stat local "./authentic-backtest.tar.gz": No such file or directory
+[2025-04-14 11:05:04] Extracting package on EC2...
+Load key "/tmp/ec2_key.pem": error in libcrypto
+ec2-user@51.20.250.135: Permission denied (publickey,gssapi-keyex,gssapi-with-mic).
+[2025-04-14 11:05:05] Cleaning up...
+rm: cannot remove './authentic-backtest.tar.gz': No such file or directory
+[2025-04-14 11:05:05] Testing the deployed backtesting framework...
+Load key "/tmp/ec2_key.pem": error in libcrypto
+ec2-user@51.20.250.135: Permission denied (publickey,gssapi-keyex,gssapi-with-mic).
+[2025-04-14 11:05:07] ✅ Authentic backtesting framework deployed successfully to EC2!
+[2025-04-14 11:05:07] INFO: You can now run backtests on EC2 with:
+[2025-04-14 11:05:07] INFO:   ./backtesting/scripts/run_authentic_backtest.sh --symbol BTCUSDT --interval 1h --start 2025-04-01 --end 2025-04-10 --ec2
+[2025-04-14 11:05:07] Running authentic backtest with parameters:
+[2025-04-14 11:05:07] INFO: Symbol: BTCUSDT
+[2025-04-14 11:05:07] INFO: Interval: 1h
+[2025-04-14 11:05:07] INFO: Date Range: 2025-04-01 to 2025-04-10
+[2025-04-14 11:05:07] INFO: Initial Balance: 10000
+[2025-04-14 11:05:07] INFO: Run on EC2: true
+[2025-04-14 11:05:07] INFO: Verbose: false
+
+[2025-04-14 11:05:07] Preparing to run authentic backtest on EC2...
+[2025-04-14 11:05:07] INFO: Using EC2_KEY from environment variable
+[2025-04-14 11:05:07] Uploading authentic backtest files to EC2...
+Load key "/tmp/ec2_backtest_key.pem": error in libcrypto
+ec2-user@51.20.250.135: Permission denied (publickey,gssapi-keyex,gssapi-with-mic).
+Load key "/tmp/ec2_backtest_key.pem": error in libcrypto
+ec2-user@51.20.250.135: Permission denied (publickey,gssapi-keyex,gssapi-with-mic).
+scp: Connection closed
+[2025-04-14 11:05:09] Running authentic backtest on EC2...
+[2025-04-14 11:05:09] INFO: Running command on EC2: cd /home/ec2-user/aGENtrader && python3 backtesting/core/authentic_backtest.py --symbol BTCUSDT --interval 1h --start_date 2025-04-01 --end_date 2025-04-10 --initial_balance 10000
+Load key "/tmp/ec2_backtest_key.pem": error in libcrypto
+ec2-user@51.20.250.135: Permission denied (publickey,gssapi-keyex,gssapi-with-mic).
+[2025-04-14 11:05:10] ERROR: ❌ Backtest failed on EC2!
+[2025-04-14 11:05:10] Authentic backtest process completed!
+ Environment updated. Reloading shell...
+~/workspace$ 

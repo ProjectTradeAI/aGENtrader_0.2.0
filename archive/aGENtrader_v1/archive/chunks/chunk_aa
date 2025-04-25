@@ -1,0 +1,71 @@
+"""
+Run Simplified Trading Test
+
+This script simulates a trading test without requiring AutoGen.
+It's designed to run on cloud instances with minimal dependencies.
+"""
+
+import os
+import sys
+import json
+import time
+import random
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, Any, List
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(f"simplified_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    ]
+)
+logger = logging.getLogger("simplified_test")
+
+def generate_mock_market_data(symbol: str, start_date: str, end_date: str, interval: str) -> List[Dict[str, Any]]:
+    """
+    Generate mock market data for testing.
+    
+    Args:
+        symbol: Trading symbol
+        start_date: Start date (YYYY-MM-DD)
+        end_date: End date (YYYY-MM-DD)
+        interval: Time interval (1m, 5m, 15m, 1h, 4h, 1d)
+        
+    Returns:
+        List of market data points
+    """
+    logger.info(f"Generating mock data for {symbol} from {start_date} to {end_date} with interval {interval}")
+    
+    # Parse dates
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    # Determine interval in minutes
+    interval_minutes = {
+        "1m": 1,
+        "5m": 5,
+        "15m": 15,
+        "30m": 30,
+        "1h": 60,
+        "4h": 240,
+        "1d": 1440
+    }.get(interval, 60)  # Default to 1h
+    
+    # Generate data points
+    data = []
+    current_time = start
+    base_price = 80000.0  # Base price for BTC
+    price = base_price
+    
+    while current_time <= end:
+        # Skip weekends for traditional markets (not needed for crypto)
+        # Generate price movement
+        price_change = random.uniform(-0.01, 0.01)  # -1% to +1%
+        price = price * (1 + price_change)
+        
+        # Calculate OHLC
+        open_price = pr

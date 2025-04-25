@@ -1,0 +1,68 @@
+Please implement Binance API as the new primary market data provider in the aGENtrader system, replacing CoinAPI where applicable.
+
+---
+
+### ✅ Goals:
+- Use Binance public API to fetch real-time market data (OHLCV, price, depth, funding rates, open interest)
+- Gracefully fall back to CoinAPI if Binance is unavailable
+- Make the data interface modular to support future source switching or aggregation
+
+---
+
+### 📁 Tasks:
+
+#### 1. Create a New Binance Market Data Module
+- File: `data/binance_data_provider.py`
+
+Include methods for:
+```python
+def get_current_price(symbol: str) -> float
+def get_ohlcv(symbol: str, interval: str, limit: int = 100) -> List[Dict]
+def get_order_book(symbol: str, limit: int = 100) -> Dict
+def get_funding_rate(symbol: str) -> float
+def get_open_interest(symbol: str) -> float
+Example endpoints to use:
+
+Price: https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT
+
+OHLCV: https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=100
+
+Funding: https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=1
+
+Open interest: https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=5m&limit=1
+
+Order Book: https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=50
+
+2. Refactor get_market_data() Calls
+Replace or wrap any existing CoinAPIFetcher usages to pull from BinanceDataProvider
+
+Keep interface consistent (return standardized OHLCV format for technical analysis)
+
+3. Add Logging & Error Handling
+Log data source used per fetch
+
+Gracefully fallback to CoinAPI (or skip decision cycle) if Binance is unavailable
+
+4. Add CLI Test Script (Optional)
+File: scripts/test_binance_data.py
+
+Use to verify OHLCV, order book, and funding rate retrieval
+
+5. Configuration
+Update settings.yaml:
+
+yaml
+Copy
+Edit
+market_data:
+  provider: "binance"
+  fallback: "coinapi"
+  retry_attempts: 3
+📌 Acceptance Criteria:
+Binance is now the primary market data source
+
+OHLCV and live price retrieval work across 1h, 4h, 1D
+
+Funding rate, order book, and open interest are available for future agents
+
+Logs clearly reflect Binance as the source (or fallback if needed)

@@ -1,0 +1,45 @@
+=== Market Analysis ===
+
+1. **Strategy Overview:**
+   - **Strategy Name:** Bitcoin Bullish Breakout Strategy
+   - **Trading Timeframe:** Daily (1D)
+   - **Market Conditions:** Bullish trend in Bitcoin, characterized by upward movement, strong volume, and favorable technical indicators.
+
+2. **Entry and Exit Rules:**
+   - **Entry Conditions:** 
+     - Enter a long position when the price retraces to the support level at $25,000, confirmed with positive price action (e.g., bullish candle patterns) and RSI below 70.
+   - **Exit Conditions:** 
+     - Set a first profit target at $28,000. 
+     - Set a secondary profit target at $30,000. 
+     - Exit the position if the price closes below the $24,500 support level, which indicates a potential market reversal.
+   - **Position Sizing:** 
+     - Use 2% of the total trading capital per trade. Adjust the position size based on the distance from the entry point to the stop loss.
+
+3. **Risk Management:**
+   - **Stop Loss Rules:** 
+     - Place a stop loss at $24,400, just below the identified support level of $24,500, to protect against losses from a market reversal.
+   - **Risk Per Trade:** 
+     - Limit the risk to 1% of the trading account balance for each trade. If the position size leads to a risk greater than 1%, adjust the trade size accordingly.
+   - **Portfolio Allocation:** 
+     - Allocate a maximum of 20% of the total trading capital to Bitcoin positions to diversify the portfolio and reduce overall risk.
+
+4. **Implementation Plan:**
+   - **Required Indicators:** 
+     - Use the following indicators for this strategy:
+       - 50-day and 200-day Moving Averages
+       - Relative Strength Index (RSI)
+       - Moving Average Convergence Divergence (MACD)
+   - **Execution Steps:** 
+     - Monitor the market for price action near the support level at $25,000.
+     - Confirm bullish signals with the RSI and MACD before entering the trade.
+     - Set up alerts on the trading platform for price movements and RSI levels to ensure timely execution.
+   - **Monitoring Process:** 
+     - Regularly review the performance of the trade daily.
+     - Adjust stop losses and profit targets based on market conditions and volatility.
+     - Track key price levels and indicators weekly to reassess the market trend and make necessary adjustments to the strategy.
+
+By following this structured approach, traders can effectively capitalize on the bullish trend in Bitcoin while managing risks appropriately.
+
+=== Trading Strategy ===
+
+None

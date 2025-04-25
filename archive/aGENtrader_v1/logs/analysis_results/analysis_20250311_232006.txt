@@ -1,0 +1,42 @@
+=== Market Analysis ===
+
+1. **Strategy Overview:**
+   - **Strategy name:** Bullish Bitcoin Recovery Strategy
+   - **Trading timeframe:** Daily (D1)
+   - **Market conditions:** Focus on a bullish trend for Bitcoin amidst positive market sentiment and strong buying pressure, supported by technical indicators like the ADX, moving averages, and volume analysis.
+
+2. **Entry and Exit Rules:**
+   - **Entry conditions:** Enter a long position when:
+     - The price pulls back to the support level around $30,000 (preferably $28,500).
+     - The ADX is above 25, confirming the strength of the uptrend.
+     - The MACD shows a bullish crossover.
+   - **Exit conditions:** Exit the long position when:
+     - The price reaches the targeted resistance level around $36,500.
+     - The RSI approaches 75, indicating overbought conditions (sell into strength).
+     - A bearish signal emerges from the MACD (e.g., a cross below the signal line).
+   - **Position sizing:** Use a fixed fraction (e.g., 2% of total capital) to determine position size based on the distance to the stop loss (i.e., risk per trade).
+
+3. **Risk Management:**
+   - **Stop loss rules:** Set a stop loss just below the key support level at $28,000. This provides a buffer against price drop and limits potential losses.
+   - **Risk per trade:** Limit risk to 2% of the total trading account per trade, adjusting position size based on stop loss distance. For instance, with a $10,000 account, risk exposure should not exceed $200 per trade.
+   - **Portfolio allocation:** Allocate no more than 20% of the total portfolio to Bitcoin trades to maintain diversification and reduce overall risk exposure.
+
+4. **Implementation Plan:**
+   - **Required indicators:** 
+     - 50-day and 200-day moving averages for trend confirmation.
+     - ADX for trend strength determination.
+     - RSI to identify overbought/oversold conditions.
+     - MACD for entry and exit timing.
+   - **Execution steps:**
+     - Monitor Bitcoin price around the support levels and set alerts for potential pullbacks.
+     - Assess additional technical indicators before entering trades (e.g., waiting for green volume signals).
+     - Execute buy orders on confirmed bullish setups and place stop loss orders immediately.
+   - **Monitoring process:**
+     - Regularly review the positions and the broader market conditions every day to either adjust stop loss levels or profit targets according to price action and key technical signals.
+     - Stay updated on news that could impact market sentiment (e.g., regulatory updates, macroeconomic indicators) and be prepared to modify or close trades in response to major shifts.
+
+By implementing this comprehensive strategy, traders can capitalize on the bullish momentum for Bitcoin, while effectively managing risk and ensuring sound decision-making. Regularly adapting to market changes and key signals is crucial for successful trading outcomes.
+
+=== Trading Strategy ===
+
+None

@@ -1,0 +1,57 @@
+# Multi-Agent Verification Solution
+
+## The Issue
+The multi-agent backtesting system is running properly but doesn't show agent communications in the logs. This makes it difficult to verify that agents are actually communicating during the backtest.
+
+## What We've Verified
+1. The multi-agent framework code exists in the codebase:
+   - CollaborativeDecisionFramework class is in agents/collaborative_decision_agent.py
+   - GroupChat implementation is properly set up in orchestration modules
+   - AutoGen integration is in place with GroupChatManager
+
+2. The backtests are executing, but:
+   - Agent communications are not visible in the logs
+   - Execution is too quick without showing intermediate steps
+
+## The Solution
+
+We've created scripts on EC2 to improve logging of agent communications during backtests. Here's how to use them:
+
+### Run a backtest with enhanced agent communications logging:
+
+```bash
+./ec2-backtest.sh run "cd /home/ec2-user/aGENtrader && ./run_test.sh"
+```
+
+This will run a simplified backtest with additional logging to make agent communications visible.
+
+### For longer backtests with agent communications:
+
+```bash
+./ec2-backtest.sh run "cd /home/ec2-user/aGENtrader && python3 run_with_logging.py"
+```
+
+### To permanently improve agent communications visibility:
+
+Edit these files on the EC2 instance to add explicit logging:
+
+1. agents/collaborative_decision_agent.py:
+   - Add logging in CollaborativeDecisionFramework.run_decision_session()
+
+2. orchestration/decision_session.py:
+   - Add logging in DecisionSession.initiate_chat()
+
+3. orchestration/autogen_manager.py:
+   - Add logging in the GroupChatManager functions
+
+Example logging statements to add:
+```python
+import logging
+agent_logger = logging.getLogger('agent_comms')
+agent_logger.info('=== STARTING AGENT COMMUNICATION ===')
+# ... existing code ...
+agent_logger.info('=== AGENT COMMUNICATION COMPLETED ===')
+```
+
+## Long-Term Improvement
+For a permanent solution, modify the backtest scripts to include more comprehensive logging of agent communications. This will make it easier to verify the system is working properly and to debug any issues.

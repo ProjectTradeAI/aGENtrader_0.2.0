@@ -1,0 +1,53 @@
+Please implement a  `SentimentAggregatorAgent` to retrieve sentiment data from Grok via its official API (`https://api.x.ai/v1/chat/completions`).
+This agent will query Grok for a given date and log a structured sentiment snapshot about Bitcoin derived from Crypto Twitter analysis.
+---
+### 🔐 API Call Structure:
+Use the following configuration for the API call:
+- Endpoint: `https://api.x.ai/v1/chat/completions`
+- Headers:
+  - `Authorization: Bearer ${XAI_API_KEY}` (use Replit Secrets)
+  - `Content-Type: application/json`
+- Model: `grok-3-latest`
+- `temperature`: 0 (for deterministic results)
+- `stream`: false
+
+---
+
+### 📦 API Payload Template:
+{
+  "model": "grok-3-latest",
+  "temperature": 0,
+  "stream": false,
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a professional financial sentiment analyst. Your task is to analyze crypto Twitter sentiment around Bitcoin with historical and narrative context."
+    },
+    {
+      "role": "user",
+      "content": "Provide the estimated sentiment of Crypto Twitter toward Bitcoin on [YYYY-MM-DD], structured as valid JSON.\n\nReturn the following keys:\n- sentiment_score (float between -1 and +1)\n- confidence (integer 0–100)\n- reasoning (string)\n- dominant_topics (list of 2–5 short strings)"
+    }
+  ]
+}
+Ensure the date is dynamically inserted at runtime.
+
+📁 Tasks:
+Update sentiment_aggregator_agent.py to:
+	Use the above API format
+	Insert the date dynamically in the user message content
+	Parse the Grok response (expect valid JSON string in response body)
+Log the response into:
+	logs/sentiment_feed.jsonl
+	Include the source ("source": "Grok API") and requested date.
+Support CLI Arguments:
+	--date 2025-01-20
+	--lookback_days 30
+Add API Key Handling:
+	Read Grok API key from XAI_API_KEY (use Replit secrets)
+
+✅ Acceptance Criteria:
+Agent performs live Grok API queries for target dates
+Output is parsed into structured JSON and logged properly
+Supports daily sentiment polling and historical backfilling
+Can be integrated directly with SentimentAnalystAgent or data analysis pipelines
+

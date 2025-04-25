@@ -1,0 +1,174 @@
+#!/bin/bash
+# Multi-Agent Backtesting script for EC2
+# This script runs different types of backtests on the EC2 instance
+
+set -e
+
+# Default values
+TYPE="simplified"  # simplified, enhanced, or full-scale
+SYMBOL="BTCUSDT"
+INTERVAL="1h"
+START_DATE="2025-03-01"
+END_DATE="2025-04-01"
+BALANCE=10000
+RISK=0.02
+DECISION_INTERVAL=2
+MIN_CONFIDENCE=75
+POSITION_SIZE=50
+LLM_TYPE="openai"
+OUTPUT_DIR="data/backtest_results"
+LOG_DIR="data/logs"
+USE_LOCAL_LLM=false
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --type) TYPE="$2"; shift ;;
+        --symbol) SYMBOL="$2"; shift ;;
+        --interval) INTERVAL="$2"; shift ;;
+        --start_date) START_DATE="$2"; shift ;;
+        --end_date) END_DATE="$2"; shift ;;
+        --balance) BALANCE="$2"; shift ;;
+        --risk) RISK="$2"; shift ;;
+        --decision_interval) DECISION_INTERVAL="$2"; shift ;;
+        --min_confidence) MIN_CONFIDENCE="$2"; shift ;;
+        --position_size) POSITION_SIZE="$2"; shift ;;
+        --llm_type) LLM_TYPE="$2"; shift ;;
+        --output_dir) OUTPUT_DIR="$2"; shift ;;
+        --log_dir) LOG_DIR="$2"; shift ;;
+        --local-llm) USE_LOCAL_LLM=true ;;
+        --help)
+            echo "Usage: $0 [options]"
+            echo "Options:"
+            echo "  --type TYPE                Type of backtest (simplified, enhanced, or full-scale)"
+            echo "  --symbol SYMBOL            Trading symbol (e.g. BTCUSDT)"
+            echo "  --interval INTERVAL        Trading interval (e.g. 1h, 4h, 1d)"
+            echo "  --start_date START_DATE    Start date for backtest (YYYY-MM-DD)"
+            echo "  --end_date END_DATE        End date for backtest (YYYY-MM-DD)"
+            echo "  --balance BALANCE          Initial balance for backtest"
+            echo "  --risk RISK                Risk percentage for backtest"
+            echo "  --decision_interval INTERVAL  Decision interval for backtest"
+            echo "  --min_confidence CONFIDENCE  Minimum confidence for trade execution"
+            echo "  --position_size SIZE       Position size for simplified backtest"
+            echo "  --output_dir DIR           Output directory for results"
+            echo "  --log_dir DIR              Log directory"
+            echo "  --local-llm                Use local LLM instead of OpenAI API"
+            echo "  --help                     Show this help message"
+            exit 0
+            ;;
+        *) echo "Unknown parameter: $1"; exit 1 ;;
+    esac
+    shift
+done
+
+# Create timestamp for log file
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG_FILE="$LOG_DIR/${TYPE}_backtest_${TIMESTAMP}.log"
+
+# Create directories
+mkdir -p "$OUTPUT_DIR" "$LOG_DIR"
+
+# Print configuration
+echo "Running $TYPE backtest with the following parameters:"
+echo "  Symbol:         $SYMBOL"
+echo "  Interval:       $INTERVAL"
+echo "  Date Range:     $START_DATE to $END_DATE"
+if [ "$TYPE" = "simplified" ]; then
+    echo "  Position Size:  $POSITION_SIZE"
+else
+    echo "  Balance:        $BALANCE"
+    echo "  Risk:           $RISK"
+    echo "  Decision Int:   $DECISION_INTERVAL"
+    echo "  Min Confidence: $MIN_CONFIDENCE"
+fi
+echo "  Output Dir:     $OUTPUT_DIR"
+echo "  Log File:       $LOG_FILE"
+if [ "$USE_LOCAL_LLM" = true ]; then
+    echo "  Using Local LLM: Yes (Mixtral)"
+else
+    echo "  Using Local LLM: No (OpenAI)"
+fi
+echo
+
+# Run the appropriate backtest
+if [ "$TYPE" = "simplified" ]; then
+    if [ "$USE_LOCAL_LLM" = true ]; then
+        echo "Running simplified backtest with local LLM..."
+        # For simplified backtest with local LLM, use run_simplified_backtest.py directly
+        # since run_backtest_with_local_llm.py doesn't accept position_size parameter
+        python3 run_simplified_backtest.py \
+            --symbol "$SYMBOL" \
+            --interval "$INTERVAL" \
+            --start_date "$START_DATE" \
+            --end_date "$END_DATE" \
+            --position_size "$POSITION_SIZE" \
+            --use_local_llm \
+            --output_dir "$OUTPUT_DIR" 2>&1 | tee "$LOG_FILE"
+    else
+        echo "Running simplified backtest..."
+        python3 run_simplified_backtest.py \
+            --symbol "$SYMBOL" \
+            --interval "$INTERVAL" \
+            --start_date "$START_DATE" \
+            --end_date "$END_DATE" \
+            --position_size "$POSITION_SIZE" \
+            --output_dir "$OUTPUT_DIR" 2>&1 | tee "$LOG_FILE"
+    fi
+elif [ "$TYPE" = "enhanced" ]; then
+    if [ "$USE_LOCAL_LLM" = true ]; then
+        echo "Running enhanced backtest with local LLM..."
+        python3 run_enhanced_backtest.py \
+            --symbol "$SYMBOL" \
+            --interval "$INTERVAL" \
+            --start_date "$START_DATE" \
+            --end_date "$END_DATE" \
+            --initial_balance "$BALANCE" \
+            --risk_per_trade "$RISK" \
+            --use_local_llm \
+            --output_dir "$OUTPUT_DIR" 2>&1 | tee "$LOG_FILE"
+    else
+        echo "Running enhanced backtest..."
+        python3 run_enhanced_backtest.py \
+            --symbol "$SYMBOL" \
+            --interval "$INTERVAL" \
+            --start_date "$START_DATE" \
+            --end_date "$END_DATE" \
+            --initial_balance "$BALANCE" \
+            --risk_per_trade "$RISK" \
+            --output_dir "$OUTPUT_DIR" 2>&1 | tee "$LOG_FILE"
+    fi
+elif [ "$TYPE" = "full-scale" ]; then
+    if [ "$USE_LOCAL_LLM" = true ]; then
+        echo "Running full-scale backtest with local LLM..."
+        python3 run_full_scale_backtest.py \
+            --symbol "$SYMBOL" \
+            --interval "$INTERVAL" \
+            --start_date "$START_DATE" \
+            --end_date "$END_DATE" \
+            --initial_balance "$BALANCE" \
+            --risk_per_trade "$RISK" \
+            --decision_interval "$DECISION_INTERVAL" \
+            --min_confidence "$MIN_CONFIDENCE" \
+            --use_local_llm \
+            --output_dir "$OUTPUT_DIR" 2>&1 | tee "$LOG_FILE"
+    else
+        echo "Running full-scale backtest..."
+        python3 run_full_scale_backtest.py \
+            --symbol "$SYMBOL" \
+            --interval "$INTERVAL" \
+            --start_date "$START_DATE" \
+            --end_date "$END_DATE" \
+            --initial_balance "$BALANCE" \
+            --risk_per_trade "$RISK" \
+            --decision_interval "$DECISION_INTERVAL" \
+            --min_confidence "$MIN_CONFIDENCE" \
+            --output_dir "$OUTPUT_DIR" 2>&1 | tee "$LOG_FILE"
+    fi
+else
+    echo "Unknown backtest type: $TYPE"
+    exit 1
+fi
+
+echo
+echo "Backtest completed. Results saved to $OUTPUT_DIR"
+echo "Log file: $LOG_FILE"

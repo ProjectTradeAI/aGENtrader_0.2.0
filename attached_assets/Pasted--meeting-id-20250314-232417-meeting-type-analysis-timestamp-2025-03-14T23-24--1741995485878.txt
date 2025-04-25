@@ -1,0 +1,140 @@
+{
+  "meeting_id": "20250314_232417",
+  "meeting_type": "analysis",
+  "timestamp": "2025-03-14T23:24:17.916934",
+  "participants": [
+    "user",
+    "market_analyst",
+    "decision_maker"
+  ],
+  "key_points": [
+    {
+      "agent": "market_analyst",
+      "analysis": {
+        "trend": {
+          "direction": "bullish",
+          "strength": 0.7,
+          "timeframe": "medium_term"
+        },
+        "technical_indicators": {
+          "moving_averages": {
+            "sma_50": 41000.0,
+            "ema_200": 38500.0,
+            "signal": "bullish"
+          },
+          "rsi": {
+            "value": 70.0,
+            "signal": "overbought"
+          },
+          "volume": {
+            "trend": "increasing",
+            "significance": 0.8
+          }
+        },
+        "market_sentiment": {
+          "overall": "positive",
+          "confidence": 0.65,
+          "key_factors": [
+            "Positive news flow",
+            "Institutional adoption",
+            "Healthy mining activity"
+          ]
+        },
+        "support_resistance": {
+          "support": [
+            40000.0,
+            38000.0,
+            36000.0
+          ],
+          "resistance": [
+            46000.0,
+            48000.0,
+            50000.0
+          ],
+          "nearest_levels": {
+            "support": 40000.0,
+            "resistance": 46000.0
+          }
+        }
+      },
+      "raw_content_length": 1285,
+      "parsed_content_length": 881
+    }
+  ],
+  "decisions": [
+    {
+      "agent": "decision_maker",
+      "decision": {
+        "action": "hold",
+        "confidence": 0.65,
+        "timeframe": "medium_term",
+        "reasoning": [
+          "The market is bullish with price above both 50 SMA and 200 EMA",
+          "RSI is showing overbought conditions, indicating a potential correction",
+          "Market sentiment is positive, indicating a bullish bias"
+        ],
+        "risk_management": {
+          "position_size": 0.05,
+          "stop_loss": {
+            "price": 40000.0,
+            "percentage": 0.11
+          },
+          "take_profit": {
+            "price": 46000.0,
+            "percentage": 0.02
+          },
+          "risk_reward": 0.18
+        },
+        "execution_details": {
+          "type": "limit",
+          "price": 44000.0,
+          "sizing": "dca",
+          "validity": "gtc"
+        }
+      },
+      "raw_content_length": 1456,
+      "parsed_content_length": 1162
+    }
+  ],
+  "action_items": [],
+  "executive_summary": {
+    "timestamp": "2025-03-14T23:24:17.916934",
+    "meeting_type": "analysis",
+    "market_overview": {
+      "market_trend": {
+        "direction": "bullish",
+        "strength": 0.7,
+        "timeframe": "medium_term"
+      },
+      "key_indicators": {
+        "moving_averages": "bullish",
+        "rsi": "overbought",
+        "volume": "increasing"
+      },
+      "sentiment": "positive",
+      "key_levels": {
+        "nearest_support": 40000.0,
+        "nearest_resistance": 46000.0
+      }
+    },
+    "trading_recommendation": {
+      "action": "hold",
+      "confidence": 0.65,
+      "timeframe": "medium_term",
+      "key_reasons": [
+        "The market is bullish with price above both 50 SMA and 200 EMA",
+        "RSI is showing overbought conditions, indicating a potential correction"
+      ],
+      "risk_profile": {
+        "position_size": 0.05,
+        "stop_loss": 40000.0,
+        "take_profit": 46000.0
+      }
+    },
+    "key_metrics": {
+      "participants": 3,
+      "analysis_points": 1,
+      "decisions_made": 1
+    }
+  }
+}

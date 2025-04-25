@@ -1,0 +1,99 @@
+modules = ["nodejs-20", "web", "postgresql-16", "python-3.11"]
+run = "npm run dev"
+hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
+
+[nix]
+channel = "stable-24_05"
+
+[deployment]
+deploymentTarget = "vm"
+build = ["npm", "run", "build"]
+run = ["npm", "run", "start"]
+runMode = "background"
+
+[[ports]]
+localPort = 3001
+externalPort = 3001
+
+[[ports]]
+localPort = 5000
+externalPort = 80
+
+[[ports]]
+localPort = 5001
+externalPort = 3000
+
+[[ports]]
+localPort = 5050
+externalPort = 3003
+
+[[ports]]
+localPort = 5555
+externalPort = 4200
+
+[[ports]]
+localPort = 8080
+externalPort = 8080
+
+[[ports]]
+localPort = 24678
+externalPort = 3002
+
+[workflows]
+runButton = "Test Agent Chat"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python scripts/init_market_data.py --granularity high"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+agentRequireRestartOnSave = false
+
+[[workflows.workflow.tasks]]
+task = "packager.installForAll"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev"
+waitForPort = 5000
+
+[[workflows.workflow]]
+name = "Run Trading Bot"
+author = 40068674
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python main.py"
+
+[[workflows.workflow]]
+name = "Test Agent Chat"
+author = 40068674
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python scripts/test_autogen_logs.py"
+
+[[workflows.workflow]]
+name = "Initialize Market Data"
+author = 40068674
+mode = "sequential"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "python scripts/init_market_data.py"

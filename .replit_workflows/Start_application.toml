@@ -1,0 +1,7 @@
+[workflow]
+name = "Start application"
+description = "Run the aGENtrader application"
+run = "python run.py --mode=demo"
+runnableType = "script"
+language = "python"
+output = "panel"

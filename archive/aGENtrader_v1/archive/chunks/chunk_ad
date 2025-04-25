@@ -1,0 +1,46 @@
+       
+                    trade_record = {
+                        "type": position['type'],
+                        "entry_time": position['entry_time'],
+                        "entry_price": position['entry_price'],
+                        "exit_time": timestamp,
+                        "exit_price": current_price,
+                        "size": position['size'],
+                        "profit_loss": profit_loss,
+                        "profit_loss_pct": (profit_loss / (position['size'] * position['entry_price'])) * 100
+                    }
+                    trades.append(trade_record)
+                    
+                    logger.info(f"Closed LONG position at ${current_price:.2f}, P/L: ${profit_loss:.2f} ({trade_record['profit_loss_pct']:.2f}%), balance: ${balance:.2f}")
+                    position = None
+    
+    # Calculate performance metrics
+    winning_trades = [t for t in trades if t['profit_loss'] > 0]
+    losing_trades = [t for t in trades if t['profit_loss'] <= 0]
+    
+    # Prevent division by zero
+    total_trades = len(trades)
+    win_rate = (len(winning_trades) / total_trades) * 100 if total_trades > 0 else 0
+    
+    # Final equity
+    final_balance = balance if position is None else balance + position['size'] * (data[-1]['close'] - position['entry_price'])
+    net_profit = final_balance - initial_balance
+    return_pct = (net_profit / initial_balance) * 100
+    
+    # Max drawdown
+    max_drawdown = 0
+    peak = initial_balance
+    for point in equity_curve:
+        if point['equity'] > peak:
+            peak = point['equity']
+        drawdown = (peak - point['equity']) / peak * 100
+        max_drawdown = max(max_drawdown, drawdown)
+    
+    # Calculate Sharpe ratio (simplified)
+    daily_returns = []
+    for i in range(1, len(equity_curve)):
+        daily_return = (equity_curve[i]['equity'] - equity_curve[i-1]['equity']) / equity_curve[i-1]['equity']
+        daily_returns.append(daily_return)
+    
+    if len(daily_returns) > 0:
+      

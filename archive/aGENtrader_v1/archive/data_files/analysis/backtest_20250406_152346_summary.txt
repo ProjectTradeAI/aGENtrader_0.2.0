@@ -1,0 +1,35 @@
+==================================================
+BACKTEST PERFORMANCE SUMMARY
+==================================================
+Test ID: backtest_20250406_152346
+Symbol: BTCUSDT
+Interval: 4h
+Period: 2025-03-01T00:00:00 to 2025-03-10T00:00:00
+Initial Balance: $10000.00
+Final Balance: $8845.51
+Absolute Return: $-1154.49
+Total Return: -11.54%
+Sharpe Ratio: -0.55
+Max Drawdown: 17.16%
+--------------------------------------------------
+TRADE STATISTICS
+--------------------------------------------------
+Total Trades: 3
+Profitable Trades: 1
+Losing Trades: 2
+Win Rate: 33.33%
+Profit Factor: 0.34
+Average Profit: 5.69%
+Average Loss: -8.50%
+Max Profit: 5.69%
+Max Loss: -10.48%
+Average Hold Time: 70.00 hours
+--------------------------------------------------
+POSITION TYPE BREAKDOWN
+--------------------------------------------------
+Short: 2 trades
+Long: 1 trades
+Long Win Rate: 0.00%
+Short Win Rate: 50.00%
+Long Avg PnL: -6.51%
+Short Avg PnL: -2.40%

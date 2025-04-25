@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  aGENtrader:
+    image: aGENtrader:production
+    container_name: aGENtrader_production
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./reports:/app/reports
+      - ./trades:/app/trades
+      - ./config:/app/config
+    command: >
+      bash -c 'mkdir -p /app/logs /app/reports /app/trades /app/config &&
+               chmod -R 777 /app/logs /app/reports /app/trades /app/config &&
+               python main.py'

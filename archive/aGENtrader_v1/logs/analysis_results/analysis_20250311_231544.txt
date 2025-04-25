@@ -1,0 +1,46 @@
+=== Market Analysis ===
+
+**1. Strategy Overview:**
+   - **Strategy name:** Bullish Bitcoin Bounce Strategy
+   - **Trading timeframe:** Daily (1D) chart
+   - **Market conditions:** Bullish Bitcoin trend with confirmed upward momentum, increasing trading volume, and significant support levels.
+
+**2. Entry and Exit Rules:**
+   - **Entry conditions:** 
+     - Enter a long position when Bitcoin price retraces and bounces off the support level of $40,000.
+     - Confirm the bounce with at least one of the following criteria: 
+       - Price action exhibiting increased buying volume compared to the previous three trading days.
+       - A bullish candlestick pattern (e.g., hammer or engulfing pattern) forming on the daily chart.
+   - **Exit conditions:** 
+     - Set a short-term profit target at $45,000 where minor resistance exists.
+     - For medium to long-term positions, set a profit target at $50,000.
+     - Exit the trade if the price closes below $38,500 on the daily chart, which would indicate a breach of the robust support level.
+   - **Position sizing:** 
+     - Risk only 2% of total trading capital on each trade. The size of the position can be calculated based on the distance between the entry point and the stop loss.
+
+**3. Risk Management:**
+   - **Stop loss rules:** 
+     - A stop loss order should be placed at $38,300 to ensure it triggers before a possible breakdown of the support level at $38,500.
+   - **Risk per trade:** 
+     - Limit risk to 2% of the total account value. For example, if the total account is $10,000, the maximum amount to risk per trade would be $200.
+   - **Portfolio allocation:** 
+     - Maintain a maximum allocation of 10% of the portfolio to Bitcoin trading at any given time, ensuring diversification across other assets.
+
+**4. Implementation Plan:**
+   - **Required indicators:** 
+     - Use a 50-day and a 200-day Moving Average for trend confirmation.
+     - Apply RSI (Relative Strength Index) to monitor potential overbought conditions (threshold at 70).
+     - Implement MACD (Moving Average Convergence Divergence) for additional confirmation of bullish momentum.
+   - **Execution steps:** 
+     - Monitor Bitcoin price consistently for any price action around the support level of $40,000.
+     - Execute the long position only after confirming bullish indicators and entry conditions.
+   - **Monitoring process:** 
+     - Review the trade daily to ensure it meets exit conditions.
+     - Adjust stop loss levels if needed, utilizing a trailing stop to lock in profits when approaching target levels.
+     - Weekly analysis of Bitcoin's price action and technical indicators to reassess the validity of the bullish outlook. 
+
+By adhering to this structured trading strategy, traders can capitalize on Bitcoin's current bullish trend while effectively managing risk and enhancing their potential for profit.
+
+=== Trading Strategy ===
+
+None

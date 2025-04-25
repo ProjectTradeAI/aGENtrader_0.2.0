@@ -1,0 +1,37 @@
+~/workspace$ ./direct-run-backtest.sh --symbol BTCUSDT --interval 1h --start 2025-04-01 --end 2025-04-10
+Testing connection to EC2 instance at 51.20.250.135...
+Connection successful!
+Connection successful!
+Running backtest with arguments: --symbol BTCUSDT --interval 1h --start 2025-04-01 --end 2025-04-10
+Running with DATABASE_URL: postgresql...de=require
+2025-04-15 10:44:07,541 - authentic_backtest - INFO - Setting up backtesting environment...
+2025-04-15 10:44:09,107 - authentic_backtest - INFO - Successfully connected to market data database
+2025-04-15 10:44:09,358 - authentic_backtest - ERROR - Error getting historical market data: relation "klines_1h" does not exist
+LINE 15:             klines_1h
+                     ^
+
+2025-04-15 10:44:09,359 - authentic_backtest - ERROR - Traceback (most recent call last):
+  File "/home/ec2-user/aGENtrader/backtesting/core/authentic_backtest.py", line 136, in get_historical_market_data
+    cursor.execute(query, (symbol, start_str, end_str))
+psycopg2.errors.UndefinedTable: relation "klines_1h" does not exist
+LINE 15:             klines_1h
+                     ^
+
+
+2025-04-15 10:44:09,363 - authentic_backtest - INFO - Successfully imported DecisionSession
+2025-04-15 10:44:09,364 - authentic_backtest - INFO - Successfully imported data integrity module
+2025-04-15 10:44:09,364 - authentic_backtest - WARNING - Failed to import TechnicalAnalyst
+2025-04-15 10:44:09,364 - authentic_backtest - WARNING - Failed to import FundamentalAnalyst
+2025-04-15 10:44:09,364 - authentic_backtest - WARNING - Failed to import SentimentAnalyst
+2025-04-15 10:44:09,365 - authentic_backtest - WARNING - Failed to import TradingSystem
+2025-04-15 10:44:09,365 - authentic_backtest - INFO - Backtesting environment set up for BTCUSDT 1h from 2025-04-01 to 2025-04-10
+2025-04-15 10:44:09,365 - authentic_backtest - INFO - Log file: logs/backtests/backtest_20250415_104409.log
+
+Backtest failed: No market data available for backtesting
+2025-04-15 10:44:09,366 - authentic_backtest - ERROR - No market data available for backtesting
+Checking for results...
+Latest log file on EC2: /home/ec2-user/aGENtrader/logs/backtests/backtest_20250415_104409.log
+Downloading log file from EC2...
+backtest_20250415_104409.log                                 100%  334     1.0KB/s   00:00    
+Downloaded log file to: ./logs/backtests/backtest_20250415_104409.log
+Backtest process completed!

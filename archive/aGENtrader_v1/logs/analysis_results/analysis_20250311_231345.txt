@@ -1,0 +1,43 @@
+=== Market Analysis ===
+
+1. **Strategy Overview:**
+   - **Strategy name:** Golden Bullish Momentum Strategy
+   - **Trading timeframe:** 4-hour chart
+   - **Market conditions:** Utilized during a bullish trend with strong upward momentum, particularly when the ADX is above 20 and trading volume is increasing. 
+
+2. **Entry and Exit Rules:**
+   - **Entry conditions:** 
+     - Enter a long position when the price breaks above the resistance level of $29,000, confirmed by an upward crossover of the MACD above the signal line. Additionally, ensure that the RSI is below 70 to avoid entering an overbought market.
+   - **Exit conditions:**
+     - Exit the position when the price hits an initial profit target of $30,500 or if RSI crosses above 75, indicating potential overbought conditions.
+     - Consider an aggressive exit at $32,000, adjusting based on market momentum and volume behavior.
+   - **Position sizing:** 
+     - Utilize a fixed percentage of the trading capital, such as 2% of total capital per trade, to ensure balanced exposure without risking total account depletion.
+
+3. **Risk Management:**
+   - **Stop loss rules:** 
+     - Set a stop-loss order just below the support level of $27,000 to limit potential losses. This provides a cushion against downside fluctuations while still allowing room for upward movement.
+   - **Risk per trade:** 
+     - Limit risks to 1-2% of total trading capital. For instance, with a capital of $10,000, set a maximum loss at $100 to $200 per trade.
+   - **Portfolio allocation:** 
+     - Dedicate no more than 15-20% of the trading portfolio to Bitcoin trades to ensure diversification and prevent overexposure to any single asset.
+
+4. **Implementation Plan:**
+   - **Required indicators:**
+     - 50-day Moving Average, 200-day Moving Average (to confirm the Golden Cross).
+     - Average Directional Index (ADX) for trend strength.
+     - Moving Average Convergence Divergence (MACD) for entry signals.
+     - Relative Strength Index (RSI) for overbought conditions.
+   - **Execution steps:**
+     - Monitor the 4-hour chart for the price action relative to the key resistance at $29,000.
+     - Confirm MACD crossover and ensure ADX is indicating strength.
+     - Execute buy orders at the entry point with predetermined stop-loss in place.
+   - **Monitoring process:**
+     - Regularly check volume and price movement every 4 hours to make real-time adjustments to targets and stop-loss.
+     - Reevaluate RSI levels and MACD signals systematically to maintain informed decision-making throughout the trade duration.
+
+This structured trading strategy aims to capitalize on the current bullish momentum seen in Bitcoin while embedding robust risk management to protect capital and optimize trade outcomes.
+
+=== Trading Strategy ===
+
+None

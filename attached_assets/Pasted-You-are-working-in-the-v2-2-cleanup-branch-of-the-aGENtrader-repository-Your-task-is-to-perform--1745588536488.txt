@@ -1,0 +1,107 @@
+You are working in the `v2.2-cleanup` branch of the aGENtrader repository.
+
+Your task is to perform a complete repository cleanup and workspace sanitization.
+
+The goal is to remove any outdated, unused, test-related, or Replit-specific files and scripts that are cluttering the workspace, confusing the system, or contributing to failed deployments.
+
+---
+
+## ✅ Key Directives:
+
+### 1. Clean Up Replit-Specific & Local-Only Files
+Remove (if present):
+.replit replit.nix *.sqlite3 *.swp *.DS_Store *.pkl .nix/ tmp/
+
+yaml
+Copy
+Edit
+
+---
+
+### 2. Remove Unused or Outdated Scripts
+- Audit the `scripts/` folder
+- Move outdated/untested/experimental scripts to `archive/scripts_legacy/`
+- Only keep scripts that are:
+  - Actively used in deployment
+  - Data analysis tools (`view_performance.py`, `view_open_trades.py`, etc.)
+  - Dataset generation and log inspection
+
+Preserve:
+scripts/git_sync.sh scripts/export_decision_dataset.py scripts/view_open_trades.py scripts/view_performance.py
+
+yaml
+Copy
+Edit
+
+Move to archive or delete if:
+- No longer used in current system
+- Created for one-off testing
+- Not tied to any agent or task
+
+---
+
+### 3. Remove Redundant Docker or Deployment Files
+Only preserve Docker-related files in:
+docker/ docker-compose.yml docker-entrypoint.sh deployment/
+
+yaml
+Copy
+Edit
+
+Remove or move to archive:
+- Older Dockerfiles no longer used (e.g., `Dockerfile.legacy`, `Dockerfile.test`)
+- Unused deployment experiments
+
+---
+
+### 4. Remove Log Clutter & Artifacts
+Delete all temporary, auto-generated logs from:
+logs/ datasets/ (except actual exports) tests/ (except real unit test files)
+
+yaml
+Copy
+Edit
+
+Exclude:
+- `logs/.gitkeep` if needed to preserve folder structure
+- Real datasets used for training
+
+---
+
+### 5. Update .gitignore to Include:
+Logs & temp files
+logs/ *.log *.jsonl
+
+Replit & editor files
+.replit *.swp *.DS_Store .vscode/ .idea/
+
+Python artifacts
+pycache/ *.pyc *.pyo
+
+System artifacts
+tmp/ .env .env.*
+
+yaml
+Copy
+Edit
+
+---
+
+### 🗃️ 6. Archive Anything You’re Unsure About
+Move anything questionable to:
+archive/unverified_scripts/ archive/misc_backups/
+
+yaml
+Copy
+Edit
+
+Nothing should be deleted permanently unless it's clearly junk.
+
+---
+
+### ✅ Acceptance Criteria:
+- Repo is fully cleaned up and ready for deployment
+- No leftover test logs, junk files, or dev-only experiments
+- `.gitignore` is fully updated
+- Only production-ready and actively used scripts are left in `scripts/`
+- Archive contains non-destructive backups of anything uncertain

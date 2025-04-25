@@ -1,0 +1,6 @@
+{
+  "timestamp": "2025-03-11T23:47:53.213885",
+  "market_analysis": "=== Trading Strategy ===  \nStrategy Name: Bullish Momentum Breakout  \nType: Momentum  \nRisk Profile: Medium  \nConfidence: 75%  \n\nTrade Parameters:  \n- Entry Zone: $26,200 - $26,500  \n- Stop Loss: $25,800  \n- Take Profit:  \n  - Target 1: $27,200  \n  - Target 2: $28,500  \n\nPosition Management:  \n- Size: 0.5 BTC  \n- Portfolio %: 10%  \n- Risk per Trade: 2%  \n\nImplementation:  \n- Required Indicators: RSI, MACD, Moving Averages  \n- Entry Conditions: Enter the trade when the price breaks above $26,500 with a confirmed close on the next candle to validate the momentum. Utilize volume confirmation for additional support.  \n- Exit Rules: Sell half of the position at Target 1 ($27,200) and place a trailing stop at the breakeven level for the remaining half to maximize gains towards Target 2 ($28,500). \n\nThis strategy effectively capitalizes on the current bullish trend while managing risk through measured entry, stop-loss placement, and profit-taking strategies.",
+  "strategy": null,
+  "duration": 4.797574
+}

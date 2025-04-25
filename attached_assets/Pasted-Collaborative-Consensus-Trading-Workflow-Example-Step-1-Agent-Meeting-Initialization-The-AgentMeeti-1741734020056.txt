@@ -1,0 +1,70 @@
+Collaborative Consensus Trading Workflow Example
+Step 1: Agent Meeting Initialization
+The AgentMeetingCoordinator begins a trading discussion for Bitcoin (BTC):
+
+==== Starting Agent Meeting #20250525_091530 at 2025-05-25T09:15:30 ====
+-- Discussion for BTC --
+Step 2: Market Analysis Presentation
+Market Analysis Agent: For BTC, I'm observing a bullish trend with 78% confidence. Current price is $52,347.85. Technical indicators suggest buy. I've identified support at $50,928.33 and resistance at $53,651.92. Key indicators: MACD: bullish crossover, RSI: 62.5 (neutral), Bollinger Bands: price near upper band.
+Step 3: Sentiment Analysis Presentation
+Sentiment Analysis Agent: Social sentiment for BTC is positive with a score of 0.72. News analysis shows very positive sentiment. Based on sentiment alone, I would suggest a buy action with 75% confidence.
+Step 4: Liquidity Analysis Presentation
+Liquidity Analysis Agent: Liquidity for BTC has a score of 82.3/100. Estimated slippage for standard orders would be 0.15%. Order book depth analysis indicates a buy bias. I've identified key liquidity zones at 50925.45, 49876.20, 48754.30 (support) and 53125.75, 54350.25, 55782.60 (resistance).
+Step 5: On-Chain Analysis Presentation
+On-Chain Analysis Agent: On-chain metrics for BTC show accumulation whale activity. Network activity is increasing. Long-term holder behavior indicates bullish sentiment. Exchange outflows exceed inflows by 28%, suggesting coins are moving to cold storage. MVRV ratio at 1.8 indicates reasonable valuation.
+Step 6: Strategy Manager Deliberation
+Strategy Manager Agent: After evaluating all inputs for BTC, I'm selecting the RSI_Trend_Following strategy with a medium risk profile. This strategy is recommending a buy signal with 82% confidence. Reasoning: Multiple agent signals align (technical, sentiment, on-chain) with favorable liquidity conditions.
+Step 7: Trade Execution Feedback
+Trade Execution Agent: If we execute this buy signal for BTC, position size would be approximately 0.0954 BTC ($5,000.00), which is 5.0% of our portfolio. Risk management: Stop loss would be set at $50,925.45, taking profit at $54,350.25.
+Step 8: Meeting Conclusion
+==== Agent Meeting concluded in 24.83 seconds ====
+Step 9: Workflow Orchestration
+The WorkflowOrchestrator takes the consensus from the meeting and coordinates the actual implementation:
+
+{
+  "workflow_id": "trading_decision",
+  "timestamp": "2025-05-25T09:15:55.021384",
+  "symbols": ["BTC"],
+  "results": {
+    "BTC": {
+      "market_analysis": {
+        "trend": "bullish",
+        "confidence": 78,
+        "signal": "buy",
+        "support_level": 50928.33,
+        "resistance_level": 53651.92
+      },
+      "liquidity_analysis": {
+        "signal": "buy",
+        "confidence": 70,
+        "liquidity_score": 82.3,
+        "levels": {
+          "support": [50925.45, 49876.20, 48754.30],
+          "resistance": [53125.75, 54350.25, 55782.60]
+        }
+      },
+      "strategy_selection": {
+        "strategy": "RSI_Trend_Following",
+        "signal": "buy",
+        "confidence": 82,
+        "risk_profile": "medium",
+        "reason": "Multiple agent signals align with favorable market conditions"
+      },
+      "trade_execution": {
+        "symbol": "BTC",
+        "action": "buy",
+        "quantity": 0.0954,
+        "price": 52347.85,
+        "value_usd": 5000.00,
+        "stop_loss": 50925.45,
+        "take_profit": 54350.25,
+        "execution_time": "2025-05-25T09:16:02.124895",
+        "status": "executed"
+      }
+    }
+  },
+  "duration": 32.15
+}
+This workflow demonstrates how your agents work together through structured communication, each providing specialized analysis that feeds into a consensus-driven decision. The AgentMeetingCoordinator facilitates discussions while the WorkflowOrchestrator ensures that decisions are implemented through the proper agent channels, resulting in concrete trading actions with appropriate risk management parameters.
+
+The system creates multiple validation layers through different analytical perspectives (technical, sentiment, liquidity, on-chain) before committing to a trading decision, significantly enhancing decision quality through multi-agent consensus.

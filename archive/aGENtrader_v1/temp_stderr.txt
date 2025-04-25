@@ -1,0 +1,21 @@
+2025-04-17 11:31:53,215 [INFO] Database connection established
+2025-04-17 11:31:53,215 [INFO] Alpaca API credentials found
+2025-04-17 11:31:53,218 [INFO] Generating trading decision for BTCUSDT on 1h timeframe
+2025-04-17 11:31:53,218 [INFO] Initialized technical analysis agent
+2025-04-17 11:31:53,218 [INFO] Initialized fundamental analysis agent
+2025-04-17 11:31:53,218 [INFO] Initialized portfolio management agent
+2025-04-17 11:31:53,218 [INFO] Using specified source: database
+2025-04-17 11:31:54,333 [INFO] Loaded 100 rows of market data for BTCUSDT 1h
+2025-04-17 11:31:54,333 [INFO] Using specified source: database
+2025-04-17 11:31:54,523 [INFO] Loaded 100 rows of market data for BTCUSDT 1h
+2025-04-17 11:31:54,528 [INFO] Technical analysis for BTCUSDT: hold with confidence 0.97
+2025-04-17 11:31:54,528 [INFO] Technical analysis completed for BTCUSDT
+2025-04-17 11:31:54,529 [INFO] Fundamental analysis for BTCUSDT: hold with confidence 0.86
+2025-04-17 11:31:54,529 [INFO] Fundamental analysis completed for BTCUSDT
+2025-04-17 11:31:54,530 [INFO] Trade not executed: Directions don't agree
+2025-04-17 11:31:54,531 [INFO] Portfolio analysis for BTCUSDT: recommendation=hold
+2025-04-17 11:31:54,531 [INFO] Portfolio analysis completed for BTCUSDT
+2025-04-17 11:31:54,531 [INFO] Formed consensus decision: hold with confidence 1.00
+2025-04-17 11:31:54,531 [INFO] No execution for BTCUSDT: direction=hold, confidence=1.00
+2025-04-17 11:31:54,532 [INFO] Session log saved to ./logs/decisions/session_BTCUSDT_20250417_113154.json
+2025-04-17 11:31:54,532 [INFO] Generated trading decision for BTCUSDT: hold

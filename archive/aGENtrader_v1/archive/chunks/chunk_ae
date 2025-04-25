@@ -1,0 +1,44 @@
+  mean_return = sum(daily_returns) / len(daily_returns)
+        std_dev = (sum((r - mean_return) ** 2 for r in daily_returns) / len(daily_returns)) ** 0.5
+        sharpe_ratio = (mean_return / std_dev) * (252 ** 0.5) if std_dev > 0 else 0
+    else:
+        sharpe_ratio = 0
+    
+    results = {
+        "initial_balance": initial_balance,
+        "final_balance": final_balance,
+        "net_profit": net_profit,
+        "return_pct": return_pct,
+        "total_trades": total_trades,
+        "winning_trades": len(winning_trades),
+        "losing_trades": len(losing_trades),
+        "win_rate": win_rate,
+        "sharpe_ratio": sharpe_ratio,
+        "max_drawdown_pct": max_drawdown,
+        "equity_curve": equity_curve,
+        "trades": trades,
+        "timestamp": datetime.now().isoformat(),
+        "output_file": f"simplified_backtest_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    }
+    
+    return results
+
+def main():
+    """Main entry point"""
+    # Parse command line arguments
+    import argparse
+    parser = argparse.ArgumentParser(description='Run simplified trading test')
+    parser.add_argument('--symbol', type=str, default='BTCUSDT', help='Trading symbol')
+    parser.add_argument('--interval', type=str, default='1h', help='Trading interval')
+    parser.add_argument('--start_date', type=str, default='2025-02-15', help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end_date', type=str, default='2025-03-15', help='End date (YYYY-MM-DD)')
+    parser.add_argument('--initial_balance', type=float, default=10000.0, help='Initial account balance')
+    parser.add_argument('--risk_per_trade', type=float, default=0.02, help='Risk per trade (e.g., 0.02 for 2%)')
+    parser.add_argument('--output_dir', type=str, default='results', help='Output directory')
+    args = parser.parse_args()
+    
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    start_time = time.time()
+    logger.info(f"Starting simplified test for {args.

@@ -1,0 +1,61 @@
+Next, implement comprehensive API Response Schema Validation within all data-fetching agents (especially CoinAPIFetcher) in the aGENtrader v2 system.
+
+### 🚦 **Goals:**
+- Clearly define and document the expected schema for API responses.
+- Validate all incoming API responses rigorously against this schema.
+- Ensure invalid responses do not cause system failures.
+
+### 📌 **Detailed Tasks:**
+
+#### 1. **Define Expected API Response Schemas**
+- Clearly define JSON schemas (structure, fields, data types) for the API responses used by:
+  - CoinAPIFetcher (OHLCV data, ticker data, etc.)
+  - Any other data-fetching agent (e.g., SentimentAnalystAgent if applicable)
+
+Example schema (OHLCV response):
+```json
+{
+  "symbol_id": "STRING",
+  "time_period_start": "ISO8601_TIMESTAMP",
+  "time_period_end": "ISO8601_TIMESTAMP",
+  "price_open": "FLOAT",
+  "price_close": "FLOAT",
+  "price_high": "FLOAT",
+  "price_low": "FLOAT",
+  "volume_traded": "FLOAT"
+}
+
+Implement Validation Logic
+Use a robust JSON schema validator library (e.g., jsonschema Python package).
+
+Before using API response data, validate strictly against your defined schema.
+
+Example validation usage:
+
+python
+from jsonschema import validate, ValidationError
+try:
+    validate(instance=api_response_json, schema=expected_schema)
+except ValidationError as e:
+    logger.error(f"Schema validation failed: {e.message}")
+    # handle gracefully, trigger retries or fail clearly
+
+3. Error Handling
+Log clear, descriptive error messages whenever validation fails, explicitly indicating:
+-Missing fields
+-Incorrect data types
+-Unexpected fields or schema mismatches
+Implement retry logic or safe fallback (e.g., skip analysis or clearly mark the event as invalid).
+
+4. Graceful Handling of Invalid Responses
+If validation fails after retries, halt further processing for the event.
+Clearly log why the data was rejected and document this event (logs/invalid_api_responses.jsonl).
+
+5. Documentation & Testing
+Document the validation schemas clearly in API_RESPONSE_SCHEMAS.md.
+Write thorough test cases (tests/test_api_response_validation.py) simulating valid and invalid responses to confirm correct validation logic.
+
+📌 Acceptance Criteria:
+All incoming API responses are validated strictly against predefined schemas.
+Invalid responses are clearly logged and do not cause crashes.
+Schema documentation is clear and well-maintained.

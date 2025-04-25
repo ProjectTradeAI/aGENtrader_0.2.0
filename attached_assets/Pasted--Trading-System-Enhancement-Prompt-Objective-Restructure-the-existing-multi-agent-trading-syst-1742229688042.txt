@@ -1,0 +1,69 @@
+
+# Trading System Enhancement Prompt
+
+## Objective
+Restructure the existing multi-agent trading system to implement:
+1. Cost-effective LLM usage through scheduled meetings
+2. Local processing for real-time operations
+3. Event-driven communication between agents
+4. Clear separation of analysis and execution responsibilities
+
+## Core Components to Modify
+
+### Agent Meeting Coordinator (orchestration/agent_meeting.py)
+- Implement scheduled periodic meetings (hourly/daily)
+- Coordinate market analysis discussions
+- Generate consensus-based decisions
+- Record meeting transcripts and decisions
+
+### Market Analysis Agent (agents/market_analysis.py)
+- Focus on real-time technical analysis
+- Implement local indicator calculations
+- Maintain price alert monitoring
+- Track support/resistance levels
+
+### Strategy Manager (agents/strategy_manager.py)
+- Evaluate strategy performance
+- Select optimal strategies based on market conditions
+- Manage risk parameters
+- Generate trading signals
+
+### Trade Execution Agent (agents/trade_execution.py)
+- Execute trades based on meeting decisions
+- Monitor active positions
+- Implement position sizing
+- Handle real-time price alerts
+
+## Implementation Requirements
+
+1. Local Processing
+- Use technical indicators library (ta-lib) for real-time analysis
+- Implement local price alert system
+- Store market data in local database
+
+2. Meeting System
+- Schedule regular analysis meetings
+- Implement emergency meetings for significant market events
+- Record all meeting decisions and rationales
+
+3. Data Management
+- Use market_data_manager.py for centralized data handling
+- Implement efficient data caching
+- Set up real-time price feeds
+
+4. Risk Management
+- Implement position sizing rules
+- Set up stop-loss monitoring
+- Track portfolio exposure
+
+## Success Criteria
+1. Reduced API costs through optimized LLM usage
+2. Improved real-time response to market conditions
+3. Clear audit trail of all decisions
+4. Effective risk management implementation
+
+## Technical Stack
+- Python 3.8+
+- SQLite for local data storage
+- Technical analysis libraries
+- Exchange API integration

@@ -1,0 +1,6 @@
+{
+  "timestamp": "2025-03-11T23:44:35.247233",
+  "market_analysis": "=== Trading Strategy ===  \nStrategy Name: Bullish Momentum Strategy  \nType: Momentum  \nRisk Profile: Medium  \nConfidence: 75%  \n\nTrade Parameters:  \n- Entry Zone: $27,200 - $27,250  \n- Stop Loss: $26,800  \n- Take Profit:  \n  - Target 1: $27,500  \n  - Target 2: $28,000  \n\nPosition Management:  \n- Size: 0.5 BTC  \n- Portfolio %: 10%  \n- Risk per Trade: 1.5%  \n\nImplementation:  \n- Required Indicators: RSI, MACD, 50-day MA, 200-day MA, Volume  \n- Entry Conditions: Trigger buy order when the price is within the entry zone and bullish momentum is confirmed by above average volume and a bullish MACD crossover.  \n- Exit Rules: Close the position at Target 1 ($27,500) and adjust the stop loss to breakeven for the remaining position once Target 1 is hit. Close the remaining position at Target 2 ($28,000).  \n\nThis strategy capitalizes on the bullish trend indicated by both market sentiment and technical analysis while incorporating prudent risk management protocols.",
+  "strategy": null,
+  "duration": 4.271865
+}

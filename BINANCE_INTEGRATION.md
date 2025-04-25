@@ -1,0 +1,1 @@
+docs/BINANCE_INTEGRATION.md

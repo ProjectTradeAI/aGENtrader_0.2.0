@@ -161,6 +161,27 @@ class BinanceDataProvider:
             # Parse JSON response
             return response.json()
             
+        except requests.exceptions.HTTPError as e:
+            # Special handling for common errors
+            if e.response.status_code == 400:
+                # Check if this is an invalid symbol error
+                try:
+                    error_data = e.response.json()
+                    if "msg" in error_data and "symbol" in error_data["msg"].lower():
+                        logger.error(f"Invalid symbol: {params.get('symbol')}")
+                        # Return empty data instead of raising an exception
+                        if endpoint == "/api/v3/klines":
+                            return []  # Return empty list for klines
+                        elif endpoint == "/api/v3/ticker/price":
+                            return {"price": "0.0"}  # Return zero price
+                        elif endpoint == "/api/v3/ticker/24hr":
+                            return {}  # Return empty dict
+                except:
+                    pass  # If we can't parse the error, continue with normal handling
+            
+            logger.error(f"API request failed: {str(e)}")
+            raise Exception(f"Binance API request failed: {str(e)}")
+            
         except requests.exceptions.RequestException as e:
             logger.error(f"API request failed: {str(e)}")
             raise Exception(f"Binance API request failed: {str(e)}")
@@ -221,7 +242,7 @@ class BinanceDataProvider:
         formatted_candlesticks = []
         for candle in candlesticks:
             formatted_candlesticks.append({
-                "time": candle[0],
+                "timestamp": candle[0],  # Changed "time" to "timestamp" to match expected format
                 "open": float(candle[1]),
                 "high": float(candle[2]),
                 "low": float(candle[3]),
@@ -246,7 +267,10 @@ class BinanceDataProvider:
         Returns:
             Current ticker data
         """
-        params = {"symbol": symbol}
+        # Format symbol correctly (remove "/" if present)
+        formatted_symbol = symbol.replace("/", "")
+        
+        params = {"symbol": formatted_symbol}
         return self._make_request("/api/v3/ticker/24hr", params=params)
     
     def get_current_price(self, symbol: str) -> float:
@@ -259,7 +283,10 @@ class BinanceDataProvider:
         Returns:
             Current price as float
         """
-        params = {"symbol": symbol}
+        # Format symbol correctly (remove "/" if present)
+        formatted_symbol = symbol.replace("/", "")
+        
+        params = {"symbol": formatted_symbol}
         ticker = self._make_request("/api/v3/ticker/price", params=params)
         return float(ticker["price"])
     

@@ -369,6 +369,17 @@ class DecisionAgent:
                     # Handle sentiment analysis format
                     action = analysis_data["analysis"].get("action")
                     confidence = analysis_data["analysis"].get("confidence", 50)
+                elif "signal" in analysis_data:
+                    # Handle signal from analyst agents
+                    signal = analysis_data.get("signal")
+                    # Map signals to actions
+                    if signal == "BUY":
+                        action = "BUY"
+                    elif signal == "SELL":
+                        action = "SELL"
+                    elif signal in ["NEUTRAL", "HOLD"]:
+                        action = "HOLD"
+                    confidence = analysis_data.get("confidence", 50)
                     
                 # Skip if we couldn't extract a valid action
                 if not action or action not in action_scores:

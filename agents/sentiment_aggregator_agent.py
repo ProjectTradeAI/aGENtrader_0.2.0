@@ -39,9 +39,11 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             data_fetcher: Optional data fetcher instance
             config: Configuration parameters
         """
-        super().__init__(data_fetcher, config)
+        super().__init__()
         self.name = "SentimentAggregatorAgent"
         self.description = "Analyzes market sentiment using Grok AI"
+        self.data_fetcher = data_fetcher
+        self.config = config or {}
         
         # Configure xAI API access
         self.api_key = os.environ.get('XAI_API_KEY')

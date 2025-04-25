@@ -40,9 +40,10 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             data_fetcher: Data fetcher instance for retrieving market data
             config: Configuration parameters
         """
-        super().__init__(data_fetcher, config)
+        super().__init__()
         self.name = "TechnicalAnalystAgent"
         self.description = "Analyzes price action using technical indicators"
+        self.data_fetcher = data_fetcher
         
         # Configure trading signal indicators
         self.config = config or {}

@@ -114,3 +114,81 @@ class BaseAnalystAgent:
             "confidence": 0,
             "reason": f"Analysis failed: {str(error)}"
         }
+        
+    def validate_input(self, symbol: Optional[str], interval: Optional[str]) -> bool:
+        """
+        Validate input parameters for analysis.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            True if input is valid, False otherwise
+        """
+        if not symbol:
+            self.logger.error("Symbol is required for analysis")
+            return False
+        
+        if not interval:
+            self.logger.error("Interval is required for analysis")
+            return False
+            
+        return True
+        
+    def build_error_response(self, error_code: str, error_message: str) -> Dict[str, Any]:
+        """
+        Build standardized error response.
+        
+        Args:
+            error_code: Error code
+            error_message: Error message
+            
+        Returns:
+            Error response dictionary
+        """
+        self.logger.error(f"{error_code}: {error_message}")
+        
+        return {
+            "error": error_code,
+            "error_message": error_message,
+            "signal": "HOLD",  # Default to HOLD on error
+            "confidence": 0,
+            "reason": f"Analysis failed: {error_message}",
+            "status": "error"
+        }
+        
+    def validate_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate analysis result and ensure it has required fields.
+        
+        Args:
+            result: Analysis result dictionary
+            
+        Returns:
+            Validated result dictionary
+        """
+        required_fields = ["signal", "confidence", "reason"]
+        
+        # Check for error
+        if "error" in result:
+            return result
+            
+        # Check for required fields
+        for field in required_fields:
+            if field not in result:
+                return self.build_error_response(
+                    "INVALID_RESULT", 
+                    f"Analysis result missing required field: {field}"
+                )
+                
+        # Ensure signal is valid
+        valid_signals = ["BUY", "SELL", "HOLD", "NEUTRAL"]
+        if result["signal"] not in valid_signals:
+            result["signal"] = "HOLD"
+            
+        # Ensure confidence is within range
+        if not isinstance(result["confidence"], (int, float)) or result["confidence"] < 0 or result["confidence"] > 100:
+            result["confidence"] = 50
+            
+        return result

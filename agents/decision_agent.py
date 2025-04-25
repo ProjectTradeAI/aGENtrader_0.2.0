@@ -27,39 +27,14 @@ sys.path.append(parent_dir)
 from models.llm_client import LLMClient
 
 # Import error handling utilities
-try:
-    from utils.error_handler import (
-        ValidationError as BaseValidationError,
-        DataFetchingError as BaseDataFetchingError,
-        retry_with_backoff as base_retry_with_backoff,
-        handle_api_errors as base_handle_api_errors,
-        check_api_keys as base_check_api_keys,
-        request_api_key as base_request_api_key
-    )
-    
-    # Alias imported error classes to avoid name conflicts
-    ValidationError = BaseValidationError
-    DataFetchingError = BaseDataFetchingError
-    retry_with_backoff = base_retry_with_backoff
-    handle_api_errors = base_handle_api_errors
-    check_api_keys = base_check_api_keys
-    request_api_key = base_request_api_key
-    
-except ImportError:
-    # Define local error classes if imports fail (fallback)
-    class ValidationError(Exception): pass
-    class DataFetchingError(Exception): pass
-    
-    # Define local decorators
-    def retry_with_backoff(*args, **kwargs): 
-        def decorator(func): return func
-        return decorator
-        
-    def handle_api_errors(func): return func
-    
-    # Define local utility functions
-    def check_api_keys(*args, **kwargs): return False
-    def request_api_key(*args, **kwargs): pass
+from utils.error_handler import (
+    ValidationError,
+    DataFetchingError,
+    retry_with_backoff,
+    handle_api_errors,
+    check_api_keys,
+    request_api_key
+)
 
 # Define decorator for handling LLM errors
 def handle_llm_errors(func: Callable) -> Callable:

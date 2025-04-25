@@ -1,165 +1,131 @@
 """
 aGENtrader v2 Error Handler
 
-This module provides standardized error handling utilities for the aGENtrader system.
+This module provides utility functions and classes for handling errors gracefully.
 """
 
 import os
+import time
 import logging
-import traceback
-import json
-from datetime import datetime
-from typing import Dict, Any, Optional, List, Union
+import functools
+from typing import Dict, Any, Optional, Callable, List, Type, Union, Tuple
+from functools import wraps
 
-# Configure logger
-logger = logging.getLogger('aGENtrader.utils.error_handler')
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('error_handler')
 
-class ErrorHandler:
-    """Error handler with standardized responses and logging."""
+class ValidationError(Exception):
+    """Exception raised for validation errors."""
+    pass
+
+class DataFetchingError(Exception):
+    """Exception raised for errors during data fetching."""
+    pass
+
+class APIKeyError(Exception):
+    """Exception raised for missing or invalid API keys."""
+    pass
+
+class LLMError(Exception):
+    """Exception raised for errors related to language model usage."""
+    pass
+
+def retry_with_backoff(max_retries: int = 3, 
+                      initial_backoff: float = 1.0, 
+                      backoff_factor: float = 2.0,
+                      exceptions_to_retry: Optional[List[Type[Exception]]] = None) -> Callable:
+    """
+    Decorator to retry functions with exponential backoff.
     
-    # Define error types with codes
-    ERROR_TYPES = {
-        'API_CONNECTION_ERROR': 1001,
-        'API_AUTHENTICATION_ERROR': 1002,
-        'API_RATE_LIMIT_ERROR': 1003,
-        'API_RESPONSE_ERROR': 1004,
-        'DATA_VALIDATION_ERROR': 2001,
-        'DATA_PARSING_ERROR': 2002,
-        'ANALYSIS_ERROR': 3001,
-        'TECHNICAL_ANALYSIS_ERROR': 3002,
-        'SENTIMENT_ANALYSIS_ERROR': 3003,
-        'AGENT_ERROR': 4001,
-        'SYSTEM_ERROR': 5001,
-        'CONFIGURATION_ERROR': 5002,
-    }
-    
-    def __init__(self, log_dir: str = 'logs'):
-        """
-        Initialize the error handler.
+    Args:
+        max_retries: Maximum number of retries
+        initial_backoff: Initial backoff time in seconds
+        backoff_factor: Factor to increase backoff time with each retry
+        exceptions_to_retry: List of exception types to retry on
         
-        Args:
-            log_dir: Directory to store error logs
-        """
-        self.log_dir = log_dir
-        self.invalid_api_log_dir = os.path.join(log_dir, 'invalid_api_responses')
+    Returns:
+        Decorated function
+    """
+    if exceptions_to_retry is None:
+        exceptions_to_retry = [Exception]
         
-        # Ensure log directories exist
-        os.makedirs(self.log_dir, exist_ok=True)
-        os.makedirs(self.invalid_api_log_dir, exist_ok=True)
-    
-    def log_error(self, error_type: str, message: str, details: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Log an error with standardized format.
-        
-        Args:
-            error_type: Type of error (from ERROR_TYPES)
-            message: Error message
-            details: Additional error details
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            retries = 0
+            backoff = initial_backoff
             
-        Returns:
-            Standardized error response dictionary
-        """
-        if error_type not in self.ERROR_TYPES:
-            logger.warning(f"Unknown error type: {error_type}, defaulting to SYSTEM_ERROR")
-            error_type = 'SYSTEM_ERROR'
+            while retries <= max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except tuple(exceptions_to_retry) as e:
+                    retries += 1
+                    if retries > max_retries:
+                        logger.error(f"Max retries reached for {func.__name__}: {str(e)}")
+                        raise
+                        
+                    logger.warning(f"Retry {retries}/{max_retries} for {func.__name__} after error: {str(e)}")
+                    logger.warning(f"Backing off for {backoff} seconds...")
+                    time.sleep(backoff)
+                    backoff *= backoff_factor
         
-        error_code = self.ERROR_TYPES[error_type]
-        
-        # Create error response
-        error_response = {
-            'success': False,
-            'error': {
-                'code': error_code,
-                'type': error_type,
-                'message': message,
-                'timestamp': datetime.utcnow().isoformat()
-            }
-        }
-        
-        if details:
-            error_response['error']['details'] = details
-        
-        # Log the error
-        logger.error(f"{error_type}: {message}")
-        if details:
-            logger.debug(f"Error details: {json.dumps(details)}")
-        
-        return error_response
+        return wrapper
     
-    def handle_exception(self, exception: Exception, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Handle an exception with full traceback logging.
-        
-        Args:
-            exception: The exception to handle
-            context: Additional context for the error
-            
-        Returns:
-            Standardized error response dictionary
-        """
-        error_type = 'SYSTEM_ERROR'
-        message = str(exception)
-        
-        # Get exception traceback
-        tb = traceback.format_exc()
-        
-        # Create details with exception info
-        details = {
-            'exception_type': exception.__class__.__name__,
-            'traceback': tb
-        }
-        
-        # Add context if provided
-        if context is not None:
-            details_with_context = details.copy()
-            details_with_context['context'] = context
-            details = details_with_context
-        
-        # Log the error
-        logger.error(f"Exception: {exception.__class__.__name__}: {message}")
-        logger.debug(f"Traceback: {tb}")
-        
-        return self.log_error(error_type, message, details)
+    return decorator
+
+def handle_api_errors(func: Callable) -> Callable:
+    """
+    Decorator to handle API-related errors gracefully.
     
-    def log_invalid_api_response(self, endpoint: str, response: Any, expected_schema: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Log an invalid API response for later analysis.
+    Args:
+        func: Function to decorate
         
-        Args:
-            endpoint: API endpoint that returned the response
-            response: The invalid response
-            expected_schema: The expected response schema
-            
-        Returns:
-            Error response dictionary
-        """
-        # Create a filename with timestamp
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        filename = f"{timestamp}_{endpoint.replace('/', '_')}.json"
-        filepath = os.path.join(self.invalid_api_log_dir, filename)
-        
-        # Prepare log data
-        log_data = {
-            'timestamp': datetime.utcnow().isoformat(),
-            'endpoint': endpoint,
-            'response': response
-        }
-        
-        if expected_schema:
-            log_data['expected_schema'] = expected_schema
-        
-        # Write to log file
+    Returns:
+        Decorated function
+    """
+    @wraps(func)
+    def wrapper(*args, **kwargs):
         try:
-            with open(filepath, 'w') as f:
-                json.dump(log_data, f, indent=2)
-            logger.info(f"Invalid API response logged to {filepath}")
+            return func(*args, **kwargs)
         except Exception as e:
-            logger.error(f"Failed to log invalid API response: {str(e)}")
+            logger.error(f"API error in {func.__name__}: {str(e)}")
+            # Return a safe default value based on the function's expected return type
+            return kwargs.get('default_return', {})
+    
+    return wrapper
+
+def check_api_keys(required_keys: List[str]) -> bool:
+    """
+    Check if required API keys are present in environment variables.
+    
+    Args:
+        required_keys: List of required API key environment variable names
         
-        # Return error response
-        message = f"Invalid API response from {endpoint}"
-        return self.log_error('API_RESPONSE_ERROR', message, {'endpoint': endpoint})
+    Returns:
+        True if all keys are present, False otherwise
+    """
+    missing_keys = []
+    
+    for key in required_keys:
+        if not os.environ.get(key):
+            missing_keys.append(key)
+    
+    if missing_keys:
+        logger.warning(f"Missing API keys: {', '.join(missing_keys)}")
+        return False
+    
+    return True
 
-
-# Create a singleton instance
-error_handler = ErrorHandler()
+def request_api_key(key_name: str, service_name: str) -> None:
+    """
+    Log a message to request an API key.
+    
+    Args:
+        key_name: Name of the API key
+        service_name: Name of the service the key is for
+    """
+    logger.warning(f"Missing API key for {service_name}. Please set the {key_name} environment variable.")

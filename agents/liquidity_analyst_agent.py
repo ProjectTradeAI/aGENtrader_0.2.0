@@ -105,28 +105,49 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         data_sources = self.agent_config.get("data_sources", [])
         result = {}
         
-        # Connect to database
-        if not self.db.connect():
-            self.logger.error("Failed to connect to database")
-            return {}
+        # Connect to database - in demo mode, we'll proceed even if connection fails
+        try:
+            self.db.connect()
+        except Exception as e:
+            self.logger.warning(f"Database connection issue: {e}. Will proceed with limited data.")
         
         # Fetch data from each source
         try:
             if "market_depth" in data_sources:
-                result["market_depth"] = self.db.get_market_depth(symbol, interval, limit)
-                self.logger.info(f"Fetched {len(result['market_depth'])} market depth records")
+                try:
+                    # Ensure we have non-null values for the parameters
+                    sym = str(symbol) if symbol is not None else str(self.default_symbol)
+                    intv = str(interval) if interval is not None else str(self.default_interval)
+                    result["market_depth"] = self.db.get_market_depth(sym, intv, limit)
+                    self.logger.info(f"Fetched {len(result['market_depth'])} market depth records")
+                except Exception as e:
+                    self.logger.warning(f"Could not fetch market depth data: {e}")
+                    result["market_depth"] = []
             
             if "volume_profile" in data_sources:
-                # For volume profile, we'll use a shorter time period
-                result["volume_profile"] = self.db.get_volume_profile(symbol, interval, "24h", limit)
-                self.logger.info(f"Fetched {len(result['volume_profile'])} volume profile records")
+                try:
+                    # Ensure we have non-null values for the parameters
+                    sym = str(symbol) if symbol is not None else str(self.default_symbol)
+                    intv = str(interval) if interval is not None else str(self.default_interval)
+                    # For volume profile, we'll use a shorter time period
+                    result["volume_profile"] = self.db.get_volume_profile(sym, intv, "24h", limit)
+                    self.logger.info(f"Fetched {len(result['volume_profile'])} volume profile records")
+                except Exception as e:
+                    self.logger.warning(f"Could not fetch volume profile data: {e}")
+                    result["volume_profile"] = []
             
             if "funding_rates" in data_sources:
-                result["funding_rates"] = self.db.get_funding_rates(symbol, limit)
-                self.logger.info(f"Fetched {len(result.get('funding_rates', []))} funding rate records")
+                try:
+                    # Ensure we have non-null values for the parameters
+                    sym = str(symbol) if symbol is not None else str(self.default_symbol)
+                    result["funding_rates"] = self.db.get_funding_rates(sym, limit)
+                    self.logger.info(f"Fetched {len(result.get('funding_rates', []))} funding rate records")
+                except Exception as e:
+                    self.logger.warning(f"Could not fetch funding rates data: {e}")
+                    result["funding_rates"] = []
         
         except Exception as e:
-            self.logger.error(f"Error fetching data: {e}")
+            self.logger.warning(f"Error fetching liquidity data: {e}. Will continue with limited analysis.")
         
         finally:
             # Disconnect from database

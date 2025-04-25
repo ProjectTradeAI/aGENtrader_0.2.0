@@ -447,11 +447,14 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         # Check if we have data
         if not raw_data or all(df.empty for df in raw_data.values() if hasattr(df, 'empty')):
             self.logger.warning(f"No data available for {symbol} at {interval} interval")
-            return self.validate_result({
+            return {
                 "symbol": symbol,
                 "interval": interval,
-                "error": "No data available for analysis"
-            })
+                "error": "No data available for analysis",
+                "signal": "NEUTRAL",  # Default to NEUTRAL on error
+                "confidence": 0,
+                "reason": "No liquidity data available for analysis"
+            }
         
         # Step 2: Preprocess data
         processed_data = self.preprocess_data(raw_data)
@@ -466,15 +469,38 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         result = {
             "symbol": symbol,
             "interval": interval,
-            "timestamp": self.format_timestamp(),
+            "timestamp": datetime.now().isoformat(),
             "rule_analysis": rule_analysis,
             "llm_analysis": llm_analysis
         }
         
         self.logger.info(f"Completed liquidity analysis for {symbol}")
         
-        # Validate and return the result
-        return self.validate_result(result)
+        # Add signal, confidence and reason for decision agent
+        if "llm_analysis" in result and "sentiment" in result["llm_analysis"]:
+            sentiment = result["llm_analysis"]["sentiment"]
+            if sentiment == "bullish":
+                signal = "BUY"
+                confidence = 70
+            elif sentiment == "bearish":
+                signal = "SELL"
+                confidence = 70
+            else:
+                signal = "NEUTRAL"
+                confidence = 50
+            
+            reason = result["llm_analysis"].get("summary", "Liquidity analysis completed")
+        else:
+            signal = "NEUTRAL"
+            confidence = 30
+            reason = "Limited liquidity data available"
+        
+        # Add required fields
+        result["signal"] = signal
+        result["confidence"] = confidence
+        result["reason"] = reason
+        
+        return result
 
 # Example usage (for demonstration)
 if __name__ == "__main__":

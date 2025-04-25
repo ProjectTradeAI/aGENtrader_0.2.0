@@ -188,3 +188,27 @@ class LLMClient:
                 "message": str(e),
                 "status": "error"
             }
+            
+    def generate(self, prompt: str, **kwargs) -> str:
+        """
+        Generate a response from the LLM (simplified interface for DecisionAgent).
+        
+        Args:
+            prompt: The prompt to send to the LLM
+            **kwargs: Additional parameters to pass to query()
+            
+        Returns:
+            The generated text as a string
+        """
+        response = self.query(prompt, **kwargs)
+        
+        if response.get("status") == "success":
+            content = response.get("content", "")
+            if isinstance(content, dict):
+                # If content is a dictionary (from JSON response), return it as a string
+                return json.dumps(content)
+            return content
+        else:
+            error_msg = response.get("message", "Unknown error")
+            logger.error(f"Error generating response: {error_msg}")
+            return f"Error: {error_msg}"

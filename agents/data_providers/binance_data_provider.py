@@ -198,9 +198,12 @@ class BinanceDataProvider:
         # Map interval if needed
         mapped_interval = self.INTERVAL_MAP.get(interval, interval)
         
+        # Format symbol correctly (remove "/" if present, e.g., "BTC/USDT" -> "BTCUSDT")
+        formatted_symbol = symbol.replace("/", "")
+        
         # Prepare parameters
         params = {
-            "symbol": symbol,
+            "symbol": formatted_symbol,
             "interval": mapped_interval,
             "limit": limit
         }

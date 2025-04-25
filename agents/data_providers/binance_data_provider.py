@@ -10,7 +10,7 @@ import hmac
 import hashlib
 import logging
 import urllib.parse
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 import requests
 
 # Configure logging
@@ -111,7 +111,7 @@ class BinanceDataProvider:
         method: str = "GET", 
         params: Optional[Dict[str, Any]] = None,
         signed: bool = False
-    ) -> Dict[str, Any]:
+    ) -> Union[Dict[str, Any], List[Any]]:
         """
         Make a request to the Binance API with error handling.
         
@@ -175,7 +175,7 @@ class BinanceDataProvider:
                         elif endpoint == "/api/v3/ticker/price":
                             return {"price": "0.0"}  # Return zero price
                         elif endpoint == "/api/v3/ticker/24hr":
-                            return {}  # Return empty dict
+                            return {}  # Return empty dict as appropriate for the endpoint
                 except:
                     pass  # If we can't parse the error, continue with normal handling
             

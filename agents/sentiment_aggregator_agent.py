@@ -103,19 +103,6 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             
             execution_time = time.time() - start_time
             
-            # Prepare response
-            results = {
-                "agent": self.name,
-                "timestamp": datetime.now().isoformat(),
-                "symbol": symbol,
-                "sentiment_score": sentiment_result["rating"],
-                "confidence": sentiment_result["confidence"],
-                "analysis_summary": sentiment_result["summary"],
-                "sentiment_signals": sentiment_result["signals"],
-                "execution_time_seconds": execution_time,
-                "status": "success"
-            }
-            
             # Map sentiment score to trading signal
             sentiment_score = sentiment_result["rating"]
             confidence_pct = int(sentiment_result["confidence"] * 100)
@@ -126,6 +113,20 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 signal = "SELL"
             else:  # Neutral
                 signal = "NEUTRAL"
+                
+            # Prepare response
+            results = {
+                "agent": self.name,
+                "timestamp": datetime.now().isoformat(),
+                "symbol": symbol,
+                "sentiment_score": sentiment_result["rating"],
+                "confidence": confidence_pct,  # Use the percentage form for consistency
+                "signal": signal,  # Add signal field for DecisionAgent
+                "analysis_summary": sentiment_result["summary"],
+                "sentiment_signals": sentiment_result["signals"],
+                "execution_time_seconds": execution_time,
+                "status": "success"
+            }
                 
             # Log decision summary
             try:

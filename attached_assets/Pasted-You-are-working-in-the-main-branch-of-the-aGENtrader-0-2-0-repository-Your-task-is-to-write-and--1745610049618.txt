@@ -1,0 +1,76 @@
+You are working in the `main` branch of the aGENtrader_0.2.0 repository.
+
+Your task is to write and execute a series of test scripts to validate the system's robustness against edge cases. These test cases should be self-contained and saved to a temporary test folder to avoid cluttering the workspace.
+
+---
+
+### 📁 Temporary Folder
+Create:
+temp/edge_case_tests/
+
+yaml
+Copy
+Edit
+
+After tests are completed and verified, this folder can be deleted safely.
+
+---
+
+### ✅ Test Scripts to Implement
+
+#### 1. `test_incomplete_ohlcv_data.py`
+- Simulate BinanceDataProvider returning only 2 candles instead of expected 20
+- Confirm system handles this gracefully (e.g. returns HOLD or logs a fallback warning)
+
+#### 2. `test_agent_timeout.py`
+- Simulate one of the agents (e.g. `SentimentAggregatorAgent`) returning `None` or failing
+- Confirm `DecisionAgent` still produces a result or gracefully defaults
+
+#### 3. `test_conflicting_high_confidence_signals.py`
+- Manually feed:
+```python
+{
+    "technical_analysis": {"action": "BUY", "confidence": 90},
+    "sentiment_analysis": {"action": "SELL", "confidence": 85}
+}
+Ensure LLM or weight logic resolves it clearly and logs the reason
+
+4. test_missing_confidence.py
+Pass a valid agent decision without a confidence key
+
+Confirm schema validation kicks in and error is handled without crashing
+
+5. test_risk_veto_but_sizer_runs.py
+Mock a trade where RiskGuardAgent vetoes the trade
+
+Ensure PositionSizerAgent does not execute in that case
+
+6. test_database_unavailable.py
+Simulate liquidity or sentiment data fetch throwing an exception
+
+Ensure fallback logging or default_reason is used and no crash occurs
+
+🔁 Logging & Output
+Each script should:
+
+Print pass/fail for each test
+
+Write to logs/edge_test_results.logl
+
+Log errors in human-readable format with timestamps
+
+✅ Cleanup Instructions
+After testing is complete:
+
+Archive test scripts to archive/ or safely delete temp/edge_case_tests/
+
+Final test results will remain in logs/edge_test_results.logl for historical reference
+
+✅ Acceptance Criteria:
+All 6 scripts simulate their test case correctly
+
+System passes all scenarios without crashing
+
+Logs reflect fallback behavior, errors, or default decisions
+
+Scripts live in a temp/ folder and do not clutter the root repo

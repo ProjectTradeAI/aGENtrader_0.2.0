@@ -26,7 +26,7 @@ class BinanceDataProvider:
     """
     
     BASE_URL = "https://api.binance.com"
-    TESTNET_URL = "https://testnet.binance.vision/api"
+    TESTNET_URL = "https://testnet.binance.vision"
     
     INTERVAL_MAP = {
         "1m": "1m",
@@ -83,6 +83,9 @@ class BinanceDataProvider:
         Returns:
             HMAC signature as hex string
         """
+        if not self.api_secret:
+            raise ValueError("API secret is required for authenticated requests")
+            
         query_string = urllib.parse.urlencode(params)
         signature = hmac.new(
             self.api_secret.encode('utf-8'),

@@ -519,9 +519,22 @@ def main():
         logger.info("Initializing system components...")
         
         # Initialize data provider
-        use_testnet = os.getenv("BINANCE_USE_TESTNET", "false").lower() == "true"
-        data_provider = BinanceDataProvider(api_key=binance_key, api_secret=binance_secret, use_testnet=use_testnet)
-        logger.info(f"Binance Data Provider initialized (Testnet: {use_testnet})")
+        try:
+            use_testnet = os.getenv("BINANCE_USE_TESTNET", "false").lower() == "true"
+            data_provider = BinanceDataProvider(api_key=binance_key, api_secret=binance_secret, use_testnet=use_testnet)
+            
+            # Test provider with a simple ping request
+            data_provider._make_request("/api/v3/ping")
+            logger.info(f"Binance Data Provider initialized (Testnet: {use_testnet})")
+        except Exception as e:
+            if args.mode == "demo":
+                logger.warning(f"Binance API access failed: {str(e)}")
+                logger.warning("Running in demo mode with simulated data")
+                from agents.data_providers.mock_data_provider import MockDataProvider
+                data_provider = MockDataProvider(symbol=args.symbol)
+                logger.info("Mock Data Provider initialized for demo mode")
+            else:
+                raise
         
         # Initialize trade book manager
         trade_book_manager = TradeBookManager()

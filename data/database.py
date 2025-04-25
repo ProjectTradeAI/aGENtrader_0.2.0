@@ -463,6 +463,69 @@ class DatabaseConnector:
             logger.error(f"Error logging decision: {str(e)}", exc_info=True)
             return None
             
+    def get_market_depth(self, symbol: str, interval: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get market depth data for a symbol.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of market depth records
+        """
+        try:
+            # In a real implementation, this would query a table with order book snapshots
+            # For now, we'll just return an empty list
+            logger.warning(f"get_market_depth not fully implemented yet for {symbol}")
+            return []
+        except Exception as e:
+            logger.error(f"Error getting market depth: {str(e)}", exc_info=True)
+            return []
+    
+    def get_volume_profile(self, symbol: str, interval: str, time_frame: str = "24h", limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get volume profile data for a symbol.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            time_frame: Time frame to analyze (e.g., "24h", "7d")
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of volume profile records
+        """
+        try:
+            # In a real implementation, this would calculate volume by price levels
+            # For now, we'll just return an empty list
+            logger.warning(f"get_volume_profile not fully implemented yet for {symbol}")
+            return []
+        except Exception as e:
+            logger.error(f"Error getting volume profile: {str(e)}", exc_info=True)
+            return []
+    
+    def get_funding_rates(self, symbol: str, limit: int = 100) -> List[Dict[str, Any]]:
+        """
+        Get funding rates for a symbol.
+        
+        Args:
+            symbol: Trading symbol
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of funding rate records
+        """
+        try:
+            # In a real implementation, this would query a table with funding rates
+            # For now, we'll just return an empty list
+            logger.warning(f"get_funding_rates not fully implemented yet for {symbol}")
+            return []
+        except Exception as e:
+            logger.error(f"Error getting funding rates: {str(e)}", exc_info=True)
+            return []
+    
     def get_recent_decisions(self, symbol: Optional[str] = None, limit: int = 10) -> List[Dict[str, Any]]:
         """
         Get recent trading decisions.

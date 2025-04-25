@@ -26,7 +26,7 @@ class BinanceDataProvider:
     """
     
     BASE_URL = "https://api.binance.com"
-    TESTNET_URL = "https://testnet.binance.vision"
+    TESTNET_URL = "https://testnet.binance.vision/api"
     
     INTERVAL_MAP = {
         "1m": "1m",

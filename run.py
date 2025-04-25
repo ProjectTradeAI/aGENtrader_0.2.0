@@ -519,8 +519,9 @@ def main():
         logger.info("Initializing system components...")
         
         # Initialize data provider
-        data_provider = BinanceDataProvider()
-        logger.info("Binance Data Provider initialized")
+        use_testnet = os.getenv("BINANCE_USE_TESTNET", "false").lower() == "true"
+        data_provider = BinanceDataProvider(api_key=binance_key, api_secret=binance_secret, use_testnet=use_testnet)
+        logger.info(f"Binance Data Provider initialized (Testnet: {use_testnet})")
         
         # Initialize trade book manager
         trade_book_manager = TradeBookManager()

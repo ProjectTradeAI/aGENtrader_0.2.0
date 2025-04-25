@@ -64,7 +64,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
     def __init__(self):
         """Initialize the Liquidity Analyst Agent."""
         # Initialize the base agent
-        super().__init__(agent_name="liquidity_analyst")
+        super().__init__()
         
         # Get agent and trading configuration
         self.agent_config = self.get_agent_config()

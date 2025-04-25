@@ -13,8 +13,8 @@ import requests
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from base_agent import BaseAnalystAgent
-from decision_logger import decision_logger
+from agents.base_agent import BaseAnalystAgent
+from core.logging.decision_logger import decision_logger
 
 # Configure logging
 logging.basicConfig(

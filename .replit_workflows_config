@@ -1,2 +1,1 @@
-Start application
-python main.py --mode=test --symbol=BTC/USD --interval=1h
+{"workflows":[{"name":"Start application","command":"python run.py --mode=demo","primary":true}]}

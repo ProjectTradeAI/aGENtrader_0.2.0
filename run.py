@@ -30,6 +30,8 @@ from agents.data_providers.binance_data_provider import BinanceDataProvider
 from agents.base_agent import BaseAnalystAgent
 from agents.technical_analyst_agent import TechnicalAnalystAgent
 from agents.sentiment_aggregator_agent import SentimentAggregatorAgent
+from agents.liquidity_analyst_agent import LiquidityAnalystAgent
+from agents.decision_agent import DecisionAgent
 
 # Import the decision logger
 from core.logging.decision_logger import DecisionLogger, decision_logger
@@ -366,6 +368,23 @@ def run_sentiment_analysis(symbol, interval, data_provider=None):
         logging.error(f"Error in sentiment analysis: {str(e)}", exc_info=True)
         return {"error": str(e), "status": "error"}
 
+def run_liquidity_analysis(symbol, interval, data_provider):
+    """Run liquidity analysis and log the results."""
+    try:
+        # Initialize the liquidity analyst agent - note that it doesn't need a data_provider in constructor
+        liquidity_agent = LiquidityAnalystAgent()
+        
+        # Perform analysis
+        result = liquidity_agent.analyze(symbol=symbol, interval=interval)
+        
+        # Log the decision
+        decision_logger.create_summary_from_result("LiquidityAnalystAgent", result, symbol)
+        
+        return result
+    except Exception as e:
+        logging.error(f"Error in liquidity analysis: {str(e)}", exc_info=True)
+        return {"error": str(e), "status": "error"}
+
 def process_trading_decision(symbol, interval, data_provider, trade_book_manager, risk_guard):
     """Process trading decisions from all agents and execute trades if approved."""
     try:
@@ -378,24 +397,49 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
         # Run sentiment analysis
         sentiment_result = run_sentiment_analysis(symbol, interval, data_provider)
         
-        # Create trade proposal
+        # Run liquidity analysis
+        liquidity_result = run_liquidity_analysis(symbol, interval, data_provider)
+        
+        # Combine all agent analyses into a single dictionary for the DecisionAgent
+        agent_analyses = {
+            "technical_analysis": ta_result,
+            "sentiment_analysis": sentiment_result, 
+            "liquidity_analysis": liquidity_result
+        }
+        
+        # Log which agents are contributing to the decision
+        active_agents = [key for key, value in agent_analyses.items() 
+                         if isinstance(value, dict) and not value.get("error")]
+        logging.info(f"✅ Decision using: {', '.join(active_agents)}")
+        
+        # Initialize the DecisionAgent and make a decision
+        decision_agent = DecisionAgent()
+        decision = decision_agent.make_decision(agent_analyses, symbol=symbol, interval=interval)
+        
+        # Create trade proposal based on the integrated decision
+        confidence = decision.get("confidence", 0)
+        if not isinstance(confidence, (int, float)):
+            confidence = 0
+        
         trade_proposal = {
             "timestamp": datetime.now().isoformat(),
             "symbol": symbol,
             "interval": interval,
             "price": current_price,
-            "type": ta_result.get("signal", "NEUTRAL"),
-            "confidence": ta_result.get("confidence", 50),
-            "position_size": ta_result.get("confidence", 50) / 100 * 0.1,  # Scale position size by confidence
+            "type": decision.get("action", "HOLD"),
+            "confidence": confidence,
+            "position_size": float(confidence) / 100.0 * 0.1,  # Scale position size by confidence
+            "reason": decision.get("reason", "No reason provided"),
             "technical_signals": ta_result.get("indicators", []),
             "sentiment_score": sentiment_result.get("sentiment_score", 3),
-            "sentiment_signals": sentiment_result.get("sentiment_signals", [])
+            "sentiment_signals": sentiment_result.get("sentiment_signals", []),
+            "decision_method": decision.get("decision_method", "unknown")
         }
         
         # Evaluate trade with risk guard
         risk_evaluation = risk_guard.evaluate_trade(trade_proposal)
         
-        if risk_evaluation["approved"]:
+        if risk_evaluation["approved"] and trade_proposal["type"] in ["BUY", "SELL"]:
             # Record approved trade
             trade_book_manager.record_trade(trade_proposal)
             
@@ -410,20 +454,28 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
                 "simulated_profit_loss": 0.01 if trade_proposal["type"] == "BUY" else -0.01,
                 "technical_confidence": ta_result.get("confidence", 50),
                 "sentiment_score": sentiment_result.get("sentiment_score", 3),
+                "contributing_agents": active_agents
             }
             
             trade_book_manager.record_performance(performance_data)
             
             logging.info(f"Trade executed: {trade_proposal['type']} {symbol} @ {current_price}")
+            logging.info(f"Reasoning: {trade_proposal['reason']}")
             
         else:
-            # Record rejected trade
-            trade_book_manager.record_rejected_trade(trade_proposal, risk_evaluation["reason"])
-            logging.info(f"Trade rejected: {trade_proposal['type']} {symbol} - Reason: {risk_evaluation['reason']}")
+            # Record rejected trade or HOLD decision
+            if trade_proposal["type"] == "HOLD":
+                logging.info(f"HOLD decision for {symbol} @ {current_price}")
+                logging.info(f"Reasoning: {trade_proposal['reason']}")
+            else:
+                trade_book_manager.record_rejected_trade(trade_proposal, risk_evaluation["reason"])
+                logging.info(f"Trade rejected: {trade_proposal['type']} {symbol} - Reason: {risk_evaluation['reason']}")
             
         return {
             "trade_proposal": trade_proposal,
+            "decision": decision,
             "risk_evaluation": risk_evaluation,
+            "agent_analyses": agent_analyses,
             "status": "success"
         }
         

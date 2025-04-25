@@ -1,0 +1,76 @@
+You’re working in the main branch of the new `aGENtrader_0.2.0` repository.
+
+Your task is to fix the current disconnect between the agents (technical, sentiment, liquidity) and the `DecisionAgent`.
+
+Although the `DecisionAgent.make_decision()` method supports multi-agent input, only technical analysis is currently being passed. This limits intelligence, confidence blending, and LLM-based synthesis.
+
+---
+
+### ✅ Objective:
+Ensure that all active agent outputs are passed to `DecisionAgent.make_decision()` in a single unified dictionary, allowing the agent to:
+
+- Integrate all signals (technical, sentiment, liquidity)
+- Use proper decision logic blending
+- Log all contributions correctly
+- Trigger LLM-based synthesis when appropriate
+
+---
+
+### 📁 Tasks
+
+#### 1. Identify Orchestrator Entry Point
+Locate the script or module that currently runs the full decision cycle:
+Likely in:
+scripts/run_live_cycle.py scripts/run_test_cycle.py or main.py
+
+css
+Copy
+Edit
+
+#### 2. Gather Agent Outputs
+Collect outputs from:
+```python
+technical_result = TechnicalAnalystAgent().analyze(...)
+sentiment_result = SentimentAggregatorAgent().analyze(...)
+liquidity_result = LiquidityAnalystAgent().analyze(...)
+3. Call DecisionAgent with Multi-Agent Input
+Replace any direct calls like:
+
+python
+Copy
+Edit
+DecisionAgent().make_decision(technical_result)
+With:
+
+python
+Copy
+Edit
+DecisionAgent().make_decision({
+    "technical_analysis": technical_result,
+    "sentiment_analysis": sentiment_result,
+    "liquidity_analysis": liquidity_result
+})
+4. Ensure Logging is Called
+Immediately after .make_decision(), call:
+
+python
+Copy
+Edit
+agent.log_decision(final_decision, input_agents)
+Pass the same agent input dictionary used for the decision.
+
+5. Add Runtime Logging
+Log that all agents are contributing to decisions:
+
+text
+Copy
+Edit
+✅ Decision made using TechnicalAnalystAgent, SentimentAggregatorAgent, LiquidityAnalystAgent
+✅ Acceptance Criteria:
+DecisionAgent receives and processes inputs from all three agent types
+
+LLM synthesis is activated when conflicting signals are detected
+
+log_decision() creates full summaries per decision
+
+No agent is skipped unless disabled via config

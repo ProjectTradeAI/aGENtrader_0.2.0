@@ -1,13 +1,24 @@
 FROM python:3.11-slim
 
+# Accept build arguments for versioning
+ARG VERSION="v0.2.0"
+ARG BUILD_DATE="2025-04-25T00:00:00Z"
+
+# Set metadata labels
 LABEL maintainer="aGENtrader Support <support@agentrader.ai>"
 LABEL description="aGENtrader v2 - Advanced multi-agent AI trading system"
-LABEL version="2.0.0"
+LABEL version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.authors="aGENtrader Team"
+LABEL org.opencontainers.image.url="https://github.com/ProjectTradeAI/aGENtrader_0.2.0"
+LABEL org.opencontainers.image.documentation="https://github.com/ProjectTradeAI/aGENtrader_0.2.0/blob/main/README.md"
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="${PYTHONPATH}:/app"
+ENV AGENTRADER_VERSION="${VERSION}"
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -21,10 +32,10 @@ WORKDIR /app
 RUN mkdir -p /app/logs
 
 # Copy requirements first for better caching
-COPY agentrader_v2_requirements.txt /app/
+COPY requirements.txt /app/
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r agentrader_v2_requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . /app/
@@ -35,7 +46,7 @@ RUN chown -R agentrader:agentrader /app
 USER agentrader
 
 # Set up entrypoint
-ENTRYPOINT ["python", "-m", "aGENtrader_v2.run"]
+ENTRYPOINT ["python", "run.py"]
 
 # Default command with arguments
-CMD ["--mode", "test", "--symbol", "BTC/USDT", "--interval", "1h", "--duration", "24h", "--config", "config/default.json"]
+CMD ["--mode", "test", "--symbol", "BTC/USDT", "--interval", "1h", "--duration", "24h"]

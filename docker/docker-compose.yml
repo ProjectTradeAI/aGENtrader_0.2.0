@@ -2,17 +2,30 @@ version: '3.8'
 
 services:
   aGENtrader:
-    image: aGENtrader:production
+    image: aGENtrader:${VERSION:-latest}
     container_name: aGENtrader_production
     restart: unless-stopped
     env_file:
-      - .env
+      - ../.env
+    environment:
+      - VERSION=${VERSION:-latest}
     volumes:
-      - ./logs:/app/logs
-      - ./reports:/app/reports
-      - ./trades:/app/trades
-      - ./config:/app/config
+      - ../logs:/app/logs
+      - ../reports:/app/reports
+      - ../trades:/app/trades
+      - ../config:/app/config
+      - ../data:/app/data
     command: >
-      bash -c 'mkdir -p /app/logs /app/reports /app/trades /app/config &&
-               chmod -R 777 /app/logs /app/reports /app/trades /app/config &&
-               python main.py'
+      bash -c 'mkdir -p /app/logs /app/reports /app/trades /app/config /app/data &&
+               chmod -R 777 /app/logs /app/reports /app/trades /app/config /app/data &&
+               echo "Starting aGENtrader version: ${VERSION:-latest}" &&
+               python run.py --mode=test --symbol=BTC/USDT --interval=1h'
+    # Automatically restart if container exits with non-zero status
+    restart: unless-stopped
+    # Health check to verify the container is running properly
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; print('Health check passed'); exit(0 if os.path.exists('/app/logs/decision_summary.logl') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s

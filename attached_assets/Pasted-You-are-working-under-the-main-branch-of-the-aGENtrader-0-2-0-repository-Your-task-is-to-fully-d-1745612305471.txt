@@ -1,0 +1,80 @@
+You are working under the `main` branch of the aGENtrader_0.2.0 repository.
+
+Your task is to fully diagnose, fix, and validate the deployment pipeline to ensure that development updates flow seamlessly from Replit → GitHub → EC2 → Dockerized production system.
+
+---
+
+### 🎯 Objectives:
+
+✅ Ensure Replit can:
+- Commit and push to GitHub without permission errors
+- Pull latest changes into EC2 securely
+
+✅ Ensure EC2 can:
+- Authenticate with GitHub (SSH deploy key or personal token method)
+- Pull latest Git commits
+- Rebuild and restart Docker containers from the updated code
+
+✅ Validate:
+- Docker is running the correct code version
+- System health check passes (Binance data connected, agents active, logs writing)
+
+---
+
+### 🛠️ Tasks:
+
+#### 1. Fix GitHub Push from Replit
+- Confirm SSH key exists for Replit Git access:
+  - If missing, generate new SSH keypair inside Replit and add public key to GitHub repo deploy keys (with Write permission).
+- Confirm `.git/config` uses `git@github.com:ProjectTradeAI/aGENtrader_0.2.0.git` format, not HTTPS.
+
+#### 2. Fix GitHub Pull from EC2
+- Confirm EC2 can authenticate with GitHub:
+  - Check if `/home/ubuntu/.ssh/id_rsa` exists and has correct private key.
+  - Add GitHub to known_hosts:
+    ```bash
+    ssh-keyscan github.com >> ~/.ssh/known_hosts
+    ```
+
+#### 3. Update `deployment/deploy_ec2.sh`
+- Modify script to:
+  - SSH into EC2 using secrets
+  - Run:
+    ```bash
+    cd ~/aGENtrader
+    git pull origin main
+    docker-compose down
+    docker-compose build --no-cache
+    docker-compose up -d
+    ```
+  - Print deployment success summary
+
+#### 4. Implement Docker Image Versioning
+- Modify `build_image.sh` and `docker-compose.yml` to tag Docker images using Git tags like:
+agen_trader:v0.2.0
+
+yaml
+Copy
+Edit
+
+#### 5. Validate Deployment
+- After `docker-compose up`, execute `deployment/validate_deployment.py`
+- Validate:
+- BinanceDataProvider initialized
+- DecisionAgent started
+- Log files (e.g., decision_summary.logl) updated
+
+---
+
+### 📄 Additional Artifacts to Update
+- `DEPLOYMENT_GUIDE.md` (brief instructions on push-pull-deploy)
+- `.ssh/config` (optional convenience for multiple EC2 instances)
+
+---
+
+### ✅ Acceptance Criteria:
+- Replit can push cleanly to GitHub without manual intervention
+- EC2 can pull cleanly from GitHub via SSH
+- Docker containers are version-tagged and updated correctly
+- After deployment, validate_deployment.py passes all checks
+- System logs confirm agent activity without errors

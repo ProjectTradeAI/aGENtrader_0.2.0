@@ -1,0 +1,103 @@
+You are operating under the latest cleaned and structured deployment pipeline for aGENtrader_0.2.0.
+
+Your next task is to perform a full EC2 cleanup and fresh redeployment, ensuring that the entire deployment system works exactly as intended with no legacy data or leftover artifacts.
+
+---
+
+### 🎯 Objectives:
+
+✅ Wipe existing Docker containers, images, and volumes  
+✅ Remove old repo folders or cached files  
+✅ (Optional) If needed, reset EC2 instance to a new one  
+✅ Clone fresh codebase from GitHub (main branch, v0.2.0 tag or latest commit)  
+✅ Build Docker image cleanly using new scripts  
+✅ Start containers  
+✅ Validate system health with `validate_deployment.py`
+
+---
+
+### 📁 Tasks:
+
+#### 1. SSH into EC2
+Use stored secrets (`EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`).
+
+---
+
+#### 2. Full Docker Cleanup
+Run:
+```bash
+docker system prune -a --volumes -f
+This removes:
+
+All stopped containers
+
+All unused images
+
+All volumes
+
+All networks
+
+3. Remove Old Repo Folder
+If ~/aGENtrader/ exists:
+
+bash
+Copy
+Edit
+rm -rf ~/aGENtrader/
+4. (Optional) Reset EC2 Instance
+If desired, terminate the current EC2 instance
+
+Launch a new EC2 instance with identical settings (region, type, etc.)
+
+Reconnect via new IP and SSH key
+
+5. Fresh Repo Clone
+bash
+Copy
+Edit
+git clone git@github.com:ProjectTradeAI/aGENtrader_0.2.0.git ~/aGENtrader
+cd ~/aGENtrader
+git checkout main
+6. Build and Deploy Using Centralized Scripts
+bash
+Copy
+Edit
+bash deployment/build_image.sh
+bash deployment/deploy_ec2.sh
+Confirm:
+
+Image builds cleanly
+
+Docker container starts
+
+Correct Git version/tag is displayed inside container logs
+
+7. Run Deployment Validation
+Inside EC2:
+
+bash
+Copy
+Edit
+python3 deployment/validate_deployment.py
+Check:
+
+Binance Data Provider initialized
+
+DecisionAgent active
+
+Logging to logs/decision_summary.logl
+
+Agents making decisions successfully
+
+✅ Acceptance Criteria:
+EC2 running fresh, clean aGENtrader deployment
+
+Docker container using correct version tag (e.g., v0.2.0)
+
+Logs created correctly (decisions, trades, sentiment)
+
+Health validation passed
+
+No artifacts from older deployments present
+
+(Optional) Ready to tag this deployment as v0.2.1-alpha

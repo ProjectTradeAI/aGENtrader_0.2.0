@@ -65,17 +65,54 @@ python run.py
 python main.py
 ```
 
-### Deployment
+### Deployment & Operations
 
-Deployment scripts are available in the deployment directory:
+The system includes robust deployment, rollback, and verification tools:
 
 ```bash
+# Standard deployment to EC2
+./deployment/deploy_ec2.sh
+
+# Clean deployment (full wipe and fresh install)
+./deployment/clean_deploy_ec2.sh
+
 # Local deployment
 ./deployment/deploy_local.sh
 
-# EC2 deployment
-./deployment/deploy_ec2.sh
+# Rollback to previous version
+./deployment/rollback_ec2.sh
+
+# Validate deployment
+python deployment/validate_deployment.py
+
+# Test deployment & rollback flow
+./deployment/test_deployment_flow.sh
+
+# Verify versioning system integrity
+python deployment/verify_versioning.py
 ```
+
+#### Versioning System
+
+The aGENtrader platform uses Git tags and commit hashes for versioning:
+
+- Each release is tagged with a version (e.g., `v0.2.0`)
+- Docker images are built with version information through build arguments
+- Rollbacks can target any specific version or commit hash
+- Version information is accessible at runtime for monitoring and logging
+
+#### Rollback System
+
+The platform includes a comprehensive rollback mechanism:
+
+1. **Automated Rollback**: Use `rollback_ec2.sh` script to revert to any previous version
+2. **Testing**: Use `test_deployment_flow.sh` to validate rollback processes
+3. **Verification**: Automated health checks run after rollback to ensure system integrity
+4. **Documentation**: See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed procedures
+
+For detailed information on deployments and rollbacks, see:
+- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Complete deployment procedures
+- [docs/ROLLBACK_PROCEDURE.md](docs/ROLLBACK_PROCEDURE.md) - Comprehensive rollback documentation
 
 ## Important Notes
 

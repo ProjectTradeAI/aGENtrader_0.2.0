@@ -2,13 +2,15 @@
 aGENtrader v2 LLM Client
 
 This module provides a client for interacting with large language models.
+It supports both API-based providers (Grok, OpenAI) and local Mixtral via Ollama.
 """
 
 import os
 import json
 import logging
 import requests
-from typing import Dict, Any, List, Optional
+import time
+from typing import Dict, Any, List, Optional, Union, Tuple
 
 # Configure logging
 logging.basicConfig(
@@ -21,46 +23,109 @@ class LLMClient:
     """
     Client for interacting with large language models.
     
-    This client supports multiple LLM providers and handles API requests,
-    prompt formatting, and response parsing.
+    This client supports multiple LLM providers including:
+    - Local Mixtral via Ollama (preferred for cost efficiency and privacy)
+    - Grok API (xAI)
+    - OpenAI API
+    
+    It handles API requests, prompt formatting, and response parsing.
     """
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    # Default providers and endpoints from environment or config
+    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'local')
+    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mixtral')
+    DEFAULT_ENDPOINT = os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434')
+    
+    def __init__(self, 
+                 provider: Optional[str] = None, 
+                 model: Optional[str] = None,
+                 endpoint: Optional[str] = None,
+                 config: Optional[Dict[str, Any]] = None):
         """
         Initialize the LLM client.
         
         Args:
-            config: Configuration parameters
+            provider: Provider to use ('local', 'grok', 'openai')
+            model: Model name to use
+            endpoint: API endpoint for local provider
+            config: Additional configuration parameters
         """
         self.config = config or {}
         
-        # Default to Grok if available
-        self.default_provider = self.config.get('default_provider', 'grok')
+        # Set provider and model from parameters or defaults
+        self.provider = provider or self.config.get('provider', self.DEFAULT_PROVIDER)
+        self.model = model or self.config.get('model', self.DEFAULT_MODEL)
+        
+        # Configure Ollama for local Mixtral
+        self.ollama_enabled = self.provider == 'local'
+        self.ollama_endpoint = endpoint or self.config.get('endpoint', self.DEFAULT_ENDPOINT)
+        self.ollama_api_chat = f"{self.ollama_endpoint}/api/chat"
+        self.ollama_api_generate = f"{self.ollama_endpoint}/api/generate"
+        
+        # Test Ollama connection if local provider is selected
+        if self.ollama_enabled:
+            ollama_available = self._test_ollama_connection()
+            if not ollama_available:
+                logger.warning(f"Ollama not available at {self.ollama_endpoint}. Will try fallback providers.")
+                # Fallback to Grok if Ollama is not available
+                self.provider = 'grok'
         
         # Configure API keys
         self.api_keys = {
+            'local': None,  # Local Ollama doesn't need an API key
             'grok': os.environ.get('XAI_API_KEY'),
             'openai': os.environ.get('OPENAI_API_KEY')
         }
         
         # Configure API endpoints
         self.api_endpoints = {
+            'local': self.ollama_api_chat,
             'grok': 'https://api.x.ai/v1/chat/completions',
             'openai': 'https://api.openai.com/v1/chat/completions'
         }
         
-        # Configure models
-        self.models = {
-            'grok': 'grok-2-1212',
+        # Configure default models for each provider
+        self.default_models = {
+            'local': 'mixtral',
+            'grok': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212'),
             'openai': 'gpt-4-turbo'
         }
         
+        # Set the model based on provider
+        if not model:
+            provider_key = self.provider or 'local'
+            self.model = self.default_models.get(provider_key, 'mixtral')
+        
         # Log available providers
-        available_providers = [p for p, key in self.api_keys.items() if key]
+        available_providers = []
+        if self.ollama_enabled and self._test_ollama_connection():
+            available_providers.append('local')
+        available_providers.extend([p for p, key in self.api_keys.items() if key and p != 'local'])
+        
         if available_providers:
-            logger.info(f"LLM client initialized with providers: {', '.join(available_providers)}")
+            logger.info(f"LLM client initialized with: {self.provider}:{self.model}")
         else:
-            logger.warning("No LLM providers are configured. Set XAI_API_KEY or OPENAI_API_KEY environment variables.")
+            logger.warning("No LLM providers are available. Check Ollama setup or set API keys.")
+    
+    def _test_ollama_connection(self) -> bool:
+        """
+        Test if local Ollama server is running and responsive.
+        
+        Returns:
+            True if Ollama is available, False otherwise
+        """
+        try:
+            # Simple ping to Ollama API
+            response = requests.get(f"{self.ollama_endpoint}")
+            if response.status_code == 200:
+                logger.info(f"Local Ollama server is available at {self.ollama_endpoint}")
+                return True
+            else:
+                logger.warning(f"Local Ollama server returned error status: {response.status_code}")
+                return False
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Local Ollama server is not available: {str(e)}")
+            return False
             
     def query(self, 
               prompt: str, 
@@ -68,124 +133,302 @@ class LLMClient:
               system_prompt: Optional[str] = None,
               model: Optional[str] = None,
               json_response: bool = False,
-              max_tokens: int = 1000
+              max_tokens: int = 1000,
+              temperature: float = 0.7
              ) -> Dict[str, Any]:
         """
         Send a query to a language model.
         
         Args:
             prompt: User prompt
-            provider: Provider to use (grok, openai)
+            provider: Provider to use ('local', 'grok', 'openai')
             system_prompt: Optional system prompt
             model: Specific model to use
             json_response: Whether to request a JSON response
             max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0.0 to 1.0)
             
         Returns:
             Dictionary containing response and metadata
         """
         # Select provider
-        provider = provider or self.default_provider
+        provider_to_use = provider or self.provider
+        model_to_use = model or self.model or "mixtral"
         
-        # Check if provider is available
-        if not self.api_keys.get(provider):
-            available = [p for p, key in self.api_keys.items() if key]
+        # If local is requested but not available, fall back
+        if provider_to_use == 'local' and not self._test_ollama_connection():
+            fallbacks = [p for p, key in self.api_keys.items() if key and p != 'local']
+            if fallbacks:
+                logger.warning(f"Ollama not available, falling back to {fallbacks[0]}")
+                provider_to_use = fallbacks[0]
+                model_to_use = self.default_models.get(provider_to_use, "mixtral")
+            else:
+                return {
+                    "error": "Ollama not available and no fallback providers configured",
+                    "message": "Check Ollama server or set API keys for Grok/OpenAI",
+                    "status": "error"
+                }
+        
+        # For non-local providers, check API keys
+        if provider_to_use != 'local' and not self.api_keys.get(provider_to_use, None):
+            available = ['local'] if self._test_ollama_connection() else []
+            available.extend([p for p, key in self.api_keys.items() if key and p != 'local'])
+            
             if not available:
                 return {
                     "error": "No LLM providers available",
-                    "message": "Set XAI_API_KEY or OPENAI_API_KEY environment variables",
+                    "message": "Check Ollama or set API keys for Grok/OpenAI",
                     "status": "error"
                 }
             
-            logger.warning(f"Provider {provider} not available. Falling back to {available[0]}")
-            provider = available[0]
+            logger.warning(f"Provider {provider_to_use} not available. Falling back to {available[0]}")
+            provider_to_use = available[0]
+            model_to_use = self.default_models.get(provider_to_use, "mixtral")
             
         try:
-            # Select model
-            model = model or self.models.get(provider)
-            
-            # Create messages
-            messages = []
-            
-            if system_prompt:
-                messages.append({
-                    "role": "system",
-                    "content": system_prompt
-                })
-                
-            messages.append({
-                "role": "user",
-                "content": prompt
-            })
-            
-            # Create API payload
-            payload = {
-                "model": model,
-                "messages": messages,
-                "max_tokens": max_tokens
-            }
-            
-            # Add JSON response format if requested
-            if json_response:
-                payload["response_format"] = {"type": "json_object"}
-                
-            # Create headers
-            headers = {
-                "Authorization": f"Bearer {self.api_keys[provider]}",
-                "Content-Type": "application/json"
-            }
-            
-            # Send request
-            response = requests.post(
-                self.api_endpoints[provider],
-                headers=headers,
-                json=payload
-            )
-            
-            # Parse response
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Extract content based on provider
-                if provider == 'grok':
-                    content = data["choices"][0]["message"]["content"]
-                elif provider == 'openai':
-                    content = data["choices"][0]["message"]["content"]
-                else:
-                    content = "Unsupported provider"
-                    
-                # Parse JSON if requested
-                if json_response:
-                    try:
-                        content = json.loads(content)
-                    except json.JSONDecodeError:
-                        logger.error(f"Error parsing JSON response: {content}")
-                        return {
-                            "error": "JSON parsing error",
-                            "message": "The model did not return valid JSON",
-                            "status": "error"
-                        }
-                
-                # Return response
-                return {
-                    "content": content,
-                    "model": data.get("model", model),
-                    "provider": provider,
-                    "status": "success"
-                }
+            # Ollama has a different API format
+            if provider_to_use == 'local':
+                return self._query_ollama(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    model=model_to_use,
+                    json_response=json_response,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
             else:
-                logger.error(f"API error: {response.status_code} - {response.text}")
-                return {
-                    "error": f"API error ({response.status_code})",
-                    "message": response.text,
-                    "status": "error"
-                }
-                
+                # For Grok and OpenAI
+                return self._query_openai_compatible(
+                    prompt=prompt,
+                    provider=provider_to_use,
+                    system_prompt=system_prompt,
+                    model=model_to_use,
+                    json_response=json_response,
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                    
         except Exception as e:
             logger.error(f"Error querying LLM: {str(e)}", exc_info=True)
+            
+            # Try fallback providers
+            if provider == 'local':
+                fallbacks = [p for p, key in self.api_keys.items() if key and p != 'local']
+                if fallbacks:
+                    logger.warning(f"Ollama query failed, trying fallback: {fallbacks[0]}")
+                    return self.query(
+                        prompt=prompt,
+                        provider=fallbacks[0],
+                        system_prompt=system_prompt,
+                        model=None,  # Use default model for fallback provider
+                        json_response=json_response,
+                        max_tokens=max_tokens
+                    )
+                    
             return {
                 "error": "LLM query error",
                 "message": str(e),
+                "status": "error"
+            }
+    
+    def _query_ollama(self,
+                      prompt: str,
+                      system_prompt: Optional[str] = None,
+                      model: Optional[str] = "mixtral",
+                      json_response: bool = False,
+                      max_tokens: int = 1000,
+                      temperature: float = 0.7) -> Dict[str, Any]:
+        """
+        Query the Ollama API for local inference.
+        
+        Args:
+            prompt: User prompt
+            system_prompt: Optional system prompt
+            model: Model name in Ollama
+            json_response: Whether to request a JSON response
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0.0 to 1.0)
+            
+        Returns:
+            Dictionary containing response and metadata
+        """
+        # Create messages
+        messages = []
+        
+        if system_prompt:
+            messages.append({
+                "role": "system",
+                "content": system_prompt
+            })
+            
+        messages.append({
+            "role": "user",
+            "content": prompt
+        })
+        
+        # Add JSON formatting hint for structured responses
+        if json_response:
+            if system_prompt:
+                messages[0]["content"] += "\n\nYour response must be valid JSON only, with no other text."
+            else:
+                messages.insert(0, {
+                    "role": "system",
+                    "content": "Your response must be valid JSON only, with no other text."
+                })
+        
+        # Create API payload for Ollama
+        payload = {
+            "model": model,
+            "messages": messages,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
+            }
+        }
+        
+        # Send request to Ollama
+        logger.debug(f"Sending request to Ollama API for model {model}...")
+        
+        # Ollama API has a different response format
+        response = requests.post(
+            self.ollama_api_chat,
+            json=payload,
+            timeout=120  # Longer timeout for local inference
+        )
+        
+        # Parse response
+        if response.status_code == 200:
+            data = response.json()
+            content = data.get("message", {}).get("content", "")
+            
+            # Parse JSON if requested
+            if json_response:
+                try:
+                    content = json.loads(content)
+                except json.JSONDecodeError:
+                    logger.error(f"Error parsing JSON response: {content}")
+                    return {
+                        "error": "JSON parsing error",
+                        "message": "The model did not return valid JSON",
+                        "status": "error"
+                    }
+            
+            # Return response
+            return {
+                "content": content,
+                "model": model,
+                "provider": "local",
+                "status": "success"
+            }
+        else:
+            logger.error(f"Ollama API error: {response.status_code} - {response.text}")
+            return {
+                "error": f"Ollama API error ({response.status_code})",
+                "message": response.text,
+                "status": "error"
+            }
+    
+    def _query_openai_compatible(self,
+                               prompt: str,
+                               provider: Optional[str] = "grok",
+                               system_prompt: Optional[str] = None,
+                               model: Optional[str] = None,
+                               json_response: bool = False,
+                               max_tokens: int = 1000,
+                               temperature: float = 0.7) -> Dict[str, Any]:
+        """
+        Query OpenAI-compatible APIs (Grok, OpenAI).
+        
+        Args:
+            prompt: User prompt
+            provider: Provider name ('grok', 'openai')
+            system_prompt: Optional system prompt
+            model: Model name
+            json_response: Whether to request a JSON response
+            max_tokens: Maximum tokens to generate
+            temperature: Sampling temperature (0.0 to 1.0)
+            
+        Returns:
+            Dictionary containing response and metadata
+        """
+        # Create messages
+        messages = []
+        
+        if system_prompt:
+            messages.append({
+                "role": "system",
+                "content": system_prompt
+            })
+            
+        messages.append({
+            "role": "user",
+            "content": prompt
+        })
+        
+        # Create API payload
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature
+        }
+        
+        # Add JSON response format if requested
+        if json_response:
+            payload["response_format"] = {"type": "json_object"}
+            
+        # Create headers
+        headers = {
+            "Content-Type": "application/json"
+        }
+        
+        # Add authorization if provider is valid and has an API key
+        if provider and provider in self.api_keys and self.api_keys[provider]:
+            headers["Authorization"] = f"Bearer {self.api_keys[provider]}"
+        
+        # Get endpoint safely
+        endpoint = self.api_endpoints.get(provider or "grok", self.api_endpoints["grok"])
+        
+        # Send request
+        logger.debug(f"Sending request to {provider or 'default'} API...")
+        response = requests.post(
+            endpoint,
+            headers=headers,
+            json=payload,
+            timeout=60
+        )
+        
+        # Parse response
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Extract content from response
+            content = data["choices"][0]["message"]["content"]
+                
+            # Parse JSON if requested
+            if json_response:
+                try:
+                    content = json.loads(content)
+                except json.JSONDecodeError:
+                    logger.error(f"Error parsing JSON response: {content}")
+                    return {
+                        "error": "JSON parsing error",
+                        "message": "The model did not return valid JSON",
+                        "status": "error"
+                    }
+            
+            # Return response
+            return {
+                "content": content,
+                "model": data.get("model", model),
+                "provider": provider,
+                "status": "success"
+            }
+        else:
+            logger.error(f"API error: {response.status_code} - {response.text}")
+            return {
+                "error": f"API error ({response.status_code})",
+                "message": response.text,
                 "status": "error"
             }
             
@@ -212,3 +455,37 @@ class LLMClient:
             error_msg = response.get("message", "Unknown error")
             logger.error(f"Error generating response: {error_msg}")
             return f"Error: {error_msg}"
+            
+    def check_ollama_status(self) -> Dict[str, Any]:
+        """
+        Check the status of the local Ollama server.
+        
+        Returns:
+            Dictionary with status information
+        """
+        if not self._test_ollama_connection():
+            return {
+                "status": "unavailable",
+                "message": "Ollama server is not running or not accessible"
+            }
+            
+        try:
+            # List models
+            response = requests.get(f"{self.ollama_endpoint}/api/tags")
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    "status": "available",
+                    "message": "Ollama server is running",
+                    "models": data.get("models", [])
+                }
+            else:
+                return {
+                    "status": "error",
+                    "message": f"Ollama server returned status code {response.status_code}"
+                }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Error checking Ollama status: {str(e)}"
+            }

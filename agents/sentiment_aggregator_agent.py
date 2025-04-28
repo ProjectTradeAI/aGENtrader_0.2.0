@@ -15,6 +15,7 @@ from datetime import datetime
 
 from agents.base_agent import BaseAnalystAgent
 from core.logging.decision_logger import decision_logger
+from models.llm_client import LLMClient
 
 # Configure logging
 logging.basicConfig(
@@ -45,15 +46,21 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         self.data_fetcher = data_fetcher
         self.config = config or {}
         
-        # Configure xAI API access
+        # Configure Grok-specific LLM client
+        self.grok_model = os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
+        self.llm_client = LLMClient(
+            provider="grok", 
+            model=self.grok_model,
+            config={"sentiment_specific": True}
+        )
+        
+        # Set API key directly from environment
         self.api_key = os.environ.get('XAI_API_KEY')
-        self.base_url = "https://api.x.ai/v1"
-        self.model = "grok-2-1212"  # Using the text-only model for sentiment analysis
         
         if not self.api_key:
             logger.warning("XAI_API_KEY not found in environment variables. Sentiment analysis will be limited.")
         else:
-            logger.info("xAI API configured successfully.")
+            logger.info(f"Sentiment Analyzer initialized with Grok model: {self.grok_model}")
         
         # Configure sentiment data storage
         self.sentiment_log_path = os.path.join('logs', 'sentiment_feed.jsonl')
@@ -80,8 +87,8 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 f"Invalid input parameters: symbol={symbol}, interval={interval}"
             )
             
-        # Check if API key is available
-        if not self.api_key:
+        # Check if our LLM client has access to Grok
+        if not self.llm_client.api_keys.get('grok'):
             return self.build_error_response(
                 "API_KEY_MISSING",
                 "XAI_API_KEY is not set. Cannot perform sentiment analysis."
@@ -190,7 +197,7 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         
     def _analyze_sentiment_with_grok(self, symbol: str, market_data: str) -> Dict[str, Any]:
         """
-        Analyze sentiment using Grok AI.
+        Analyze sentiment using Grok AI via the LLM client.
         
         Args:
             symbol: Trading symbol
@@ -200,57 +207,65 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             Dictionary containing sentiment analysis results
         """
         try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            # Define the prompt for sentiment analysis
+            # Define the system prompt for sentiment analysis
             clean_symbol = symbol.replace("/", "")
             
-            payload = {
-                "model": self.model,
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a financial sentiment analysis expert. "
-                            "Analyze the sentiment of cryptocurrency market data and provide: "
-                            "1. A sentiment rating from 1 to 5 (1=very bearish, 3=neutral, 5=very bullish) "
-                            "2. A confidence score between 0 and 1 "
-                            "3. A brief summary of your analysis (3 sentences max) "
-                            "4. Three key signals that informed your analysis "
-                            "Respond with JSON in this format: "
-                            "{ \"rating\": number, \"confidence\": number, \"summary\": string, \"signals\": [string, string, string] }"
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Analyze the current market sentiment for {clean_symbol} based on this data:\n\n{market_data}"
-                    }
-                ],
-                "response_format": {"type": "json_object"}
-            }
+            system_prompt = (
+                "You are a financial sentiment analysis expert. "
+                "Analyze the sentiment of cryptocurrency market data and provide: "
+                "1. A sentiment rating from 1 to 5 (1=very bearish, 3=neutral, 5=very bullish) "
+                "2. A confidence score between 0 and 1 "
+                "3. A brief summary of your analysis (3 sentences max) "
+                "4. Three key signals that informed your analysis "
+                "Respond with JSON in this format: "
+                "{ \"rating\": number, \"confidence\": number, \"summary\": string, \"signals\": [string, string, string] }"
+            )
             
-            # Make the API call
-            response = requests.post(
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload
+            user_prompt = f"Analyze the current market sentiment for {clean_symbol} based on this data:\n\n{market_data}"
+            
+            # Query LLM using our configured LLM client for Grok
+            response = self.llm_client.query(
+                prompt=user_prompt,
+                system_prompt=system_prompt,
+                provider="grok",  # Enforce using Grok for sentiment analysis
+                model=self.grok_model,
+                json_response=True
             )
             
             # Check if the request was successful
-            if response.status_code == 200:
-                response_data = response.json()
-                result = json.loads(response_data["choices"][0]["message"]["content"])
+            if response["status"] == "success":
+                # Get the content - should already be a JSON object since json_response=True
+                result = response["content"]
                 
-                # Ensure the response has the expected format
-                result["rating"] = max(1, min(5, int(result.get("rating", 3))))
-                result["confidence"] = max(0, min(1, float(result.get("confidence", 0.5))))
-                
-                return result
+                # Ensure the response has the expected format and types
+                if isinstance(result, dict):
+                    result["rating"] = max(1, min(5, int(result.get("rating", 3))))
+                    result["confidence"] = max(0, min(1, float(result.get("confidence", 0.5))))
+                    
+                    # Ensure signals is a list
+                    if not isinstance(result.get("signals", []), list):
+                        result["signals"] = ["No specific signals were identified"]
+                    
+                    # Ensure summary is a string
+                    if not isinstance(result.get("summary", ""), str):
+                        result["summary"] = "No summary was provided"
+                    
+                    return result
+                else:
+                    # If not a proper dict, create a fallback response
+                    logger.error(f"Invalid response format from Grok: {result}")
+                    return {
+                        "rating": 3,
+                        "confidence": 0.3,
+                        "summary": "Received malformed response from Grok AI. Using fallback neutral sentiment.",
+                        "signals": [
+                            "API response format error",
+                            "Using fallback neutral sentiment with low confidence",
+                            "Check Grok API for proper JSON formatting"
+                        ]
+                    }
             else:
-                logger.error(f"Error from xAI API: {response.status_code} - {response.text}")
+                logger.error(f"Error from Grok API: {response.get('error', 'Unknown error')}")
                 # Fallback to a default response with clear indication it's a fallback
                 return {
                     "rating": 3,

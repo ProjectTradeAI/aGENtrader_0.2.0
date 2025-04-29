@@ -54,16 +54,12 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         sentiment_config = self.agent_config.get("sentiment_analyst", {})
         self.default_interval = sentiment_config.get("timeframe", self.trading_config.get("default_interval", "1h"))
         
-        # Configure Grok-specific LLM client
-        self.grok_model = os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
-        self.llm_client = LLMClient(
-            provider="grok", 
-            model=self.grok_model,
-            config={"sentiment_specific": True}
-        )
+        # Configure Grok-specific LLM client using agent-specific model selection
+        self.llm_client = LLMClient(agent_name="sentiment_aggregator")
         
         # Set API key directly from environment
         self.api_key = os.environ.get('XAI_API_KEY')
+        self.grok_model = os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         
         if not self.api_key:
             logger.warning("XAI_API_KEY not found in environment variables. Sentiment analysis will be limited.")

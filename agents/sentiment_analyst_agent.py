@@ -84,8 +84,8 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         self.agent_config = self.get_agent_config()
         self.trading_config = self.get_trading_config()
         
-        # Initialize LLM client
-        self.llm_client = LLMClient()
+        # Initialize LLM client with agent-specific configuration
+        self.llm_client = LLMClient(agent_name="sentiment_analyst")
         
         # Initialize database connector
         self.db = DatabaseConnector()

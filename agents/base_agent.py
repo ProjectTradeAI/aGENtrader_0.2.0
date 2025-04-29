@@ -22,10 +22,17 @@ class BaseAnalystAgent:
     - Standard analysis result structure
     """
     
-    def __init__(self):
-        """Initialize the base analyst agent."""
+    def __init__(self, agent_name=None):
+        """Initialize the base analyst agent.
+        
+        Args:
+            agent_name: Optional name for the agent (used for agent-specific configurations)
+        """
         # Set up logger
         self.logger = logging.getLogger(f"aGENtrader.agents.{self.__class__.__name__}")
+        
+        # Save agent name for agent-specific configurations
+        self.agent_name = agent_name or self.__class__.__name__.lower()
         
         # Load default configs
         self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")

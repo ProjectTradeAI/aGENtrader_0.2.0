@@ -64,15 +64,16 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
     
     def __init__(self):
         """Initialize the Liquidity Analyst Agent."""
-        # Initialize the base agent
-        super().__init__()
+        # Initialize the base agent with agent-specific name
+        super().__init__(agent_name="liquidity_analyst")
         
         # Get agent and trading configuration
         self.agent_config = self.get_agent_config()
         self.trading_config = self.get_trading_config()
         
-        # Initialize LLM client
-        self.llm_client = LLMClient()
+        # Initialize LLM client with agent-specific configuration
+        # Liquidity analyst uses Mistral, not Grok
+        self.llm_client = LLMClient(agent_name="liquidity_analyst")
         
         # Initialize database connector
         self.db = DatabaseConnector()

@@ -42,14 +42,14 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
     
     def __init__(self):
         """Initialize the Funding Rate Analyst Agent."""
-        super().__init__()
+        super().__init__(agent_name="funding_rate_analyst")
         
         # Set up logger
         self.logger = logging.getLogger(f"aGENtrader.agents.{self.__class__.__name__}")
         
-        # Initialize components
+        # Initialize components with agent-specific configuration
         self.db = DatabaseConnector()
-        self.llm_client = LLMClient()
+        self.llm_client = LLMClient(agent_name="funding_rate_analyst")
         
         # Load agent-specific configuration
         agent_config = self.get_agent_config()

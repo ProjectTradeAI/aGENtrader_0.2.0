@@ -32,8 +32,45 @@ class LLMClient:
     """
     
     # Default providers and endpoints from environment or config
-    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'grok')  # Changed default to grok since Ollama is often not available
-    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mistral')  # Changed from mixtral to mistral for lower resource requirements
+    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'local')  # Default to local (Ollama) with fallback
+    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mistral')  # Using mistral for lower resource requirements
+    
+    # Agent-specific model configuration
+    AGENT_SPECIFIC_MODELS = {
+        # Sentiment agents use Grok by default for better sentiment analysis
+        'sentiment_analyst': {
+            'provider': 'grok',
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
+        },
+        'sentiment_aggregator': {
+            'provider': 'grok',
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
+        },
+        
+        # Technical and market structure agents use Mistral by default
+        'technical_analyst': {
+            'provider': 'local',  # Will fallback to grok if local is unavailable
+            'model': 'mistral'
+        },
+        'liquidity_analyst': {
+            'provider': 'local',  # Will fallback to grok if local is unavailable
+            'model': 'mistral'
+        },
+        'funding_rate_analyst': {
+            'provider': 'local',  # Will fallback to grok if local is unavailable
+            'model': 'mistral'
+        },
+        'open_interest_analyst': {
+            'provider': 'local',  # Will fallback to grok if local is unavailable
+            'model': 'mistral'
+        },
+        
+        # Decision agent uses Mistral by default for consistent and logical decisions
+        'decision_agent': {
+            'provider': 'local',  # Will fallback to grok if local is unavailable
+            'model': 'mistral'
+        }
+    }
     
     # Try multiple potential Ollama endpoints
     DEFAULT_ENDPOINTS = [
@@ -48,7 +85,8 @@ class LLMClient:
                  provider: Optional[str] = None, 
                  model: Optional[str] = None,
                  endpoint: Optional[str] = None,
-                 config: Optional[Dict[str, Any]] = None):
+                 config: Optional[Dict[str, Any]] = None,
+                 agent_name: Optional[str] = None):
         """
         Initialize the LLM client.
         
@@ -57,8 +95,20 @@ class LLMClient:
             model: Model name to use
             endpoint: API endpoint for local provider
             config: Additional configuration parameters
+            agent_name: Name of the agent using this LLM client (for agent-specific configurations)
         """
         self.config = config or {}
+        self.agent_name = agent_name
+        
+        # Check if we have an agent-specific configuration
+        if agent_name:
+            if agent_name.lower() in self.AGENT_SPECIFIC_MODELS:
+                agent_config = self.AGENT_SPECIFIC_MODELS[agent_name.lower()]
+                provider = provider or agent_config.get('provider')
+                model = model or agent_config.get('model')
+                logger.info(f"Using agent-specific LLM config for {agent_name}: {provider}:{model}")
+            else:
+                logger.info(f"No special LLM config for {agent_name}, using default provider: {self.DEFAULT_PROVIDER}, model: {self.DEFAULT_MODEL}")
         
         # Set provider and model from parameters or defaults
         self.provider = provider or self.config.get('provider', self.DEFAULT_PROVIDER)

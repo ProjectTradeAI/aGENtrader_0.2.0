@@ -4,6 +4,7 @@ An advanced multi-agent AI trading platform with sophisticated deployment and wo
 
 ## Recent Updates
 
+- **2025-04-29**: Implemented agent-specific LLM routing - Sentiment agents now use Grok, others use Mistral
 - **2025-04-29**: Fixed validation script to properly detect Binance API initialization by matching the correct log pattern
 - **2025-04-28**: Upgraded from Mixtral to Mistral as the default LLM due to EC2 memory constraints
 - **2025-04-27**: Enhanced error handling in all market data providers
@@ -38,12 +39,21 @@ Key directories:
 
 The system is built around a multi-agent architecture where specialist agents collaborate to make trading decisions:
 
-- **Technical Analyst Agent**: Performs technical analysis on price data
-- **Sentiment Analyst Agent**: Analyzes market sentiment data
-- **Liquidity Analyst Agent**: Monitors market liquidity conditions
-- **Portfolio Manager Agent**: Manages overall portfolio allocation
-- **Risk Guard Agent**: Enforces risk management rules
-- **Trade Executor Agent**: Executes trading decisions
+- **Technical Analyst Agent**: Performs technical analysis on price data (Uses Mistral)
+- **Sentiment Analyst Agent**: Analyzes market sentiment data (Uses Grok)
+- **Sentiment Aggregator Agent**: Aggregates sentiment from various sources (Uses Grok)
+- **Liquidity Analyst Agent**: Monitors market liquidity conditions (Uses Mistral)
+- **Funding Rate Analyst Agent**: Analyzes futures market funding rates (Uses Mistral)
+- **Open Interest Analyst Agent**: Evaluates open interest trends (Uses Mistral)
+- **Decision Agent**: Weighs all analyses and makes final decisions (Uses Mistral)
+
+#### LLM Model Selection Strategy
+
+The system uses an intelligent model routing strategy:
+- Sentiment-related tasks use Grok (2-1212) for its superior natural language understanding
+- Technical analysis and market structure tasks use Mistral for efficiency
+- Each agent has a dedicated LLM client with its specific model configuration
+- System automatically falls back to alternative models if the primary is unavailable
 
 ### Data Providers
 

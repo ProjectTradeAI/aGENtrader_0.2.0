@@ -139,8 +139,9 @@ class DecisionAgent:
         self.agent_weights = self.config.get("agent_weights", {})
         self.logger.info(f"Loaded agent weights: {self.agent_weights}")
         
-        # Initialize LLM client
-        self.llm_client = LLMClient()
+        # Initialize LLM client with agent-specific configuration
+        # Decision agent uses regular Mistral, not Grok
+        self.llm_client = LLMClient(agent_name="decision_agent")
         
         # Set default parameters
         self.default_symbol = self.trading_config.get("default_pair", "BTC/USDT")

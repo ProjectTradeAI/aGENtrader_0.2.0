@@ -40,10 +40,14 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             data_fetcher: Data fetcher instance for retrieving market data
             config: Configuration parameters
         """
-        super().__init__()
+        super().__init__(agent_name="technical_analyst")
         self.name = "TechnicalAnalystAgent"
         self.description = "Analyzes price action using technical indicators"
         self.data_fetcher = data_fetcher
+        
+        # Initialize LLM client with agent-specific configuration
+        from models.llm_client import LLMClient
+        self.llm_client = LLMClient(agent_name="technical_analyst")
         
         # Get agent config for timeframe setting
         self.agent_config = self.get_agent_config()
@@ -213,11 +217,52 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         # Create DataFrame
         df = pd.DataFrame(ohlcv_data)
         
+        # Log initial columns to debug
+        logger.debug(f"Initial columns in OHLCV data: {df.columns.tolist()}")
+        
+        # Handle different column naming formats from data providers (Binance vs others)
+        # Binance format: [timestamp(int), open, high, low, close, volume, ...]
+        if len(df.columns) >= 6 and all(col in [0, 1, 2, 3, 4, 5] for col in df.columns):
+            logger.info("Detected Binance-style numeric columns, converting to named columns")
+            df = pd.DataFrame({
+                'timestamp': df[0],
+                'open': df[1],
+                'high': df[2],
+                'low': df[3],
+                'close': df[4],
+                'volume': df[5]
+            })
+        
+        # Check if we have time column instead of timestamp
+        if 'time' in df.columns and 'timestamp' not in df.columns:
+            df['timestamp'] = df['time']
+        
         # Ensure the correct columns exist
         required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-        for col in required_columns:
-            if col not in df.columns:
-                raise ValueError(f"Required column '{col}' missing from OHLCV data")
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            error_msg = f"Required columns missing from OHLCV data: {missing_columns}"
+            logger.error(error_msg)
+            logger.error(f"Available columns: {df.columns.tolist()}")
+            
+            # If we have enough basic data, try to continue with defaults
+            if len(df.columns) >= 6:
+                logger.warning("Attempting to use positional columns as fallback")
+                # Try to map columns by position
+                column_mapping = {}
+                for i, col in enumerate(required_columns):
+                    if i < len(df.columns):
+                        column_mapping[col] = df.columns[i]
+                
+                # Create new DataFrame with required column names
+                new_df = pd.DataFrame()
+                for required_col, actual_col in column_mapping.items():
+                    new_df[required_col] = df[actual_col]
+                
+                df = new_df
+            else:
+                raise ValueError(f"Required columns missing from OHLCV data: {missing_columns}")
         
         # Convert string values to float if needed
         for col in ['open', 'high', 'low', 'close', 'volume']:
@@ -226,6 +271,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         # Sort by timestamp
         df = df.sort_values('timestamp')
         
+        logger.debug(f"Processed dataframe with columns: {df.columns.tolist()}")
         return df
     
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:

@@ -1,0 +1,74 @@
+    4. VALIDATION - Verifying deployment
+-------------------------------------------------------------
+
+2025-04-29 15:40:36 [STEP] Executing: Validating deployment
+2025-04-29 15:41:37 [ERROR] Validating deployment failed with error code 1
+2025-04-29 15:41:37 [ERROR] Error output:
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > =====================================================================
+2025-04-29 15:41:37 [ERROR]   >             aGENtrader v2.2 - Deployment Validation
+2025-04-29 15:41:37 [ERROR]   > =====================================================================
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > Started: 2025-04-29 15:40:36
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > Docker Container
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > ✗ FAIL Docker Container: Container not found
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > Docker Logs
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > ✗ FAIL Docker Logs: Error checking logs: Command '['docker', 'logs', 'aGENtrader_production', '--tail', '100']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > Binance Connection
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > ✗ FAIL Binance Connection: Error checking Binance connection: Command '['docker', 'logs', 'aGENtrader_production', '--tail', '100']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > Agent Activity
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > ✗ FAIL Agent Activity: Error checking agent activity: Command '['docker', 'logs', 'aGENtrader_production', '--tail', '200']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > Log Files
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > ✗ FAIL Log Files: Error checking log files: Command '['docker', 'exec', 'aGENtrader_production', 'ls', '-la', '/app/logs']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > Decision Making
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > Waiting for new trading decisions to appear in logs...
+2025-04-29 15:41:37 [ERROR]   > 0s ....5s ....10s ....15s ....20s ....25s ....30s ....35s ....40s ....45s ....50s ....55s ....
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ✗ FAIL Decision Making: No new trading decisions detected within timeout period
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > VALIDATION SUMMARY
+2025-04-29 15:41:37 [ERROR]   > ---------------------------------------------------------------------
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > Passed 0 out of 6 checks.
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > Failed checks:
+2025-04-29 15:41:37 [ERROR]   > - Docker Container: Container not found
+2025-04-29 15:41:37 [ERROR]   > - Docker Logs: Error checking logs: Command '['docker', 'logs', 'aGENtrader_production', '--tail', '100']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > - Binance Connection: Error checking Binance connection: Command '['docker', 'logs', 'aGENtrader_production', '--tail', '100']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > - Agent Activity: Error checking agent activity: Command '['docker', 'logs', 'aGENtrader_production', '--tail', '200']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > - Log Files: Error checking log files: Command '['docker', 'exec', 'aGENtrader_production', 'ls', '-la', '/app/logs']' returned non-zero exit status 1.
+2025-04-29 15:41:37 [ERROR]   > - Decision Making: No new trading decisions detected within timeout period
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [ERROR]   > Some validation checks failed. Review the issues above.
+2025-04-29 15:41:37 [ERROR]   > 
+2025-04-29 15:41:37 [WARNING] Deployment validation reported issues. See output above.
+2025-04-29 15:41:37 [WARNING] The container is still running, but may have issues.
+
+-------------------------------------------------------------
+    5. SUMMARY - Development Cycle Completed
+-------------------------------------------------------------
+
+2025-04-29 15:41:37 [SUCCESS] Dev cycle completed successfully
+2025-04-29 15:41:37 [INFO] Current branch: main
+2025-04-29 15:41:37 [INFO] Current commit: 22363e7
+2025-04-29 15:41:37 [INFO] Current container: 71adda8dcf26   agentrader:v2.2   "python run.py --mod…"   About a minute ago   Up About a minute   0.0.0.0:8000->8000/tcp, :::8000->8000/tcp   agentrader

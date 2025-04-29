@@ -41,23 +41,28 @@ The script is interactive and will guide you through the process with clear logs
    - Verifies you're in the correct directory
    - Checks if Docker is installed and running
 
-2. **Git Pull**:
+2. **Ollama LLM Setup**:
+   - Checks if Ollama is installed and offers to install it if not
+   - Ensures Ollama server is running or starts it automatically
+   - Verifies Mixtral model is available and offers to download if needed
+
+3. **Git Pull**:
    - Fetches and pulls the latest changes from the main branch
    - Shows a summary of changes if any were pulled
 
-3. **Docker Build**:
+4. **Docker Build**:
    - Builds a fresh Docker image using deployment/build_image.sh
    - Tags the image appropriately
 
-4. **Deployment**:
+5. **Deployment**:
    - Deploys the container locally or to EC2 (with confirmation)
    - Handles stopping existing containers if needed
 
-5. **Validation**:
+6. **Validation**:
    - Runs deployment validation to ensure everything is working
    - Shows detailed logs of the validation process
 
-6. **Summary and Logs**:
+7. **Summary and Logs**:
    - Displays a summary of the entire process
    - Offers the option to tail logs for monitoring
 
@@ -70,6 +75,10 @@ The script includes several safety features:
 - **Detailed logging**: Creates a timestamped log file of the entire process
 - **Environment checks**: Verifies Docker is running before attempting builds
 - **User confirmation**: Requires confirmation for potentially destructive actions
+- **Auto-container detection**: Automatically detects and uses the correct container name
+- **Smart validation**: Updates validation parameters to match the actual runtime environment
+- **Ollama auto-management**: Automatically installs and starts Ollama when needed
+- **LLM fallback mechanisms**: Gracefully falls back to other models if local model is unavailable
 
 ## Troubleshooting
 
@@ -94,6 +103,12 @@ The script includes several safety features:
    - Examine container logs: `docker logs agentrader`
    - Verify API endpoints are accessible
    - Check database connectivity if applicable
+
+5. **Ollama installation or startup issues**:
+   - Verify you have permissions to install and run Ollama
+   - Check /tmp/ollama.log for detailed error messages
+   - Manually run `ollama serve` to see direct console output
+   - Verify port 11434 is not being used by another service
 
 ### Logs
 

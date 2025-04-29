@@ -16,7 +16,7 @@ import re
 from typing import Dict, List, Tuple, Any, Optional
 
 # Configuration
-CONTAINER_NAME = "aGENtrader_production"
+CONTAINER_NAME = "agentrader"  # Updated to match actual container name
 LOG_FILE = "../logs/decision_summary.logl"
 LOG_CHECK_TIMEOUT = 60  # seconds to wait for log updates
 BINANCE_CHECK_TIMEOUT = 30  # seconds to wait for Binance connection

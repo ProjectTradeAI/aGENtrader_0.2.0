@@ -174,6 +174,96 @@ if ! docker info &> /dev/null; then
     exit 1
 fi
 
+# --- Ollama Setup ---
+section "0. OLLAMA - Setting up LLM service"
+
+# Check if Ollama is installed
+if ! command -v ollama &> /dev/null; then
+    log "WARNING" "Ollama is not installed. Will attempt to install it."
+    
+    # Ask user for confirmation
+    read -p "Install Ollama now? (y/n): " install_ollama
+    
+    if [[ $install_ollama == "y" || $install_ollama == "Y" ]]; then
+        log "INFO" "Installing Ollama..."
+        
+        # Installation based on the official documentation
+        if check_step "curl -fsSL https://ollama.com/install.sh | sh" "Installing Ollama"; then
+            log "SUCCESS" "Ollama installed successfully"
+        else
+            log "WARNING" "Ollama installation failed. System will use fallback LLM providers."
+            log "INFO" "You can install Ollama manually later: curl -fsSL https://ollama.com/install.sh | sh"
+        fi
+    else
+        log "INFO" "Ollama installation skipped. System will use fallback LLM providers."
+    fi
+else
+    log "INFO" "Ollama is already installed"
+fi
+
+# Check if Ollama is running
+if command -v ollama &> /dev/null; then
+    log "INFO" "Checking if Ollama server is running..."
+    
+    # Test connectivity to Ollama
+    if curl -s http://localhost:11434 &> /dev/null; then
+        log "SUCCESS" "Ollama server is already running"
+    else
+        log "INFO" "Starting Ollama server..."
+        
+        # Start Ollama in the background
+        if check_step "ollama serve > /tmp/ollama.log 2>&1 &" "Starting Ollama server"; then
+            # Give it a moment to start
+            sleep 2
+            log "INFO" "Waiting for Ollama server to initialize..."
+            
+            # Check if it's now running
+            attempt=0
+            while [ $attempt -lt 5 ]; do
+                if curl -s http://localhost:11434 &> /dev/null; then
+                    log "SUCCESS" "Ollama server started successfully"
+                    break
+                fi
+                attempt=$((attempt + 1))
+                sleep 2
+            done
+            
+            if [ $attempt -eq 5 ]; then
+                log "WARNING" "Ollama server did not start properly. Check /tmp/ollama.log for details."
+                log "INFO" "System will use fallback LLM providers."
+            fi
+        else
+            log "WARNING" "Failed to start Ollama server. System will use fallback LLM providers."
+        fi
+    fi
+    
+    # Check if Mixtral model is available
+    if curl -s http://localhost:11434 &> /dev/null; then
+        log "INFO" "Checking if Mixtral model is available..."
+        
+        # List models and check if mixtral is available
+        models_output=$(ollama list 2>&1)
+        if echo "$models_output" | grep -q "mixtral"; then
+            log "SUCCESS" "Mixtral model is already downloaded and available"
+        else
+            log "INFO" "Mixtral model not found. Attempting to pull it..."
+            
+            # Ask user for confirmation as this is a large download
+            read -p "Download Mixtral model (4-8GB)? This may take a while. (y/n): " pull_mixtral
+            
+            if [[ $pull_mixtral == "y" || $pull_mixtral == "Y" ]]; then
+                if check_step "ollama pull mixtral" "Downloading Mixtral model"; then
+                    log "SUCCESS" "Mixtral model downloaded successfully"
+                else
+                    log "WARNING" "Failed to download Mixtral model. System will use fallback LLM providers."
+                fi
+            else
+                log "INFO" "Mixtral model download skipped. System will use fallback LLM providers."
+            fi
+        fi
+    fi
+fi
+
 # --- Main Dev Cycle Steps ---
 
 section "1. GIT PULL - Updating from repository"
@@ -255,31 +345,61 @@ section "4. VALIDATION - Verifying deployment"
 
 # Run deployment validation
 if [ -f "deployment/validate_deployment.py" ]; then
+    # Check container name in validation script matches actual running container
+    actual_container_name=$(docker ps --format "{{.Names}}" | grep agentrader | head -1)
+    
+    if [ -n "$actual_container_name" ]; then
+        log "INFO" "Found running container: $actual_container_name"
+        
+        # Check and update container name in validation script if needed
+        validation_container=$(grep -o "CONTAINER_NAME = \"[^\"]*\"" deployment/validate_deployment.py | cut -d'"' -f2)
+        
+        if [ "$validation_container" != "$actual_container_name" ]; then
+            log "WARNING" "Container name in validation script ($validation_container) doesn't match actual container ($actual_container_name)"
+            log "INFO" "Updating validation script to use correct container name..."
+            
+            # Use sed to update the container name in the validation script
+            sed -i "s/CONTAINER_NAME = \"$validation_container\"/CONTAINER_NAME = \"$actual_container_name\"/" deployment/validate_deployment.py
+            
+            log "INFO" "Updated validation script with correct container name"
+        fi
+    fi
+    
+    # Run the validation script
     if check_step "python3 deployment/validate_deployment.py" "Validating deployment"; then
         log "SUCCESS" "Deployment validation passed"
     else
         log "WARNING" "Deployment validation reported issues. See output above."
         log "WARNING" "The container is still running, but may have issues."
+        
+        # Show container status for debugging
+        docker ps | grep agentrader | while read -r line; do
+            log "INFO" "Container status: $line"
+        done
+        
+        # Offer to show logs as additional debugging info
+        log "INFO" "You can check container logs after completion with: docker logs $actual_container_name"
     fi
 else
     log "WARNING" "Validation script not found at deployment/validate_deployment.py"
     log "WARNING" "Checking container status manually..."
     
     # Basic container check if no validation script
-    if docker ps | grep -q "$CONTAINER_NAME"; then
+    if docker ps | grep -q "agentrader"; then
+        actual_container_name=$(docker ps --format "{{.Names}}" | grep agentrader | head -1)
         log "INFO" "Container is running:"
-        docker ps | grep "$CONTAINER_NAME" | while read -r line; do
+        docker ps | grep "agentrader" | while read -r line; do
             log "INFO" "  > $line"
         done
         
         # Show recent logs
         log "INFO" "Recent container logs:"
-        docker logs --tail 10 $CONTAINER_NAME 2>&1 | while read -r line; do
+        docker logs --tail 10 $actual_container_name 2>&1 | while read -r line; do
             log "INFO" "  > $line"
         done
     else
         log "ERROR" "Container does not appear to be running."
-        docker ps -a | grep "$CONTAINER_NAME" | while read -r line; do
+        docker ps -a | grep "agentrader" | while read -r line; do
             log "ERROR" "  > $line"
         done
         
@@ -290,11 +410,17 @@ fi
 
 section "5. SUMMARY - Development Cycle Completed"
 
+# Get actual container name
+actual_container_name=$(docker ps --format "{{.Names}}" | grep agentrader | head -1)
+if [ -z "$actual_container_name" ]; then
+    actual_container_name="agentrader"
+fi
+
 # Display summary
 log "SUCCESS" "Dev cycle completed successfully"
 log "INFO" "Current branch: $(git branch --show-current)"
-log "INFO" "Current commit: $(git rev-parse --short HEAD)"
-log "INFO" "Current container: $(docker ps | grep $CONTAINER_NAME || echo 'Not found')"
+log "INFO" "Current commit: $(git rev-parse --short HEAD)" 
+log "INFO" "Current container: $(docker ps | grep "$actual_container_name" || echo 'Not found')"
 
 # --- Optional Log Viewing ---
 
@@ -308,8 +434,8 @@ read -p "Enter your choice (1/2): " log_choice
 
 case $log_choice in
     1)
-        echo -e "\n${CYAN}Tailing logs for aGENtrader container (Ctrl+C to exit):${RESET}\n"
-        docker logs -f $CONTAINER_NAME
+        echo -e "\n${CYAN}Tailing logs for $actual_container_name container (Ctrl+C to exit):${RESET}\n"
+        docker logs -f "$actual_container_name"
         ;;
     *)
         echo -e "\n${GREEN}Dev cycle complete. Exiting.${RESET}"

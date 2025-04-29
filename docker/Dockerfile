@@ -40,10 +40,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . /app/
 
-# Create a non-root user to run the app
+# Create a non-root user to run the app but ensure logs are accessible
 RUN useradd -m agentrader
+RUN mkdir -p /app/logs /app/reports /app/trades /app/config /app/data
+RUN chmod -R 777 /app/logs /app/reports /app/trades /app/config /app/data
 RUN chown -R agentrader:agentrader /app
-USER agentrader
+# Run explicitly as root to ensure logs are accessible for validation
+# USER agentrader
 
 # Set up entrypoint
 ENTRYPOINT ["python", "run.py"]

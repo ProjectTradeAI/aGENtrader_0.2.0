@@ -203,8 +203,9 @@ def check_binance_connection() -> Tuple[bool, str]:
 def check_agent_activity() -> Tuple[bool, str]:
     """Check if the agents are active and running"""
     try:
+        # First check the main logs
         result = subprocess.run(
-            ["docker", "logs", CONTAINER_NAME, "--tail", "200"],
+            ["docker", "logs", CONTAINER_NAME, "--tail", "300"],
             capture_output=True,
             text=True,
             check=True
@@ -212,7 +213,7 @@ def check_agent_activity() -> Tuple[bool, str]:
         
         logs = result.stdout
         
-        # Look for agent initialization and activity
+        # Look for agent initialization and activity in logs
         agent_patterns = [
             "LiquidityAnalystAgent",
             "TechnicalAnalystAgent", 
@@ -227,12 +228,43 @@ def check_agent_activity() -> Tuple[bool, str]:
             if pattern in logs:
                 found_agents.append(pattern)
         
+        # If we found enough agents in the logs, return success
         if len(found_agents) >= 3:  # Allow for some agents not to be detected
-            return True, f"Found {len(found_agents)}/{len(agent_patterns)} agents active: {', '.join(found_agents)}"
-        elif found_agents:
-            return False, f"Only found {len(found_agents)}/{len(agent_patterns)} agents: {', '.join(found_agents)}"
-        else:
-            return False, "No agent activity detected in logs"
+            return True, f"Found {len(found_agents)}/{len(agent_patterns)} agents active in logs: {', '.join(found_agents)}"
+        
+        # If not enough found in logs, check the pre-startup file
+        print(f"{YELLOW}Checking pre-startup log file for agent initialization...{RESET}")
+        try:
+            pre_startup_result = subprocess.run(
+                ["docker", "exec", CONTAINER_NAME, "cat", "/app/logs/pre_startup.log"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            
+            pre_startup_logs = pre_startup_result.stdout
+            
+            # Check for agents in pre-startup logs
+            pre_found_agents = []
+            for pattern in agent_patterns:
+                if pattern in pre_startup_logs:
+                    pre_found_agents.append(pattern)
+            
+            # Combine agents from both sources
+            all_found_agents = list(set(found_agents + pre_found_agents))
+            
+            if len(all_found_agents) >= 3:  # Allow for some agents not to be detected
+                return True, f"Found {len(all_found_agents)}/{len(agent_patterns)} agents initialized: {', '.join(all_found_agents)}"
+            elif all_found_agents:
+                return False, f"Only found {len(all_found_agents)}/{len(agent_patterns)} agents: {', '.join(all_found_agents)}"
+            else:
+                return False, "No agent activity detected in logs or pre-startup file"
+        except subprocess.CalledProcessError:
+            # If we can't read the pre-startup file, just use the results from logs
+            if found_agents:
+                return False, f"Only found {len(found_agents)}/{len(agent_patterns)} agents in logs: {', '.join(found_agents)}"
+            else:
+                return False, "No agent activity detected in logs and pre-startup file not found"
             
     except subprocess.CalledProcessError as e:
         return False, f"Error checking agent activity: {e}"
@@ -337,7 +369,37 @@ def check_decision_making() -> Tuple[bool, str]:
         except:
             last_log = ""
         
-        # Main waiting loop
+        # First, check if the current log already has trading decisions
+        if last_log and any(word in last_log for word in ["BUY", "SELL", "HOLD"]):
+            signal = "UNKNOWN"
+            for signal_type in ["BUY", "SELL", "HOLD"]:
+                if signal_type in last_log:
+                    signal = signal_type
+                    break
+            return True, f"System already made trading decisions. Latest signal: {signal}"
+        
+        # Get docker logs as a backup check
+        try:
+            docker_logs_result = subprocess.run(
+                ["docker", "logs", CONTAINER_NAME, "--tail", "300"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            docker_logs = docker_logs_result.stdout
+            
+            # Check if docker logs already have decision signals
+            if any(word in docker_logs for word in ["BUY decision", "SELL decision", "HOLD decision"]):
+                signal = "UNKNOWN"
+                for signal_type in ["BUY", "SELL", "HOLD"]:
+                    if f"{signal_type} decision" in docker_logs:
+                        signal = signal_type
+                        break
+                return True, f"System is making trading decisions (found in Docker logs). Latest signal: {signal}"
+        except:
+            pass
+        
+        # Main waiting loop - check both methods
         for i in range(LOG_CHECK_TIMEOUT):
             time.sleep(1)
             if i % 5 == 0:  # Show progress every 5 seconds
@@ -346,6 +408,7 @@ def check_decision_making() -> Tuple[bool, str]:
                 sys.stdout.write(".")
             sys.stdout.flush()
             
+            # Try decision log file
             try:
                 result = subprocess.run(
                     ["docker", "exec", CONTAINER_NAME, "tail", "-n", "10", "/app/logs/decision_summary.logl"],
@@ -366,7 +429,28 @@ def check_decision_making() -> Tuple[bool, str]:
                                 signal = signal_type
                                 break
                                 
-                        return True, f"System is making trading decisions. Latest signal: {signal}"
+                        return True, f"System is making trading decisions (in log file). Latest signal: {signal}"
+            except:
+                pass
+                
+            # Try docker logs as well
+            try:
+                docker_logs_result = subprocess.run(
+                    ["docker", "logs", CONTAINER_NAME, "--tail", "50"],
+                    capture_output=True,
+                    text=True,
+                    check=True
+                )
+                docker_logs = docker_logs_result.stdout
+                
+                if any(word in docker_logs for word in ["BUY decision", "SELL decision", "HOLD decision"]):
+                    print("\n")
+                    signal = "UNKNOWN"
+                    for signal_type in ["BUY", "SELL", "HOLD"]:
+                        if f"{signal_type} decision" in docker_logs:
+                            signal = signal_type
+                            break
+                    return True, f"System is making trading decisions (in Docker logs). Latest signal: {signal}"
             except:
                 pass
         

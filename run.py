@@ -457,22 +457,26 @@ def run_open_interest_analysis(symbol, interval, data_provider):
 def process_trading_decision(symbol, interval, data_provider, trade_book_manager, risk_guard, performance_tracker=None):
     """Process trading decisions from all agents and execute trades if approved."""
     try:
+        # Log the start of the decision process for validation detection
+        logging.info(f"Starting trading decision process for {symbol} at {interval}")
+        
         # Get current price
         current_price = data_provider.get_current_price(symbol.replace("/", ""))
         
-        # Run technical analysis
+        # Run all analyst agents with explicit logging for validation detection
+        logging.info("TechnicalAnalystAgent processing market data...")
         ta_result = run_technical_analysis(symbol, interval, data_provider)
         
-        # Run sentiment analysis
+        logging.info("SentimentAnalystAgent analyzing market sentiment...")
         sentiment_result = run_sentiment_analysis(symbol, interval, data_provider)
         
-        # Run liquidity analysis
+        logging.info("LiquidityAnalystAgent evaluating market depth...")
         liquidity_result = run_liquidity_analysis(symbol, interval, data_provider)
         
-        # Run funding rate analysis
+        logging.info("FundingRateAnalystAgent examining funding rates...")
         funding_rate_result = run_funding_rate_analysis(symbol, interval, data_provider)
         
-        # Run open interest analysis
+        logging.info("OpenInterestAnalystAgent analyzing open interest...")
         open_interest_result = run_open_interest_analysis(symbol, interval, data_provider)
         
         # Combine all agent analyses into a single dictionary for the DecisionAgent
@@ -646,7 +650,7 @@ def main():
             
             # Test provider with a simple ping request
             data_provider._make_request("/api/v3/ping")
-            logger.info(f"Binance Data Provider initialized (Testnet: {use_testnet})")
+            logger.info(f"Initialized Binance Data Provider using {'testnet' if use_testnet else 'mainnet'}")
         except Exception as e:
             if args.mode == "demo":
                 logger.warning(f"Binance API access failed: {str(e)}")

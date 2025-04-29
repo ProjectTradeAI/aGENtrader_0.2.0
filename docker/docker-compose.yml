@@ -9,6 +9,9 @@ services:
       - ../.env
     environment:
       - VERSION=${VERSION:-latest}
+      - IN_DOCKER=true
+      - TEST_DURATION=24h
+      - MODE=test
     volumes:
       - ../logs:/app/logs
       - ../reports:/app/reports
@@ -32,7 +35,8 @@ services:
                echo "$(date +"%Y-%m-%d %H:%M:%S") - SentimentAnalystAgent - INFO - Market sentiment is positive" >> /app/logs/decision_summary.logl &&
                chmod 666 /app/logs/decision_summary.logl &&
                # Start actual application
-               python run.py --mode=test --symbol=BTC/USDT --interval=1h'
+               # Use docker_run.py which ensures container stays running
+               python docker_run.py'
     # Automatically restart if container exits with non-zero status
     restart: unless-stopped
     # Health check to verify the container is running properly

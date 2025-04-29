@@ -22,6 +22,15 @@ try:
     load_dotenv()
 except ImportError:
     print("Warning: python-dotenv not installed. Environment variables must be set manually.")
+    # Ensure we install it for future runs
+    try:
+        import subprocess
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "python-dotenv"])
+        from dotenv import load_dotenv
+        load_dotenv()
+        print("Installed python-dotenv successfully.")
+    except:
+        print("Could not auto-install python-dotenv. Continuing without it.")
 
 # Import the data providers
 from agents.data_providers.binance_data_provider import BinanceDataProvider
@@ -66,7 +75,12 @@ def setup_logging(log_level=None):
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="aGENtrader v2.1 Trading System")
-    parser.add_argument("--mode", type=str, default=os.getenv("MODE", "demo"), 
+    
+    # Check if we're in Docker, force test mode if true
+    in_docker = os.environ.get("IN_DOCKER", "false").lower() == "true"
+    default_mode = "test" if in_docker else os.getenv("MODE", "demo")
+    
+    parser.add_argument("--mode", type=str, default=default_mode, 
                         choices=["demo", "test", "live_simulation", "live"],
                         help="Trading mode (demo, test, live_simulation, or live)")
     parser.add_argument("--symbol", type=str, default=os.getenv("DEFAULT_SYMBOL", "BTC/USDT"),
@@ -76,7 +90,14 @@ def parse_arguments():
     parser.add_argument("--sentiment", action="store_true",
                         help="Run sentiment analysis demo")
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    
+    # Force test mode in Docker environment regardless of command line arguments
+    if in_docker and args.mode == "demo":
+        print("WARNING: Demo mode not supported in Docker environment. Forcing test mode.")
+        args.mode = "test"
+        
+    return args
 
 class TradeBookManager:
     """
@@ -613,10 +634,18 @@ def main():
     # Set up logging
     logger = setup_logging()
     
+    # Check if we're running in Docker
+    in_docker = os.environ.get("IN_DOCKER", "false").lower() == "true"
+    
     # Parse command-line arguments
     args = parse_arguments()
     
-    logger.info(f"Starting aGENtrader v2.1 in {args.mode} mode")
+    # Extra safety: Force test mode in Docker environment
+    if in_docker and args.mode == "demo":
+        logger.warning("Detected demo mode in Docker environment. Forcing test mode for container stability.")
+        args.mode = "test"
+        
+    logger.info(f"Starting aGENtrader v2.1 in {args.mode} mode {'(Docker environment)' if in_docker else ''}")
     
     # Run sentiment analysis demo if requested
     if args.sentiment:
@@ -645,12 +674,53 @@ def main():
         
         # Initialize data provider
         try:
+            # Determine if we should use testnet based on env
             use_testnet = os.getenv("BINANCE_USE_TESTNET", "false").lower() == "true"
-            data_provider = BinanceDataProvider(api_key=binance_key, api_secret=binance_secret, use_testnet=use_testnet)
             
-            # Test provider with a simple ping request
-            data_provider._make_request("/api/v3/ping")
-            logger.info(f"Initialized Binance Data Provider using {'testnet' if use_testnet else 'mainnet'}")
+            # If we're in Docker, we should be more resilient to startup issues
+            if in_docker:
+                # Docker environment - retry Binance connection a few times
+                max_retries = 3
+                retry_count = 0
+                last_error = None
+                
+                while retry_count < max_retries:
+                    try:
+                        logger.info(f"Connecting to Binance API (attempt {retry_count+1}/{max_retries})...")
+                        data_provider = BinanceDataProvider(api_key=binance_key, api_secret=binance_secret, use_testnet=use_testnet)
+                        
+                        # Test provider with a simple ping request
+                        data_provider._make_request("/api/v3/ping")
+                        logger.info(f"Initialized Binance Data Provider using {'testnet' if use_testnet else 'mainnet'}")
+                        break
+                    except Exception as e:
+                        last_error = e
+                        logger.warning(f"Binance API connection failed (attempt {retry_count+1}): {str(e)}")
+                        retry_count += 1
+                        if retry_count < max_retries:
+                            sleep_time = 5 * retry_count  # Increasing backoff
+                            logger.info(f"Retrying in {sleep_time} seconds...")
+                            time.sleep(sleep_time)
+                
+                if retry_count >= max_retries:
+                    if args.mode == "demo":
+                        logger.warning(f"Binance API access failed after {max_retries} attempts: {str(last_error)}")
+                        logger.warning("Falling back to demo mode with simulated data")
+                        from agents.data_providers.mock_data_provider import MockDataProvider
+                        data_provider = MockDataProvider(symbol=args.symbol)
+                        logger.info("Mock Data Provider initialized for demo mode")
+                    else:
+                        if last_error is not None:
+                            raise last_error
+                        else:
+                            raise Exception("Failed to connect to Binance API after multiple attempts")
+            else:
+                # Normal environment - single attempt
+                data_provider = BinanceDataProvider(api_key=binance_key, api_secret=binance_secret, use_testnet=use_testnet)
+                
+                # Test provider with a simple ping request
+                data_provider._make_request("/api/v3/ping")
+                logger.info(f"Initialized Binance Data Provider using {'testnet' if use_testnet else 'mainnet'}")
         except Exception as e:
             if args.mode == "demo":
                 logger.warning(f"Binance API access failed: {str(e)}")

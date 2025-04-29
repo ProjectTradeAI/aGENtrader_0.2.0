@@ -63,7 +63,13 @@ docker run -d \
     --name "$CONTAINER_NAME" \
     -p "$PORT:$PORT" \
     --env-file "$ENV_FILE" \
+    -e "IN_DOCKER=true" \
+    -e "MODE=test" \
+    -e "TEST_DURATION=24h" \
     -v "$(pwd)/logs:/app/logs" \
+    -v "$(pwd)/reports:/app/reports" \
+    -v "$(pwd)/trades:/app/trades" \
+    -v "$(pwd)/config:/app/config" \
     -v "$(pwd)/data:/app/data" \
     "$IMAGE_NAME:$TAG"
 

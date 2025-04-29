@@ -19,6 +19,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH="${PYTHONPATH}:/app"
 ENV AGENTRADER_VERSION="${VERSION}"
+ENV IN_DOCKER=true
+ENV TEST_DURATION=24h
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -48,8 +50,10 @@ RUN chown -R agentrader:agentrader /app
 # Run explicitly as root to ensure logs are accessible for validation
 # USER agentrader
 
-# Set up entrypoint
-ENTRYPOINT ["python", "run.py"]
+# Make docker_run.py executable
+RUN chmod +x docker_run.py
 
-# Default command with arguments
-CMD ["--mode", "test", "--symbol", "BTC/USDT", "--interval", "1h", "--duration", "24h"]
+# Set up entrypoint using the Docker-specific runner
+ENTRYPOINT ["python", "docker_run.py"]
+
+# No command needed as docker_run.py handles everything

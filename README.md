@@ -2,6 +2,13 @@
 
 An advanced multi-agent AI trading platform with sophisticated deployment and workflow management capabilities, focusing on intelligent cryptocurrency trading and comprehensive system monitoring.
 
+## Recent Updates
+
+- **2025-04-29**: Fixed validation script to properly detect Binance API initialization by matching the correct log pattern
+- **2025-04-28**: Upgraded from Mixtral to Mistral as the default LLM due to EC2 memory constraints
+- **2025-04-27**: Enhanced error handling in all market data providers
+- **2025-04-26**: Improved deployment validation with automatic container detection and fallback to local process checks
+
 ## Repository Structure
 
 The repository follows a standardized structure for better maintainability and organization.

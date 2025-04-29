@@ -169,7 +169,7 @@ def check_binance_connection() -> Tuple[bool, str]:
         
         logs = result.stdout
         
-        if "Binance Data Provider initialized" in logs:
+        if "Initialized Binance Data Provider" in logs or "Binance Data Provider initialized" in logs:
             return True, "Binance Data Provider initialized successfully"
         
         # If not found in recent logs, wait and check more logs
@@ -187,7 +187,7 @@ def check_binance_connection() -> Tuple[bool, str]:
             )
             
             logs = result.stdout
-            if "Binance Data Provider initialized" in logs:
+            if "Initialized Binance Data Provider" in logs or "Binance Data Provider initialized" in logs:
                 print("\n")
                 return True, "Binance Data Provider initialized successfully"
         
@@ -217,6 +217,8 @@ def check_agent_activity() -> Tuple[bool, str]:
             "LiquidityAnalystAgent",
             "TechnicalAnalystAgent", 
             "SentimentAnalystAgent",
+            "FundingRateAnalystAgent",
+            "OpenInterestAnalystAgent",
             "Decision Agent initialized"
         ]
         
@@ -280,14 +282,24 @@ def check_log_files() -> Tuple[bool, str]:
         # Check timestamp of last entry
         try:
             # Extract timestamp from last log entry
-            # Common format: 2025-04-15 14:23:45
-            timestamp_match = re.search(r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})", log_content)
+            # Common formats: 2025-04-15 14:23:45 or 2025-04-29T18:06:43.124463
+            timestamp_match = re.search(r"(\d{4}-\d{2}-\d{2}[T\s]+\d{2}:\d{2}:\d{2})", log_content)
             
             if not timestamp_match:
                 return False, "Could not find timestamp in log entries"
                 
             log_time_str = timestamp_match.group(1)
-            log_time = datetime.datetime.strptime(log_time_str, "%Y-%m-%d %H:%M:%S")
+            # Handle both formats: 2025-04-15 14:23:45 or 2025-04-29T18:06:43
+            try:
+                log_time = datetime.datetime.strptime(log_time_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                try:
+                    log_time = datetime.datetime.strptime(log_time_str, "%Y-%m-%dT%H:%M:%S")
+                except ValueError:
+                    # If all else fails, just get the date portion and use current time
+                    date_str = log_time_str.split()[0]
+                    log_time = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                    print(f"{YELLOW}Warning: Could only parse date, not time: {log_time_str}{RESET}")
             current_time = datetime.datetime.now()
             
             time_diff = (current_time - log_time).total_seconds() / 60  # minutes
@@ -454,7 +466,7 @@ def check_local_binance() -> Tuple[bool, str]:
                 with open(log_path, 'r') as f:
                     try:
                         log_content = f.read()
-                        if "Binance Data Provider initialized" in log_content:
+                        if "Initialized Binance Data Provider" in log_content or "Binance Data Provider initialized" in log_content:
                             return True, "Found Binance connection in local logs"
                     except:
                         pass
@@ -478,6 +490,8 @@ def check_local_agents() -> Tuple[bool, str]:
             "LiquidityAnalystAgent",
             "TechnicalAnalystAgent", 
             "SentimentAnalystAgent",
+            "FundingRateAnalystAgent",
+            "OpenInterestAnalystAgent",
             "Decision Agent initialized"
         ]
         

@@ -146,28 +146,34 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
             # Initialize data provider
             self.logger.info(f"Fetching open interest for {formatted_symbol} at {interval} interval")
             
-            # Create Binance provider directly to access futures API
-            from agents.data_providers.binance_data_provider import BinanceDataProvider
-            binance = BinanceDataProvider()
+            # Create Binance provider directly to access futures API with API keys
+            # Import from root directory as it's located there
+            import sys
+            import os
+            # Add project root to path
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            project_root = os.path.dirname(script_dir)
+            if project_root not in sys.path:
+                sys.path.append(project_root)
+            from binance_data_provider import BinanceDataProvider
+            
+            api_key = os.environ.get('BINANCE_API_KEY')
+            api_secret = os.environ.get('BINANCE_API_SECRET')
+            
+            if not api_key or not api_secret:
+                self.logger.warning("Binance API keys not found in environment, using unauthorized access")
+                binance = BinanceDataProvider()
+            else:
+                self.logger.info("Using Binance API with authentication")
+                binance = BinanceDataProvider(api_key=api_key, api_secret=api_secret)
             
             try:
-                # Map interval to valid API values
-                period_map = {
-                    "5m": "5m", "15m": "15m", "30m": "30m", "1h": "1h",
-                    "2h": "2h", "4h": "4h", "6h": "6h", "12h": "12h", "1d": "1d"
-                }
-                period = period_map.get(interval, "4h")  # Default to 4h if invalid
-                
-                # Prepare API parameters
-                params = {
-                    "symbol": formatted_symbol,
-                    "period": period,
-                    "limit": self.lookback_periods
-                }
-                
-                # Make API request to futures open interest history endpoint
-                url = "/futures/data/openInterestHist"
-                oi_history = binance._make_request(url, params=params)
+                # Use the specialized method to get futures open interest data
+                oi_history = binance.fetch_futures_open_interest(
+                    symbol=formatted_symbol,
+                    interval=interval,
+                    limit=self.lookback_periods
+                )
                 
                 # Verify we got valid data
                 if not oi_history or not isinstance(oi_history, list):

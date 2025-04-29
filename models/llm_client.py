@@ -32,9 +32,17 @@ class LLMClient:
     """
     
     # Default providers and endpoints from environment or config
-    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'local')
+    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'grok')  # Changed default to grok since Ollama is often not available
     DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mistral')  # Changed from mixtral to mistral for lower resource requirements
-    DEFAULT_ENDPOINT = os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434')
+    
+    # Try multiple potential Ollama endpoints
+    DEFAULT_ENDPOINTS = [
+        os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434'),
+        'http://localhost:11434',
+        'http://host.docker.internal:11434',  # For Docker environments
+        'http://172.31.16.22:11434'  # For specific server IP
+    ]
+    DEFAULT_ENDPOINT = DEFAULT_ENDPOINTS[0]  # Use the first one as default
     
     def __init__(self, 
                  provider: Optional[str] = None, 
@@ -110,21 +118,51 @@ class LLMClient:
     def _test_ollama_connection(self) -> bool:
         """
         Test if local Ollama server is running and responsive.
+        Tries multiple possible endpoints if the default one fails.
         
         Returns:
             True if Ollama is available, False otherwise
         """
+        # First try the configured endpoint
+        if self._try_ollama_endpoint(self.ollama_endpoint):
+            return True
+            
+        # If that fails, try all the default endpoints
+        for endpoint in self.DEFAULT_ENDPOINTS:
+            if endpoint != self.ollama_endpoint:  # Skip the one we already tried
+                if self._try_ollama_endpoint(endpoint):
+                    # Update the endpoint to the working one
+                    logger.info(f"Switching to working Ollama endpoint: {endpoint}")
+                    self.ollama_endpoint = endpoint
+                    self.ollama_api_chat = f"{self.ollama_endpoint}/api/chat"
+                    self.ollama_api_generate = f"{self.ollama_endpoint}/api/generate"
+                    return True
+                    
+        # If all endpoints fail, log the failure
+        logger.warning("All Ollama endpoints failed to connect")
+        return False
+        
+    def _try_ollama_endpoint(self, endpoint: str) -> bool:
+        """
+        Try to connect to a specific Ollama endpoint.
+        
+        Args:
+            endpoint: The endpoint URL to try
+            
+        Returns:
+            True if connection successful, False otherwise
+        """
         try:
             # Simple ping to Ollama API
-            response = requests.get(f"{self.ollama_endpoint}")
+            response = requests.get(endpoint, timeout=5)  # Add a timeout
             if response.status_code == 200:
-                logger.info(f"Local Ollama server is available at {self.ollama_endpoint}")
+                logger.info(f"Local Ollama server is available at {endpoint}")
                 return True
             else:
-                logger.warning(f"Local Ollama server returned error status: {response.status_code}")
+                logger.warning(f"Ollama server at {endpoint} returned error status: {response.status_code}")
                 return False
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Local Ollama server is not available: {str(e)}")
+            logger.warning(f"Ollama server at {endpoint} is not available: {str(e)}")
             return False
             
     def query(self, 

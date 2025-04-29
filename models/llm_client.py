@@ -72,13 +72,38 @@ class LLMClient:
         }
     }
     
-    # Try multiple potential Ollama endpoints
-    DEFAULT_ENDPOINTS = [
-        os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434'),
-        'http://localhost:11434',
-        'http://host.docker.internal:11434',  # For Docker environments
-        'http://172.31.16.22:11434'  # For specific server IP
-    ]
+    # Try multiple potential Ollama endpoints based on deployment environment
+    DEPLOY_ENV = os.environ.get('DEPLOY_ENV', 'dev').lower()
+    
+    # Define environment-specific endpoints
+    if DEPLOY_ENV == 'ec2':
+        # When running on EC2, try connections within the instance first, then other known locations
+        DEFAULT_ENDPOINTS = [
+            os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434'),
+            'http://localhost:11434',
+            'http://127.0.0.1:11434',
+            'http://0.0.0.0:11434',
+            'http://172.31.16.22:11434'  # EC2 internal IP (might vary)
+        ]
+        logger.info(f"Running in EC2 environment, will use these Ollama endpoints: {DEFAULT_ENDPOINTS}")
+    elif DEPLOY_ENV == 'docker':
+        # When running in Docker, include Docker-specific hostnames
+        DEFAULT_ENDPOINTS = [
+            os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434'),
+            'http://localhost:11434', 
+            'http://host.docker.internal:11434',  # Docker host access
+            'http://ollama:11434'  # If running in a Docker network with ollama service
+        ]
+        logger.info(f"Running in Docker environment, will use these Ollama endpoints: {DEFAULT_ENDPOINTS}")
+    else:
+        # Default endpoints for local development
+        DEFAULT_ENDPOINTS = [
+            os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434'),
+            'http://localhost:11434',
+            'http://127.0.0.1:11434'
+        ]
+        logger.info(f"Running in {DEPLOY_ENV} environment, will use these Ollama endpoints: {DEFAULT_ENDPOINTS}")
+        
     DEFAULT_ENDPOINT = DEFAULT_ENDPOINTS[0]  # Use the first one as default
     
     def __init__(self, 
@@ -169,6 +194,7 @@ class LLMClient:
         """
         Test if local Ollama server is running and responsive.
         Tries multiple possible endpoints if the default one fails.
+        Provides more detailed diagnostics in EC2 environment.
         
         Returns:
             True if Ollama is available, False otherwise
@@ -187,9 +213,25 @@ class LLMClient:
                     self.ollama_api_chat = f"{self.ollama_endpoint}/api/chat"
                     self.ollama_api_generate = f"{self.ollama_endpoint}/api/generate"
                     return True
-                    
-        # If all endpoints fail, log the failure
-        logger.warning("All Ollama endpoints failed to connect")
+        
+        # If all endpoints fail, provide environment-specific diagnostics
+        if self.DEPLOY_ENV == 'ec2':
+            logger.warning("""
+            ===== EC2 OLLAMA CONNECTION FAILURE =====
+            Unable to connect to Ollama server in the EC2 environment.
+            
+            Possible causes and solutions:
+            1. Ollama service is not running - Run 'sudo systemctl start ollama' on the EC2 instance
+            2. Ollama is running but not on port 11434 - Check 'sudo netstat -tulpn | grep ollama'
+            3. Firewall blocking connections - Check EC2 security group settings
+            4. Mistral model is installed but service is stopped - Run 'ollama serve' on the EC2 instance
+            
+            Will fallback to using Grok API instead.
+            ==========================================
+            """)
+        else:
+            logger.warning(f"All Ollama endpoints failed to connect in {self.DEPLOY_ENV} environment")
+            
         return False
         
     def _try_ollama_endpoint(self, endpoint: str) -> bool:
@@ -206,13 +248,45 @@ class LLMClient:
             # Simple ping to Ollama API
             response = requests.get(endpoint, timeout=5)  # Add a timeout
             if response.status_code == 200:
+                # Check if the model we need is available (for Mistral)
+                try:
+                    models_response = requests.get(f"{endpoint}/api/tags", timeout=5)
+                    if models_response.status_code == 200:
+                        models_data = models_response.json()
+                        models = [model.get('name', '') for model in models_data.get('models', [])]
+                        if 'mistral' in models or 'mistral:latest' in models:
+                            logger.info(f"Ollama server is available at {endpoint} with Mistral model")
+                        else:
+                            logger.warning(f"Ollama is available at {endpoint} but Mistral model is not installed")
+                            # We still return True as Ollama is available, but log a warning
+                except Exception as model_e:
+                    logger.warning(f"Could not check available models: {str(model_e)}")
+                
                 logger.info(f"Local Ollama server is available at {endpoint}")
                 return True
             else:
-                logger.warning(f"Ollama server at {endpoint} returned error status: {response.status_code}")
+                if self.DEPLOY_ENV == 'ec2':
+                    logger.warning(f"Ollama server at {endpoint} returned error status: {response.status_code}")
+                    logger.warning("Possible issue: Ollama service may need to be restarted with 'sudo systemctl restart ollama'")
+                else:
+                    logger.warning(f"Ollama server at {endpoint} returned error status: {response.status_code}")
                 return False
         except requests.exceptions.RequestException as e:
-            logger.warning(f"Ollama server at {endpoint} is not available: {str(e)}")
+            error_message = str(e)
+            
+            if self.DEPLOY_ENV == 'ec2':
+                if "Connection refused" in error_message:
+                    logger.warning(f"Ollama server at {endpoint} connection refused: Service may not be running")
+                    logger.warning("Start Ollama with: 'sudo systemctl start ollama' or 'ollama serve'")
+                elif "Name or service not known" in error_message:
+                    logger.warning(f"Ollama server at {endpoint} host not found: Check network configuration or hostname")
+                elif "timed out" in error_message:
+                    logger.warning(f"Connection timed out for {endpoint}: Check firewall settings or instance security group")
+                else:
+                    logger.warning(f"Ollama server at {endpoint} is not available: {error_message}")
+            else:
+                logger.warning(f"Ollama server at {endpoint} is not available: {error_message}")
+                
             return False
             
     def query(self, 

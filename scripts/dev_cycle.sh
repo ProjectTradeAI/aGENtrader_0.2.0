@@ -177,44 +177,161 @@ fi
 # --- Ollama Setup ---
 section "0. OLLAMA - Setting up LLM service"
 
-# Check if Ollama is installed
-if ! command -v ollama &> /dev/null; then
-    log "WARNING" "Ollama is not installed. Will attempt to install it."
+# Check if Python3 is available for enhanced Ollama health check
+if command -v python3 &> /dev/null; then
+    log "INFO" "Using enhanced Ollama health check script"
     
-    # Ask user for confirmation
-    read -p "Install Ollama now? (y/n): " install_ollama
+    # Check if we're in EC2 environment
+    if grep -q "DEPLOY_ENV=ec2" .env 2>/dev/null; then
+        EC2_FLAG="--ec2"
+        log "INFO" "Detected EC2 environment from .env file"
+    else
+        EC2_FLAG=""
+    fi
     
-    if [[ $install_ollama == "y" || $install_ollama == "Y" ]]; then
-        log "INFO" "Installing Ollama..."
+    # Run the Ollama health check
+    log "INFO" "Running Ollama health check..."
+    HEALTH_CHECK_OUTPUT=$(python3 scripts/ollama_health_check.py --json $EC2_FLAG 2>&1)
+    HEALTH_CHECK_STATUS=$?
+    
+    # Parse the JSON output
+    OLLAMA_INSTALLED=$(echo "$HEALTH_CHECK_OUTPUT" | grep -o '"installed": true' || echo "")
+    OLLAMA_RUNNING=$(echo "$HEALTH_CHECK_OUTPUT" | grep -o '"running": true' || echo "")
+    OLLAMA_ENDPOINT=$(echo "$HEALTH_CHECK_OUTPUT" | grep -o '"endpoint": "[^"]*"' | cut -d'"' -f4 || echo "")
+    
+    # Check if Ollama is installed
+    if [[ -z "$OLLAMA_INSTALLED" ]]; then
+        log "WARNING" "Ollama is not installed. Will attempt to install it."
         
-        # Installation based on the official documentation
-        if check_step "curl -fsSL https://ollama.com/install.sh | sh" "Installing Ollama"; then
-            log "SUCCESS" "Ollama installed successfully"
+        # Ask user for confirmation
+        read -p "Install Ollama now? (y/n): " install_ollama
+        
+        if [[ $install_ollama == "y" || $install_ollama == "Y" ]]; then
+            log "INFO" "Installing Ollama..."
+            
+            # Installation based on the official documentation
+            if check_step "curl -fsSL https://ollama.com/install.sh | sh" "Installing Ollama"; then
+                log "SUCCESS" "Ollama installed successfully"
+            else
+                log "WARNING" "Ollama installation failed. System will use fallback LLM providers."
+                log "INFO" "You can install Ollama manually later: curl -fsSL https://ollama.com/install.sh | sh"
+            fi
         else
-            log "WARNING" "Ollama installation failed. System will use fallback LLM providers."
-            log "INFO" "You can install Ollama manually later: curl -fsSL https://ollama.com/install.sh | sh"
+            log "INFO" "Ollama installation skipped. System will use fallback LLM providers."
         fi
     else
-        log "INFO" "Ollama installation skipped. System will use fallback LLM providers."
+        log "INFO" "Ollama is already installed"
+    fi
+    
+    # Check if Ollama is running
+    if [[ -z "$OLLAMA_RUNNING" ]]; then
+        log "INFO" "Ollama server is not running. Attempting to start..."
+        
+        # Start Ollama using the health check script
+        if python3 scripts/ollama_health_check.py --start $EC2_FLAG; then
+            log "SUCCESS" "Ollama server started successfully"
+            
+            # Update the running state and endpoint
+            HEALTH_CHECK_OUTPUT=$(python3 scripts/ollama_health_check.py --json $EC2_FLAG 2>&1)
+            OLLAMA_RUNNING=$(echo "$HEALTH_CHECK_OUTPUT" | grep -o '"running": true' || echo "")
+            OLLAMA_ENDPOINT=$(echo "$HEALTH_CHECK_OUTPUT" | grep -o '"endpoint": "[^"]*"' | cut -d'"' -f4 || echo "")
+        else
+            log "WARNING" "Failed to start Ollama server. System will use fallback LLM providers."
+            log "INFO" "If on EC2, try manually: 'sudo systemctl start ollama'"
+        fi
+    else
+        log "SUCCESS" "Ollama server is already running at: $OLLAMA_ENDPOINT"
+    fi
+    
+    # Check and pull required models if needed
+    if [[ ! -z "$OLLAMA_RUNNING" ]]; then
+        log "INFO" "Checking if required models are available..."
+        
+        # Get model status
+        MODEL_CHECK_OUTPUT=$(python3 scripts/ollama_health_check.py --check-models --json $EC2_FLAG 2>&1)
+        MODEL_CHECK_STATUS=$?
+        
+        # Check if we have mistral models
+        MISTRAL_AVAILABLE=$(echo "$MODEL_CHECK_OUTPUT" | grep -o '"mistral": true' || echo "")
+        
+        if [[ -z "$MISTRAL_AVAILABLE" ]]; then
+            log "INFO" "Mistral model not found. Attempting to pull it..."
+            
+            # Ask user for confirmation as this is a moderately sized download
+            read -p "Download Mistral model (~4GB)? Uses less memory than Mixtral. (y/n): " pull_mistral
+            
+            if [[ $pull_mistral == "y" || $pull_mistral == "Y" ]]; then
+                if check_step "ollama pull mistral" "Downloading Mistral model"; then
+                    log "SUCCESS" "Mistral model downloaded successfully"
+                else
+                    log "WARNING" "Failed to download Mistral model. System will use fallback LLM providers."
+                fi
+            else
+                log "INFO" "Mistral model download skipped. System will use fallback LLM providers."
+            fi
+        else
+            log "SUCCESS" "Mistral model is already downloaded and available"
+        fi
     fi
 else
-    log "INFO" "Ollama is already installed"
-fi
-
-# Check if Ollama is running
-if command -v ollama &> /dev/null; then
-    log "INFO" "Checking if Ollama server is running..."
+    # Fallback to basic checks if Python3 is not available
+    log "WARNING" "Python3 not found for enhanced checks. Using basic Ollama checks."
     
-    # Test connectivity to Ollama
-    if curl -s http://localhost:11434 &> /dev/null; then
-        log "SUCCESS" "Ollama server is already running"
-    else
-        log "INFO" "Starting Ollama server..."
+    # Check if Ollama is installed
+    if ! command -v ollama &> /dev/null; then
+        log "WARNING" "Ollama is not installed. Will attempt to install it."
         
-        # Start Ollama in the background
-        if check_step "ollama serve > /tmp/ollama.log 2>&1 &" "Starting Ollama server"; then
-            # Give it a moment to start
-            sleep 2
+        # Ask user for confirmation
+        read -p "Install Ollama now? (y/n): " install_ollama
+        
+        if [[ $install_ollama == "y" || $install_ollama == "Y" ]]; then
+            log "INFO" "Installing Ollama..."
+            
+            # Installation based on the official documentation
+            if check_step "curl -fsSL https://ollama.com/install.sh | sh" "Installing Ollama"; then
+                log "SUCCESS" "Ollama installed successfully"
+            else
+                log "WARNING" "Ollama installation failed. System will use fallback LLM providers."
+                log "INFO" "You can install Ollama manually later: curl -fsSL https://ollama.com/install.sh | sh"
+            fi
+        else
+            log "INFO" "Ollama installation skipped. System will use fallback LLM providers."
+        fi
+    else
+        log "INFO" "Ollama is already installed"
+    fi
+    
+    # Check if Ollama is running
+    if command -v ollama &> /dev/null; then
+        log "INFO" "Checking if Ollama server is running..."
+        
+        # Test connectivity to Ollama
+        if curl -s http://localhost:11434 &> /dev/null; then
+            log "SUCCESS" "Ollama server is already running"
+        else
+            log "INFO" "Starting Ollama server..."
+            
+            # Try to detect if we're on EC2
+            if grep -q "DEPLOY_ENV=ec2" .env 2>/dev/null; then
+                log "INFO" "Detected EC2 environment, trying systemctl first..."
+                if sudo systemctl start ollama 2>/dev/null; then
+                    log "SUCCESS" "Started Ollama with systemctl"
+                    sleep 5 # Give it time to start
+                else
+                    # Fall back to regular method
+                    log "INFO" "Systemctl failed, trying direct method..."
+                    if check_step "ollama serve > /tmp/ollama.log 2>&1 &" "Starting Ollama server"; then
+                        sleep 5 # Give it more time on EC2
+                    fi
+                fi
+            else
+                # Regular method for non-EC2
+                if check_step "ollama serve > /tmp/ollama.log 2>&1 &" "Starting Ollama server"; then
+                    # Give it a moment to start
+                    sleep 2
+                fi
+            fi
+            
             log "INFO" "Waiting for Ollama server to initialize..."
             
             # Check if it's now running
@@ -232,33 +349,31 @@ if command -v ollama &> /dev/null; then
                 log "WARNING" "Ollama server did not start properly. Check /tmp/ollama.log for details."
                 log "INFO" "System will use fallback LLM providers."
             fi
-        else
-            log "WARNING" "Failed to start Ollama server. System will use fallback LLM providers."
         fi
-    fi
-    
-    # Check if Mistral model is available
-    if curl -s http://localhost:11434 &> /dev/null; then
-        log "INFO" "Checking if Mistral model is available..."
         
-        # List models and check if mistral is available
-        models_output=$(ollama list 2>&1)
-        if echo "$models_output" | grep -q "mistral"; then
-            log "SUCCESS" "Mistral model is already downloaded and available"
-        else
-            log "INFO" "Mistral model not found. Attempting to pull it..."
+        # Check if Mistral model is available
+        if curl -s http://localhost:11434 &> /dev/null; then
+            log "INFO" "Checking if Mistral model is available..."
             
-            # Ask user for confirmation as this is a moderately sized download
-            read -p "Download Mistral model (~4GB)? Uses less memory than Mixtral. (y/n): " pull_mistral
-            
-            if [[ $pull_mistral == "y" || $pull_mistral == "Y" ]]; then
-                if check_step "ollama pull mistral" "Downloading Mistral model"; then
-                    log "SUCCESS" "Mistral model downloaded successfully"
-                else
-                    log "WARNING" "Failed to download Mistral model. System will use fallback LLM providers."
-                fi
+            # List models and check if mistral is available
+            models_output=$(ollama list 2>&1)
+            if echo "$models_output" | grep -q "mistral"; then
+                log "SUCCESS" "Mistral model is already downloaded and available"
             else
-                log "INFO" "Mistral model download skipped. System will use fallback LLM providers."
+                log "INFO" "Mistral model not found. Attempting to pull it..."
+                
+                # Ask user for confirmation as this is a moderately sized download
+                read -p "Download Mistral model (~4GB)? Uses less memory than Mixtral. (y/n): " pull_mistral
+                
+                if [[ $pull_mistral == "y" || $pull_mistral == "Y" ]]; then
+                    if check_step "ollama pull mistral" "Downloading Mistral model"; then
+                        log "SUCCESS" "Mistral model downloaded successfully"
+                    else
+                        log "WARNING" "Failed to download Mistral model. System will use fallback LLM providers."
+                    fi
+                else
+                    log "INFO" "Mistral model download skipped. System will use fallback LLM providers."
+                fi
             fi
         fi
     fi

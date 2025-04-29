@@ -631,6 +631,60 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
         logging.error(f"Error processing trading decision: {str(e)}", exc_info=True)
         return {"error": str(e), "status": "error"}
 
+def check_ollama_health():
+    """Check if Ollama is running and attempt to start it if needed."""
+    logger = logging.getLogger("aGENtrader.ollama")
+    
+    # Check if we should run in EC2 mode
+    deploy_env = os.environ.get('DEPLOY_ENV', 'dev').lower()
+    is_ec2 = deploy_env == 'ec2'
+    
+    logger.info(f"Checking Ollama health in {deploy_env} environment...")
+    
+    try:
+        # Check if we have the health check script
+        ollama_script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 
+                                         "scripts", "ollama_health_check.py")
+        
+        if os.path.exists(ollama_script_path):
+            import importlib.util
+            import subprocess
+            
+            # Try to run the script directly
+            cmd = [sys.executable, ollama_script_path, "--start", "--check-models", "--json"]
+            if is_ec2:
+                cmd.append("--ec2")
+                
+            logger.info(f"Running Ollama health check: {' '.join(cmd)}")
+            
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                
+                if result.returncode == 0:
+                    try:
+                        status = json.loads(result.stdout)
+                        logger.info(f"Ollama health check passed: {status.get('endpoint', 'unknown')}")
+                        return True
+                    except json.JSONDecodeError:
+                        logger.info("Ollama health check passed but returned non-JSON output")
+                        return True
+                else:
+                    logger.warning(f"Ollama health check failed: {result.stderr}")
+                    # Continue anyway, as we'll use fallback providers
+            except subprocess.TimeoutExpired:
+                logger.warning("Ollama health check timed out after 30 seconds")
+            except Exception as e:
+                logger.warning(f"Error running Ollama health check script: {str(e)}")
+        else:
+            logger.warning(f"Ollama health check script not found at {ollama_script_path}")
+            
+    except Exception as e:
+        logger.warning(f"Failed to check Ollama health: {str(e)}")
+    
+    # If we get here, we failed to start Ollama or the script is missing
+    # The LLM client will automatically use fallback providers
+    return False
+
 def main():
     """Initialize and run the trading system."""
     # Set up logging
@@ -641,6 +695,9 @@ def main():
     
     # Parse command-line arguments
     args = parse_arguments()
+    
+    # Check Ollama health early
+    check_ollama_health()
     
     # Extra safety: Force test mode in Docker environment
     if in_docker and args.mode == "demo":

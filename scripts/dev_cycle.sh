@@ -345,102 +345,209 @@ section "4. VALIDATION - Verifying deployment"
 
 # Run deployment validation
 if [ -f "deployment/validate_deployment.py" ]; then
-    # Check container name in validation script matches actual running container
-    actual_container_name=$(docker ps --format "{{.Names}}" | grep agentrader | head -1)
+    log "INFO" "Running enhanced deployment validation..."
     
-    if [ -n "$actual_container_name" ]; then
-        log "INFO" "Found running container: $actual_container_name"
-        
-        # Check and update container name in validation script if needed
-        validation_container=$(grep -o "CONTAINER_NAME = \"[^\"]*\"" deployment/validate_deployment.py | cut -d'"' -f2)
-        
-        if [ "$validation_container" != "$actual_container_name" ]; then
-            log "WARNING" "Container name in validation script ($validation_container) doesn't match actual container ($actual_container_name)"
-            log "INFO" "Updating validation script to use correct container name..."
-            
-            # Use sed to update the container name in the validation script
-            sed -i "s/CONTAINER_NAME = \"$validation_container\"/CONTAINER_NAME = \"$actual_container_name\"/" deployment/validate_deployment.py
-            
-            log "INFO" "Updated validation script with correct container name"
-        fi
-    fi
+    # The validation script now automatically detects container names and
+    # falls back to local process checks if Docker is not available
     
     # Run the validation script
     if check_step "python3 deployment/validate_deployment.py" "Validating deployment"; then
         log "SUCCESS" "Deployment validation passed"
     else
         log "WARNING" "Deployment validation reported issues. See output above."
-        log "WARNING" "The container is still running, but may have issues."
         
-        # Show container status for debugging
-        docker ps | grep agentrader | while read -r line; do
-            log "INFO" "Container status: $line"
-        done
-        
-        # Offer to show logs as additional debugging info
-        log "INFO" "You can check container logs after completion with: docker logs $actual_container_name"
+        # Get container status if Docker is available
+        if command -v docker &> /dev/null; then
+            # Show container status for debugging
+            actual_container_name=$(docker ps --format "{{.Names}}" | grep -i agentrader | head -1)
+            
+            if [ -n "$actual_container_name" ]; then
+                log "INFO" "Container is running:"
+                docker ps | grep -i "agentrader" | while read -r line; do
+                    log "INFO" "  > $line"
+                done
+                
+                # Offer to show logs as additional debugging info
+                log "INFO" "You can check container logs after completion with: docker logs $actual_container_name"
+            else
+                log "WARNING" "No aGENtrader container appears to be running."
+                
+                # Check if containers exist but are stopped
+                stopped_containers=$(docker ps -a --format "{{.Names}}" | grep -i agentrader)
+                if [ -n "$stopped_containers" ]; then
+                    log "INFO" "Found stopped aGENtrader containers:"
+                    docker ps -a | grep -i "agentrader" | while read -r line; do
+                        log "INFO" "  > $line"
+                    done
+                    
+                    log "INFO" "You may want to restart one of these containers or check their logs."
+                fi
+            fi
+        else
+            # Docker not available, check for local processes
+            log "INFO" "Docker not available. Checking for local processes..."
+            ps aux | grep -i "python.*main.py\|python.*run.py" | grep -v grep | while read -r line; do
+                log "INFO" "  > $line"
+            done
+        fi
     fi
 else
     log "WARNING" "Validation script not found at deployment/validate_deployment.py"
-    log "WARNING" "Checking container status manually..."
+    log "WARNING" "Checking deployment status manually..."
     
-    # Basic container check if no validation script
-    if docker ps | grep -q "agentrader"; then
-        actual_container_name=$(docker ps --format "{{.Names}}" | grep agentrader | head -1)
-        log "INFO" "Container is running:"
-        docker ps | grep "agentrader" | while read -r line; do
-            log "INFO" "  > $line"
-        done
-        
-        # Show recent logs
-        log "INFO" "Recent container logs:"
-        docker logs --tail 10 $actual_container_name 2>&1 | while read -r line; do
-            log "INFO" "  > $line"
-        done
+    # Basic container check if validation script is missing
+    if command -v docker &> /dev/null; then
+        if docker ps | grep -qi "agentrader"; then
+            actual_container_name=$(docker ps --format "{{.Names}}" | grep -i agentrader | head -1)
+            log "INFO" "Container is running:"
+            docker ps | grep -i "agentrader" | while read -r line; do
+                log "INFO" "  > $line"
+            done
+            
+            # Show recent logs
+            log "INFO" "Recent container logs:"
+            docker logs --tail 10 $actual_container_name 2>&1 | while read -r line; do
+                log "INFO" "  > $line"
+            done
+        else
+            log "WARNING" "No aGENtrader container appears to be running."
+            
+            # Check for local Python processes
+            log "INFO" "Checking for local processes instead..."
+            ps aux | grep -i "python.*main.py\|python.*run.py" | grep -v grep | while read -r line; do
+                log "INFO" "  > $line"
+            done
+        fi
     else
-        log "ERROR" "Container does not appear to be running."
-        docker ps -a | grep "agentrader" | while read -r line; do
-            log "ERROR" "  > $line"
+        # Docker not available, check for local processes
+        log "INFO" "Docker not available. Checking for local processes..."
+        ps aux | grep -i "python.*main.py\|python.*run.py" | grep -v grep | while read -r line; do
+            log "INFO" "  > $line"
         done
         
-        # Don't exit, allow user to debug
-        log "WARNING" "Deployment may have failed, but continuing."
+        # Check if log files exist and show last few lines
+        if [ -d "logs" ]; then
+            log_files=$(find logs -name "*.log" -o -name "*.logl" | head -3)
+            if [ -n "$log_files" ]; then
+                log "INFO" "Found log files:"
+                for log_file in $log_files; do
+                    log "INFO" "  > $log_file (last 5 lines):"
+                    tail -n 5 "$log_file" | while read -r line; do
+                        log "INFO" "    $line"
+                    done
+                done
+            else
+                log "WARNING" "No log files found in logs/ directory."
+            fi
+        else
+            log "WARNING" "No logs directory found."
+        fi
     fi
 fi
 
 section "5. SUMMARY - Development Cycle Completed"
 
-# Get actual container name
-actual_container_name=$(docker ps --format "{{.Names}}" | grep agentrader | head -1)
-if [ -z "$actual_container_name" ]; then
-    actual_container_name="agentrader"
-fi
-
 # Display summary
 log "SUCCESS" "Dev cycle completed successfully"
 log "INFO" "Current branch: $(git branch --show-current)"
-log "INFO" "Current commit: $(git rev-parse --short HEAD)" 
-log "INFO" "Current container: $(docker ps | grep "$actual_container_name" || echo 'Not found')"
+log "INFO" "Current commit: $(git rev-parse --short HEAD)"
 
-# --- Optional Log Viewing ---
-
-# Prompt user to view logs
-echo
-echo -e "${YELLOW}Would you like to:${RESET}"
-echo "  1) Tail logs for live monitoring"
-echo "  2) Exit"
-
-read -p "Enter your choice (1/2): " log_choice
-
-case $log_choice in
-    1)
-        echo -e "\n${CYAN}Tailing logs for $actual_container_name container (Ctrl+C to exit):${RESET}\n"
-        docker logs -f "$actual_container_name"
-        ;;
-    *)
+# Check if Docker is available
+if command -v docker &> /dev/null; then
+    # Get actual container name
+    actual_container_name=$(docker ps --format "{{.Names}}" | grep -i agentrader | head -1)
+    if [ -n "$actual_container_name" ]; then
+        log "INFO" "Current container: $(docker ps | grep -i "$actual_container_name")"
+        
+        # --- Optional Log Viewing for Docker ---
+        echo
+        echo -e "${YELLOW}Would you like to:${RESET}"
+        echo "  1) Tail Docker container logs"
+        echo "  2) Exit"
+        
+        read -p "Enter your choice (1/2): " log_choice
+        
+        case $log_choice in
+            1)
+                echo -e "\n${CYAN}Tailing logs for $actual_container_name container (Ctrl+C to exit):${RESET}\n"
+                docker logs -f "$actual_container_name"
+                ;;
+            *)
+                echo -e "\n${GREEN}Dev cycle complete. Exiting.${RESET}"
+                ;;
+        esac
+    else
+        log "INFO" "No running aGENtrader container found"
+        
+        # Check if local Python process is running
+        python_process=$(ps aux | grep -i "python.*main.py\|python.*run.py" | grep -v grep | head -1)
+        if [ -n "$python_process" ]; then
+            log "INFO" "Local Python process: $python_process"
+        fi
+        
+        # --- Optional Log Viewing for Local Files ---
+        if [ -d "logs" ]; then
+            echo
+            echo -e "${YELLOW}Would you like to:${RESET}"
+            echo "  1) Tail local log file"
+            echo "  2) Exit"
+            
+            read -p "Enter your choice (1/2): " log_choice
+            
+            case $log_choice in
+                1)
+                    log_files=$(find logs -name "*.log" -o -name "*.logl" | head -1)
+                    if [ -n "$log_files" ]; then
+                        echo -e "\n${CYAN}Tailing logs from $log_files (Ctrl+C to exit):${RESET}\n"
+                        tail -f "$log_files"
+                    else
+                        echo -e "\n${YELLOW}No log files found.${RESET}"
+                    fi
+                    ;;
+                *)
+                    echo -e "\n${GREEN}Dev cycle complete. Exiting.${RESET}"
+                    ;;
+            esac
+        else
+            echo -e "\n${GREEN}Dev cycle complete. Exiting.${RESET}"
+        fi
+    fi
+else
+    # Check if local Python process is running
+    python_process=$(ps aux | grep -i "python.*main.py\|python.*run.py" | grep -v grep | head -1)
+    if [ -n "$python_process" ]; then
+        log "INFO" "Local Python process: $python_process"
+    else
+        log "INFO" "No running aGENtrader process found"
+    fi
+    
+    # --- Optional Log Viewing for Local Files ---
+    if [ -d "logs" ]; then
+        echo
+        echo -e "${YELLOW}Would you like to:${RESET}"
+        echo "  1) Tail local log file"
+        echo "  2) Exit"
+        
+        read -p "Enter your choice (1/2): " log_choice
+        
+        case $log_choice in
+            1)
+                log_files=$(find logs -name "*.log" -o -name "*.logl" | head -1)
+                if [ -n "$log_files" ]; then
+                    echo -e "\n${CYAN}Tailing logs from $log_files (Ctrl+C to exit):${RESET}\n"
+                    tail -f "$log_files"
+                else
+                    echo -e "\n${YELLOW}No log files found.${RESET}"
+                fi
+                ;;
+            *)
+                echo -e "\n${GREEN}Dev cycle complete. Exiting.${RESET}"
+                ;;
+        esac
+    else
         echo -e "\n${GREEN}Dev cycle complete. Exiting.${RESET}"
-        ;;
-esac
+    fi
+fi
 
 # Completion message
 echo

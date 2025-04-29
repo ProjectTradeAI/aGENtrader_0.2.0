@@ -16,10 +16,52 @@ import re
 from typing import Dict, List, Tuple, Any, Optional
 
 # Configuration
-CONTAINER_NAME = "agentrader"  # Updated to match actual container name
+DEFAULT_CONTAINER_NAME = "agentrader"  # Default container name prefix
 LOG_FILE = "../logs/decision_summary.logl"
 LOG_CHECK_TIMEOUT = 60  # seconds to wait for log updates
 BINANCE_CHECK_TIMEOUT = 30  # seconds to wait for Binance connection
+
+# Dynamically detect container name
+def detect_container_name():
+    """Try to detect aGENtrader container name from running containers"""
+    try:
+        # Try variations of the container name
+        container_prefixes = ["agentrader", "aGENtrader"]
+        
+        for prefix in container_prefixes:
+            result = subprocess.run(
+                ["docker", "ps", "--format", "{{.Names}}", "--filter", f"name={prefix}"],
+                capture_output=True,
+                text=True
+            )
+            
+            containers = result.stdout.strip().split('\n')
+            containers = [c for c in containers if c]  # Remove empty strings
+            
+            if containers:
+                print(f"{GREEN}Detected container: {containers[0]}{RESET}")
+                return containers[0]
+                
+        print(f"{YELLOW}No container found with names: {container_prefixes}{RESET}")
+        return DEFAULT_CONTAINER_NAME
+        
+    except Exception as e:
+        print(f"{YELLOW}Error detecting container name: {e}{RESET}")
+        print(f"{YELLOW}Using default container name: {DEFAULT_CONTAINER_NAME}{RESET}")
+        return DEFAULT_CONTAINER_NAME
+
+# Check if Docker is available
+def is_docker_available():
+    """Check if Docker command is available"""
+    try:
+        subprocess.run(["docker", "--version"], capture_output=True, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+# Set container name dynamically
+DOCKER_AVAILABLE = is_docker_available()
+CONTAINER_NAME = detect_container_name() if DOCKER_AVAILABLE else DEFAULT_CONTAINER_NAME
 
 # ANSI color codes for prettier output
 GREEN = "\033[92m"
@@ -325,18 +367,165 @@ def check_decision_making() -> Tuple[bool, str]:
         return False, f"Unexpected error: {e}"
 
 
+def check_local_process() -> Tuple[bool, str]:
+    """Check if aGENtrader is running as a local process instead of Docker"""
+    try:
+        # Look for Python process running main.py or run.py
+        result = subprocess.run(
+            ["ps", "aux"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        processes = result.stdout
+        
+        if "python" in processes and ("main.py" in processes or "run.py" in processes):
+            return True, "Found aGENtrader running as a local Python process"
+        else:
+            return False, "No aGENtrader process found running locally"
+            
+    except subprocess.CalledProcessError as e:
+        return False, f"Error checking local process: {e}"
+    except Exception as e:
+        return False, f"Unexpected error: {e}"
+
+
+def check_local_logs() -> Tuple[bool, str]:
+    """Check local log files instead of Docker logs"""
+    try:
+        log_paths = [
+            "logs/decision_summary.logl",
+            "logs/agentrader.log"
+        ]
+        
+        found_logs = []
+        for log_path in log_paths:
+            if os.path.exists(log_path):
+                found_logs.append(log_path)
+                
+        if not found_logs:
+            return False, "No log files found in logs/ directory"
+            
+        # Check content of first found log
+        with open(found_logs[0], 'r') as f:
+            try:
+                last_lines = f.readlines()[-20:]  # Get last 20 lines
+                last_content = ''.join(last_lines)
+                
+                # Look for error patterns
+                error_patterns = [
+                    "critical error",
+                    "exception occurred",
+                    "fatal error",
+                    "cannot connect",
+                    "terminated with error"
+                ]
+                
+                errors = []
+                for pattern in error_patterns:
+                    if re.search(pattern, last_content, re.IGNORECASE):
+                        matches = re.findall(f".*{pattern}.*", last_content, re.IGNORECASE)
+                        errors.extend(matches[:3])
+                
+                if errors:
+                    return False, f"Found errors in logs: {', '.join(errors[:3])}"
+                    
+                return True, f"Found local logs: {', '.join(found_logs)}"
+                
+            except Exception as e:
+                return False, f"Error reading log file: {e}"
+                
+    except Exception as e:
+        return False, f"Error checking local logs: {e}"
+        
+        
+def check_local_binance() -> Tuple[bool, str]:
+    """Check for Binance connectivity in local logs"""
+    try:
+        log_paths = [
+            "logs/agentrader.log",
+            "logs/system.log",
+            "logs/debug.log"
+        ]
+        
+        for log_path in log_paths:
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    try:
+                        log_content = f.read()
+                        if "Binance Data Provider initialized" in log_content:
+                            return True, "Found Binance connection in local logs"
+                    except:
+                        pass
+                        
+        return False, "No evidence of Binance connection in local logs"
+        
+    except Exception as e:
+        return False, f"Error checking Binance connection: {e}"
+
+
+def check_local_agents() -> Tuple[bool, str]:
+    """Check for agent activity in local logs"""
+    try:
+        log_paths = [
+            "logs/agentrader.log",
+            "logs/system.log",
+            "logs/decision_summary.logl"
+        ]
+        
+        agent_patterns = [
+            "LiquidityAnalystAgent",
+            "TechnicalAnalystAgent", 
+            "SentimentAnalystAgent",
+            "Decision Agent initialized"
+        ]
+        
+        found_agents = set()
+        
+        for log_path in log_paths:
+            if os.path.exists(log_path):
+                with open(log_path, 'r') as f:
+                    try:
+                        log_content = f.read()
+                        for pattern in agent_patterns:
+                            if pattern in log_content:
+                                found_agents.add(pattern)
+                    except:
+                        pass
+                        
+        if found_agents:
+            return True, f"Found {len(found_agents)}/{len(agent_patterns)} agents in local logs: {', '.join(found_agents)}"
+        else:
+            return False, "No agent activity found in local logs"
+            
+    except Exception as e:
+        return False, f"Error checking agent activity: {e}"
+
+
 def main():
     """Run the deployment validation checks"""
     print_header()
     
-    checks = [
-        ("Docker Container", check_docker_running),
-        ("Docker Logs", check_docker_logs),
-        ("Binance Connection", check_binance_connection),
-        ("Agent Activity", check_agent_activity),
-        ("Log Files", check_log_files),
-        ("Decision Making", check_decision_making)
-    ]
+    if DOCKER_AVAILABLE:
+        # Docker environment checks
+        checks = [
+            ("Docker Container", check_docker_running),
+            ("Docker Logs", check_docker_logs),
+            ("Binance Connection", check_binance_connection),
+            ("Agent Activity", check_agent_activity),
+            ("Log Files", check_log_files),
+            ("Decision Making", check_decision_making)
+        ]
+    else:
+        # Local environment checks when Docker is not available
+        print(f"{YELLOW}Docker not available. Performing local environment checks.{RESET}")
+        checks = [
+            ("Local Process", check_local_process),
+            ("Local Logs", check_local_logs),
+            ("Binance Connection", check_local_binance),
+            ("Agent Activity", check_local_agents)
+        ]
     
     results = []
     

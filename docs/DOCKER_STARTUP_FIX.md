@@ -36,6 +36,8 @@ The Docker container was exiting prematurely with exit code 1 before the core sy
    - Added `IN_DOCKER=true` to Dockerfile and docker-compose.yml.
    - Added `TEST_DURATION=24h` to control how long the system runs in test mode.
    - Set `MODE=test` explicitly to avoid accidentally running in demo (single-cycle) mode.
+   - Added `DEMO_OVERRIDE=true` to force continuous mode even if demo mode is specified.
+   - Added `CONTINUOUS_RUN=true` as an additional signal to ensure long-running operation.
 
 3. **Improved Error Handling**:
    - Added retry logic with backoff for Binance API connections.

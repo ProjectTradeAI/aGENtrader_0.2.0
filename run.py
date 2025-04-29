@@ -765,6 +765,15 @@ def main():
         logger.info(f"Running in {args.mode} mode with {args.symbol} at {args.interval} interval")
         
         # Main loop
+        demo_override = os.environ.get("DEMO_OVERRIDE", "false").lower() == "true"
+        continuous_run = os.environ.get("CONTINUOUS_RUN", "false").lower() == "true"
+        
+        # If running in Docker via docker_run.py, always force continuous mode
+        if in_docker or continuous_run:
+            if args.mode == "demo":
+                logger.info("Demo mode detected in Docker environment. Forcing continuous mode.")
+                args.mode = "test"
+        
         if args.mode == "demo":
             # In demo mode, run once and exit
             logger.info("Demo mode active. Running one trading cycle.")
@@ -778,6 +787,11 @@ def main():
             )
             logger.info(f"Demo cycle completed with status: {result['status']}")
         else:
+            # Force continuous mode if requested via environment
+            if demo_override:
+                logger.info("Demo mode behaviors disabled by DEMO_OVERRIDE.")
+                args.mode = "test"
+                
             # In all other modes, keep the system running
             logger.info(f"System running in {args.mode} mode. Press Ctrl+C to stop.")
             

@@ -12,6 +12,8 @@ services:
       - IN_DOCKER=true
       - TEST_DURATION=24h
       - MODE=test
+      - DEMO_OVERRIDE=true
+      - CONTINUOUS_RUN=true
     volumes:
       - ../logs:/app/logs
       - ../reports:/app/reports

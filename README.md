@@ -4,6 +4,8 @@ An advanced multi-agent AI trading platform with sophisticated deployment and wo
 
 ## Recent Updates
 
+- **2025-04-29**: Implemented automatic Ollama health check system with environment-specific startup procedures
+- **2025-04-29**: Enhanced LLM client with improved error diagnostics and environment detection
 - **2025-04-29**: Implemented agent-specific LLM routing - Sentiment agents now use Grok, others use Mistral
 - **2025-04-29**: Fixed validation script to properly detect Binance API initialization by matching the correct log pattern
 - **2025-04-28**: Upgraded from Mixtral to Mistral as the default LLM due to EC2 memory constraints
@@ -67,6 +69,17 @@ The system can fetch data from multiple sources:
 - **Decision Logger**: Creates human-readable summaries of agent decisions
 - **Live Trading**: Core trading functionality that integrates all specialist agents
 - **Trigger Scheduler**: Manages scheduled triggers for different timeframes
+- **Ollama Health Check**: Automatic LLM service management with environment-specific detection
+
+#### Ollama Health Check System
+
+The platform includes a robust automatic LLM service management system:
+
+- **Automatic Detection**: Detects environment (EC2, Docker, local) and uses appropriate configuration
+- **Service Management**: Automatically starts Ollama service if not running
+- **Model Verification**: Ensures required models (Mistral) are available
+- **Fallback Mechanism**: Gracefully falls back to Grok API when Ollama is unavailable
+- **Diagnostics**: Provides detailed error messages with environment-specific troubleshooting steps
 
 ## Getting Started
 

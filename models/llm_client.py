@@ -33,7 +33,7 @@ class LLMClient:
     
     # Default providers and endpoints from environment or config
     DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'local')
-    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mistral')  # Changed from mixtral to mistral for lower resource usage
+    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mixtral')
     DEFAULT_ENDPOINT = os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434')
     
     def __init__(self, 
@@ -86,7 +86,7 @@ class LLMClient:
         
         # Configure default models for each provider
         self.default_models = {
-            'local': 'mistral',  # Changed from mixtral to mistral for lower resource usage
+            'local': 'mixtral',
             'grok': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212'),
             'openai': 'gpt-4-turbo'
         }
@@ -94,7 +94,7 @@ class LLMClient:
         # Set the model based on provider
         if not model:
             provider_key = self.provider or 'local'
-            self.model = self.default_models.get(provider_key, 'mistral')  # Changed from mixtral to mistral
+            self.model = self.default_models.get(provider_key, 'mixtral')
         
         # Log available providers
         available_providers = []
@@ -153,7 +153,7 @@ class LLMClient:
         """
         # Select provider
         provider_to_use = provider or self.provider
-        model_to_use = model or self.model or "mistral"  # Changed from mixtral to mistral
+        model_to_use = model or self.model or "mixtral"
         
         # If local is requested but not available, fall back
         if provider_to_use == 'local' and not self._test_ollama_connection():
@@ -161,7 +161,7 @@ class LLMClient:
             if fallbacks:
                 logger.warning(f"Ollama not available, falling back to {fallbacks[0]}")
                 provider_to_use = fallbacks[0]
-                model_to_use = self.default_models.get(provider_to_use, "mistral")
+                model_to_use = self.default_models.get(provider_to_use, "mixtral")
             else:
                 return {
                     "error": "Ollama not available and no fallback providers configured",
@@ -183,7 +183,7 @@ class LLMClient:
             
             logger.warning(f"Provider {provider_to_use} not available. Falling back to {available[0]}")
             provider_to_use = available[0]
-            model_to_use = self.default_models.get(provider_to_use, "mistral")
+            model_to_use = self.default_models.get(provider_to_use, "mixtral")
             
         try:
             # Ollama has a different API format
@@ -234,7 +234,7 @@ class LLMClient:
     def _query_ollama(self,
                       prompt: str,
                       system_prompt: Optional[str] = None,
-                      model: Optional[str] = "mistral",  # Changed from mixtral to mistral
+                      model: Optional[str] = "mixtral",
                       json_response: bool = False,
                       max_tokens: int = 1000,
                       temperature: float = 0.7) -> Dict[str, Any]:

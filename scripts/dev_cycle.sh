@@ -237,28 +237,28 @@ if command -v ollama &> /dev/null; then
         fi
     fi
     
-    # Check if Mixtral model is available
+    # Check if Mistral model is available
     if curl -s http://localhost:11434 &> /dev/null; then
-        log "INFO" "Checking if Mixtral model is available..."
+        log "INFO" "Checking if Mistral model is available..."
         
-        # List models and check if mixtral is available
+        # List models and check if mistral is available
         models_output=$(ollama list 2>&1)
-        if echo "$models_output" | grep -q "mixtral"; then
-            log "SUCCESS" "Mixtral model is already downloaded and available"
+        if echo "$models_output" | grep -q "mistral"; then
+            log "SUCCESS" "Mistral model is already downloaded and available"
         else
-            log "INFO" "Mixtral model not found. Attempting to pull it..."
+            log "INFO" "Mistral model not found. Attempting to pull it..."
             
-            # Ask user for confirmation as this is a large download
-            read -p "Download Mixtral model (4-8GB)? This may take a while. (y/n): " pull_mixtral
+            # Ask user for confirmation as this is a moderately sized download
+            read -p "Download Mistral model (~4GB)? Uses less memory than Mixtral. (y/n): " pull_mistral
             
-            if [[ $pull_mixtral == "y" || $pull_mixtral == "Y" ]]; then
-                if check_step "ollama pull mixtral" "Downloading Mixtral model"; then
-                    log "SUCCESS" "Mixtral model downloaded successfully"
+            if [[ $pull_mistral == "y" || $pull_mistral == "Y" ]]; then
+                if check_step "ollama pull mistral" "Downloading Mistral model"; then
+                    log "SUCCESS" "Mistral model downloaded successfully"
                 else
-                    log "WARNING" "Failed to download Mixtral model. System will use fallback LLM providers."
+                    log "WARNING" "Failed to download Mistral model. System will use fallback LLM providers."
                 fi
             else
-                log "INFO" "Mixtral model download skipped. System will use fallback LLM providers."
+                log "INFO" "Mistral model download skipped. System will use fallback LLM providers."
             fi
         fi
     fi

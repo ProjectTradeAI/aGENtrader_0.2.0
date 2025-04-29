@@ -177,8 +177,10 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                 
                 # Verify we got valid data
                 if not oi_history or not isinstance(oi_history, list):
-                    self.logger.warning(f"Invalid open interest data returned for {formatted_symbol}")
-                    return self._generate_mock_oi_data(formatted_symbol, interval)
+                    self.logger.error(f"Invalid open interest data returned for {formatted_symbol}")
+                    self.logger.error("Unable to fetch authentic open interest data - returning empty dataset")
+                    # Return empty dataset rather than generating simulated data
+                    return []
                 
                 # Fetch price data to correlate with open interest
                 price_data = self.fetch_price_data(formatted_symbol, interval)
@@ -190,9 +192,10 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                 return merged_data
                 
             except Exception as fetch_error:
-                self.logger.warning(f"Error accessing futures open interest API: {str(fetch_error)}")
-                self.logger.warning("Generating simulated open interest data for demo purposes")
-                return self._generate_mock_oi_data(formatted_symbol, interval)
+                self.logger.error(f"Error accessing futures open interest API: {str(fetch_error)}")
+                self.logger.error("Unable to fetch authentic open interest data - returning empty dataset")
+                # No simulated data - return empty dataset to maintain data integrity
+                return []
                 
         except Exception as e:
             self.logger.error(f"Error fetching open interest data: {str(e)}", exc_info=True)

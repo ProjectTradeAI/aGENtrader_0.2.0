@@ -448,70 +448,96 @@ class BinanceDataProvider:
             "limit": limit
         }
         
-        # Different endpoints for mainnet vs testnet
+        # Try the appropriate endpoint with fallbacks to handle geographic restrictions
+        futures_endpoints = []
+        
         if self.use_testnet:
-            # For testnet, use fapi endpoint
-            endpoint = "/fapi/v1/openInterest"
+            # For testnet, use fapi endpoint first
+            futures_endpoints.append({
+                "endpoint": "/fapi/v1/openInterest",
+                "is_historical": False,
+                "description": "testnet current open interest"
+            })
+        else:
+            # For mainnet, try multiple endpoints starting with the historical one
+            futures_endpoints.extend([
+                {
+                    "endpoint": "/futures/data/openInterestHist", 
+                    "is_historical": True,
+                    "description": "mainnet historical open interest"
+                },
+                {
+                    "endpoint": "/fapi/v1/openInterest", 
+                    "is_historical": False,
+                    "description": "mainnet current open interest"
+                }
+            ])
+        
+        # Try each endpoint in order until one works
+        for endpoint_info in futures_endpoints:
+            endpoint = endpoint_info["endpoint"]
+            is_historical = endpoint_info["is_historical"]
+            description = endpoint_info["description"]
             
             try:
-                # Note: On testnet, this returns only current open interest, not historical data
-                current_oi_data = self._make_request(endpoint, params={"symbol": formatted_symbol}, use_futures_api=True)
+                logger.info(f"Trying to fetch {description} from {endpoint}")
                 
-                # Create a historical-like structure with just the current data repeated
-                if isinstance(current_oi_data, dict) and "openInterest" in current_oi_data:
-                    # Single current value, create a list of historical-like records
-                    current_oi = float(current_oi_data.get("openInterest", 0))
-                    current_time = int(time.time() * 1000)
+                if is_historical:
+                    # For historical endpoints
+                    data = self._make_request(endpoint, params=params, use_futures_api=True)
                     
-                    # Create historical-like data with the current value
-                    historical_data = []
-                    for i in range(limit):
-                        # Create timestamps going backward in time
-                        timestamp = current_time - (i * self._get_interval_milliseconds(interval))
-                        historical_data.append({
-                            "symbol": formatted_symbol,
-                            "sumOpenInterest": current_oi,
-                            "sumOpenInterestValue": current_oi * self.get_current_price(formatted_symbol),
-                            "timestamp": timestamp
+                    # Ensure the response is a list
+                    if not isinstance(data, list):
+                        logger.warning(f"Unexpected response from {description}: {data}")
+                        continue
+                        
+                    # Format the response
+                    formatted_data = []
+                    for item in data:
+                        formatted_data.append({
+                            "symbol": item.get("symbol", formatted_symbol),
+                            "sumOpenInterest": float(item.get("sumOpenInterest", 0)),
+                            "sumOpenInterestValue": float(item.get("sumOpenInterestValue", 0)),
+                            "timestamp": item.get("timestamp", 0)
                         })
                     
-                    logger.info(f"Created historical-like open interest data from current value ({current_oi})")
-                    return historical_data
+                    logger.info(f"Successfully fetched {len(formatted_data)} futures open interest records from {description}")
+                    return formatted_data
                 else:
-                    logger.warning(f"Unexpected open interest response format: {current_oi_data}")
-                    return []
-            except Exception as e:
-                logger.error(f"Error fetching current open interest from testnet: {str(e)}")
-                return []
-        else:
-            # For mainnet, use the historical endpoint
-            endpoint = "/futures/data/openInterestHist"
-            
-            try:
-                # Make request to the futures API
-                data = self._make_request(endpoint, params=params, use_futures_api=True)
-                
-                # Ensure the response is a list
-                if not isinstance(data, list):
-                    logger.warning(f"Unexpected open interest history response: {data}")
-                    return []
+                    # For non-historical endpoints (current value only)
+                    current_oi_data = self._make_request(endpoint, params={"symbol": formatted_symbol}, use_futures_api=True)
                     
-                # Format the response
-                formatted_data = []
-                for item in data:
-                    formatted_data.append({
-                        "symbol": item.get("symbol", formatted_symbol),
-                        "sumOpenInterest": float(item.get("sumOpenInterest", 0)),
-                        "sumOpenInterestValue": float(item.get("sumOpenInterestValue", 0)),
-                        "timestamp": item.get("timestamp", 0)
-                    })
-                
-                logger.info(f"Fetched {len(formatted_data)} futures open interest records")
-                return formatted_data
-                
+                    # Create a historical-like structure with just the current data repeated
+                    if isinstance(current_oi_data, dict) and "openInterest" in current_oi_data:
+                        # Single current value, create a list of historical-like records
+                        current_oi = float(current_oi_data.get("openInterest", 0))
+                        current_time = int(time.time() * 1000)
+                        current_price = self.get_current_price(formatted_symbol)
+                        
+                        # Create historical-like data with the current value
+                        historical_data = []
+                        for i in range(limit):
+                            # Create timestamps going backward in time
+                            timestamp = current_time - (i * self._get_interval_milliseconds(interval))
+                            historical_data.append({
+                                "symbol": formatted_symbol,
+                                "sumOpenInterest": current_oi,
+                                "sumOpenInterestValue": current_oi * current_price,
+                                "timestamp": timestamp
+                            })
+                        
+                        logger.info(f"Successfully created historical-like open interest data from current value ({current_oi}) via {description}")
+                        return historical_data
+                    else:
+                        logger.warning(f"Unexpected response from {description}: {current_oi_data}")
+                        continue
             except Exception as e:
-                logger.error(f"Error fetching futures open interest history: {str(e)}")
-                return []
+                logger.warning(f"Error fetching from {description}: {str(e)}")
+                continue  # Try the next endpoint
+        
+        # If all endpoints fail, return empty list
+        logger.error("All Binance futures endpoints failed when trying to fetch open interest data")
+        return []
     
     def _get_interval_milliseconds(self, interval: str) -> int:
         """

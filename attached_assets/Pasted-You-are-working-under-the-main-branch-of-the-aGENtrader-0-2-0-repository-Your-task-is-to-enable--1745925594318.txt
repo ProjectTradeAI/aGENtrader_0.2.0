@@ -1,0 +1,75 @@
+You are working under the `main` branch of the aGENtrader_0.2.0 repository.
+
+Your task is to enable customized timeframes for each agent (TechnicalAnalystAgent, LiquidityAnalystAgent, SentimentAggregatorAgent), improving the intelligence and realism of market analysis.
+
+Each agent should use the timeframe that suits its purpose best.
+
+---
+
+### 🎯 Objectives
+
+✅ Add per-agent timeframe configuration to system settings  
+✅ Modify agents to fetch data based on their configured timeframe  
+✅ Update logs to reflect the timeframe each agent used for its decision  
+✅ Keep DecisionAgent neutral — it aggregates outputs without needing to know timeframe context
+
+---
+
+### 📁 Tasks
+
+#### 1. Update Config Settings
+In `config/settings.yaml` (or `.env`), add agent-specific timeframes:
+
+```yaml
+agents:
+  TechnicalAnalystAgent:
+    timeframe: 4h
+  LiquidityAnalystAgent:
+    timeframe: 1h
+  SentimentAggregatorAgent:
+    timeframe: 1d
+2. Modify Agent Initialization
+In each agent class (e.g., TechnicalAnalystAgent, LiquidityAnalystAgent, etc.):
+
+Load timeframe from config during initialization:
+
+python
+Copy
+Edit
+self.timeframe = config["agents"]["TechnicalAnalystAgent"]["timeframe"]
+Use this self.timeframe whenever fetching data.
+
+✅ No hardcoded "1h" or "4h" values inside agent methods anymore.
+
+3. Update Data Fetching
+Inside each agent's data retrieval logic:
+
+When calling the data provider, use:
+
+python
+Copy
+Edit
+self.data_provider.fetch_data(symbol=self.symbol, interval=self.timeframe)
+✅ Dynamic, agent-specific data fetching.
+
+4. Improve Decision Logging
+When logging agent outputs (especially in decision_logger), include timeframe info:
+
+text
+Copy
+Edit
+TechnicalAnalystAgent (4h): BUY 82% - Reason: EMA cross and RSI trend
+LiquidityAnalystAgent (1h): HOLD 50% - Reason: No liquidity gap detected
+SentimentAggregatorAgent (1D): SELL 65% - Reason: Sentiment weakening
+✅ Future audits and dataset training become much more intelligent and nuanced.
+
+✅ Acceptance Criteria
+Each agent now uses its own configured timeframe for analysis
+
+Data provider calls match the correct timeframe for each agent
+
+Logs show timeframe per decision
+
+DecisionAgent continues to aggregate without any change needed
+
+Validate that the system can still run cleanly end-to-end after changes

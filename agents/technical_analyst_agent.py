@@ -45,6 +45,14 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         self.description = "Analyzes price action using technical indicators"
         self.data_fetcher = data_fetcher
         
+        # Get agent config for timeframe setting
+        self.agent_config = self.get_agent_config()
+        self.trading_config = self.get_trading_config()
+        
+        # Use agent-specific timeframe from config if available
+        technical_config = self.agent_config.get("technical_analyst", {})
+        self.default_interval = technical_config.get("timeframe", self.trading_config.get("default_interval", "1h"))
+        
         # Configure trading signal indicators
         self.config = config or {}
         self.indicators = self.config.get('indicators', {
@@ -103,6 +111,9 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             Technical analysis results
         """
         start_time = time.time()
+        
+        # Use agent-specific timeframe if none provided
+        interval = interval or self.default_interval
         
         # Validate input
         if not self.validate_input(symbol, interval):

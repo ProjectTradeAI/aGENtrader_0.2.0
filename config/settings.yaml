@@ -25,16 +25,19 @@ agents:
   liquidity_analyst:
     enabled: true
     confidence_threshold: 60
+    timeframe: 12h  # Customized timeframe for liquidity analysis
   
   technical_analyst:
     enabled: true
     confidence_threshold: 70
+    timeframe: 4h  # Customized timeframe for technical analysis
     
   sentiment_analyst:
     enabled: true
     data_mode: mock  # or api or scrape
     api_source: lunarcrush  # placeholder
     confidence_threshold: 65
+    timeframe: 1d  # Customized timeframe for sentiment analysis
     confidence_map:
       Bullish: 0.7
       Neutral: 0.5

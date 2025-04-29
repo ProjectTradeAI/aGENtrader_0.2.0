@@ -38,11 +38,25 @@ class BaseAnalystAgent:
             Dictionary with agent configuration
         """
         try:
-            config_path = os.path.join(self.config_dir, "agents.json")
-            if os.path.exists(config_path):
-                with open(config_path, "r") as f:
+            # First try to load from settings.yaml which is our new config format
+            yaml_config_path = os.path.join(self.config_dir, "settings.yaml")
+            if os.path.exists(yaml_config_path):
+                try:
+                    import yaml
+                    with open(yaml_config_path, "r") as f:
+                        config = yaml.safe_load(f)
+                    # Get the 'agents' section from settings.yaml
+                    return config.get("agents", {})
+                except ImportError:
+                    self.logger.warning("PyYAML not installed, falling back to JSON config")
+                    
+            # Fall back to agents.json if settings.yaml isn't available
+            json_config_path = os.path.join(self.config_dir, "agents.json")
+            if os.path.exists(json_config_path):
+                with open(json_config_path, "r") as f:
                     config = json.load(f)
                 return config.get(self.__class__.__name__, {})
+                
             return {}
         except Exception as e:
             self.logger.warning(f"Error loading agent config: {str(e)}")
@@ -56,9 +70,22 @@ class BaseAnalystAgent:
             Dictionary with trading configuration
         """
         try:
-            config_path = os.path.join(self.config_dir, "trading.json")
-            if os.path.exists(config_path):
-                with open(config_path, "r") as f:
+            # First try to load from settings.yaml which is our new config format
+            yaml_config_path = os.path.join(self.config_dir, "settings.yaml")
+            if os.path.exists(yaml_config_path):
+                try:
+                    import yaml
+                    with open(yaml_config_path, "r") as f:
+                        config = yaml.safe_load(f)
+                    # Get the 'trading' section from settings.yaml
+                    return config.get("trading", {})
+                except ImportError:
+                    self.logger.warning("PyYAML not installed, falling back to JSON config")
+            
+            # Fall back to trading.json if settings.yaml isn't available
+            json_config_path = os.path.join(self.config_dir, "trading.json")
+            if os.path.exists(json_config_path):
+                with open(json_config_path, "r") as f:
                     return json.load(f)
             return {}
         except Exception as e:

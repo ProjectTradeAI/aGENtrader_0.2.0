@@ -78,7 +78,10 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
         # Set default parameters
         self.default_symbol = self.trading_config.get("default_pair", "BTC/USDT").replace("/", "")
-        self.default_interval = self.trading_config.get("default_interval", "1h")
+        
+        # Use agent-specific timeframe from config if available
+        liquidity_config = self.agent_config.get("liquidity_analyst", {})
+        self.default_interval = liquidity_config.get("timeframe", self.trading_config.get("default_interval", "1h"))
         
         self.logger.info(f"Liquidity Analyst Agent initialized with symbol={self.default_symbol}, interval={self.default_interval}")
     
@@ -406,10 +409,21 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         Returns:
             Dictionary with complete analysis results
         """
+        # Use the default symbol if none provided
         symbol = symbol or self.default_symbol
+        
+        # Use agent-specific timeframe if none provided
         interval = interval or self.default_interval
         
-        self.logger.info(f"Starting liquidity analysis for {symbol} at {interval} interval")
+        # Standard BTC/USDT format for logging, but use BTCUSDT format for API calls
+        display_symbol = str(symbol) if symbol is not None else "UNKNOWN"
+        if "/" not in display_symbol and len(display_symbol) > 3:
+            # If we have BTCUSDT format, convert to BTC/USDT for display
+            if display_symbol.endswith("USDT"):
+                base = display_symbol[:-4]
+                display_symbol = f"{base}/USDT"
+        
+        self.logger.info(f"Starting liquidity analysis for {display_symbol} at {interval} interval")
         
         # Step 1: Get data - either from market_data or fetch from database
         raw_data = {}
@@ -466,16 +480,36 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             raw_data = self.fetch_data(symbol, interval)
         
         # Check if we have data
-        if not raw_data or all(df.empty for df in raw_data.values() if hasattr(df, 'empty')):
-            self.logger.warning(f"No data available for {symbol} at {interval} interval")
+        if not raw_data:
+            self.logger.warning(f"No raw data available for {symbol} at {interval} interval")
             return {
                 "symbol": symbol,
                 "interval": interval,
                 "error": "No data available for analysis",
                 "signal": "NEUTRAL",  # Default to NEUTRAL on error
-                "confidence": 0,
+                "confidence": 50,
                 "reason": "No liquidity data available for analysis"
             }
+            
+        # Check if all DataFrames are empty
+        empty_dataframes = [key for key, df in raw_data.items() 
+                           if hasattr(df, 'empty') and df.empty]
+        
+        if empty_dataframes and len(empty_dataframes) == len(raw_data):
+            self.logger.warning(f"All data sources empty for {symbol} at {interval} interval: {empty_dataframes}")
+            return {
+                "symbol": symbol,
+                "interval": interval,
+                "error": "All data sources returned empty results",
+                "signal": "NEUTRAL",  # Default to NEUTRAL on error
+                "confidence": 50,
+                "reason": "Insufficient liquidity data for analysis"
+            }
+            
+        # If some data sources are empty but others have data, log a warning but continue
+        if empty_dataframes:
+            self.logger.warning(f"Some data sources empty for {symbol} at {interval} interval: {empty_dataframes}")
+            # We can continue with the available data
         
         # Step 2: Preprocess data
         processed_data = self.preprocess_data(raw_data)

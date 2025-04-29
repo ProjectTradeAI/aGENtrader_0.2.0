@@ -1,0 +1,53 @@
+[+] Building 11.1s (6/13)                                                        docker:default
+ => [internal] load build definition from Dockerfile                                       0.0s
+ => => transferring dockerfile: 1.67kB                                                     0.0s
+ => [internal] load metadata for docker.io/library/python:3.11-slim                        1.8s
+ => [internal] load .dockerignore                                                          0.0s
+ => => transferring context: 645B                                                          0.0s
+ => CACHED [1/9] FROM docker.io/library/python:3.11-slim@sha256:82c07f2f6e35255b92eb16f38  0.0s
+ => [internal] load build context                                                          0.2s
+ => => transferring context: 203.36kB                                                      0.2s
+ => ERROR [2/9] RUN apt-get update && apt-get install -y --no-install-recommends     buil  9.2s
+------                                                                                          
+ > [2/9] RUN apt-get update && apt-get install -y --no-install-recommends     build-essential     curl     ca-certificates     && rm -rf /var/lib/apt/lists/*:                                  
+1.041 Get:1 http://deb.debian.org/debian bookworm InRelease [151 kB]                            
+1.054 Get:2 http://deb.debian.org/debian bookworm-updates InRelease [55.4 kB]                   
+1.055 Get:3 http://deb.debian.org/debian-security bookworm-security InRelease [48.0 kB]         
+1.142 Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8792 kB]
+1.190 Ign:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+1.206 Err:2 http://deb.debian.org/debian bookworm-updates InRelease
+1.207   At least one invalid signature was encountered.
+1.209 Err:3 http://deb.debian.org/debian-security bookworm-security InRelease
+1.209   Couldn't create temporary file /tmp/apt.conf.DMSCzS for passing config to apt-key
+2.213 Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8792 kB]
+2.217 Ign:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+4.240 Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8792 kB]
+4.241 Ign:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+8.263 Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8792 kB]
+8.264 Ign:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+8.461 Get:4 http://deb.debian.org/debian bookworm/main amd64 Packages [8792 kB]
+8.489 Err:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+8.490   Error writing to file - write (28: No space left on device) [IP: 146.75.46.132 80]
+8.494 Ign:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+8.672 Err:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+8.672   Error writing to file - write (28: No space left on device) [IP: 146.75.46.132 80]
+8.911 Ign:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+9.114 Err:4 http://deb.debian.org/debian bookworm/main amd64 Packages
+9.115   Error writing to file - write (28: No space left on device) [IP: 146.75.46.132 80]
+9.119 Reading package lists...
+9.128 W: GPG error: http://deb.debian.org/debian bookworm-updates InRelease: At least one invalid signature was encountered.
+9.129 E: The repository 'http://deb.debian.org/debian bookworm-updates InRelease' is not signed.
+9.131 W: GPG error: http://deb.debian.org/debian-security bookworm-security InRelease: Couldn't create temporary file /tmp/apt.conf.DMSCzS for passing config to apt-key
+9.131 E: The repository 'http://deb.debian.org/debian-security bookworm-security InRelease' is not signed.
+------
+Dockerfile:24
+--------------------
+  23 |     # Install system dependencies
+  24 | >>> RUN apt-get update && apt-get install -y --no-install-recommends \
+  25 | >>>     build-essential \
+  26 | >>>     curl \
+  27 | >>>     ca-certificates \
+  28 | >>>     && rm -rf /var/lib/apt/lists/*
+  29 |     
+--------------------
+ERROR: failed to solve: process "/bin/sh -c apt-get update && apt-get install -y --no-install-recommends     build-essential     curl     ca-certificates     && rm -rf /var/lib/apt/lists/*" did not complete successfully: exit code: 100

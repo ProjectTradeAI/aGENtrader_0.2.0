@@ -335,8 +335,14 @@ def run_technical_analysis(symbol, interval, data_provider):
         # Initialize the technical analyst agent
         tech_agent = TechnicalAnalystAgent(data_fetcher=data_provider)
         
-        # Perform analysis
-        result = tech_agent.analyze(symbol=symbol, interval=interval)
+        # Get agent's configured timeframe from its initialization
+        # We don't pass the system interval to respect the agent-specific timeframe
+        logging.info(f"Running technical analysis for {symbol} using agent's configured timeframe")
+        result = tech_agent.analyze(symbol=symbol)
+        
+        # Extract the actual interval used for logging purposes
+        used_interval = result.get("interval", "unknown")
+        logging.info(f"Technical analysis completed using {used_interval} timeframe")
         
         # Log the decision
         decision_logger.create_summary_from_result("TechnicalAnalystAgent", result, symbol)
@@ -357,8 +363,14 @@ def run_sentiment_analysis(symbol, interval, data_provider=None):
         # Initialize the sentiment agent
         sentiment_agent = SentimentAggregatorAgent()
         
-        # Perform analysis
-        result = sentiment_agent.analyze(symbol=symbol, interval=interval)
+        # Get agent's configured timeframe from its initialization
+        # We don't pass the system interval to respect the agent-specific timeframe
+        logging.info(f"Running sentiment analysis for {symbol} using agent's configured timeframe")
+        result = sentiment_agent.analyze(symbol=symbol)
+        
+        # Extract the actual interval used for logging purposes
+        used_interval = result.get("interval", "unknown")
+        logging.info(f"Sentiment analysis completed using {used_interval} timeframe")
         
         # Log the decision
         decision_logger.create_summary_from_result("SentimentAggregatorAgent", result, symbol)
@@ -374,8 +386,14 @@ def run_liquidity_analysis(symbol, interval, data_provider):
         # Initialize the liquidity analyst agent - note that it doesn't need a data_provider in constructor
         liquidity_agent = LiquidityAnalystAgent()
         
-        # Perform analysis
-        result = liquidity_agent.analyze(symbol=symbol, interval=interval)
+        # Get agent's configured timeframe from its initialization
+        # We don't pass the system interval to respect the agent-specific timeframe
+        logging.info(f"Running liquidity analysis for {symbol} using agent's configured timeframe")
+        result = liquidity_agent.analyze(symbol=symbol)
+        
+        # Extract the actual interval used for logging purposes
+        used_interval = result.get("interval", "unknown")
+        logging.info(f"Liquidity analysis completed using {used_interval} timeframe")
         
         # Log the decision
         decision_logger.create_summary_from_result("LiquidityAnalystAgent", result, symbol)

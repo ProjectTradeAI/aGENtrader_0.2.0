@@ -46,6 +46,14 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         self.data_fetcher = data_fetcher
         self.config = config or {}
         
+        # Get agent config for timeframe setting
+        self.agent_config = self.get_agent_config()
+        self.trading_config = self.get_trading_config()
+        
+        # Use agent-specific timeframe from config if available
+        sentiment_config = self.agent_config.get("sentiment_analyst", {})
+        self.default_interval = sentiment_config.get("timeframe", self.trading_config.get("default_interval", "1h"))
+        
         # Configure Grok-specific LLM client
         self.grok_model = os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         self.llm_client = LLMClient(
@@ -72,7 +80,7 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         
         Args:
             symbol: Trading symbol
-            interval: Time interval (not used for sentiment analysis)
+            interval: Time interval (different timeframe for sentiment analysis)
             **kwargs: Additional parameters
             
         Returns:
@@ -80,12 +88,18 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         """
         start_time = time.time()
         
+        # Use agent-specific timeframe if none provided
+        interval = interval or self.default_interval
+        
         # Validate input
         if not self.validate_input(symbol, interval):
-            return self.build_error_response(
+            error_response = self.build_error_response(
                 "INVALID_INPUT", 
                 f"Invalid input parameters: symbol={symbol}, interval={interval}"
             )
+            # Add interval to error response for consistency
+            error_response["interval"] = interval
+            return error_response
             
         # Check if our LLM client has access to Grok
         if not self.llm_client.api_keys.get('grok'):
@@ -126,6 +140,7 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 "agent": self.name,
                 "timestamp": datetime.now().isoformat(),
                 "symbol": symbol,
+                "interval": interval,  # Add interval for consistency with other agents
                 "sentiment_score": sentiment_result["rating"],
                 "confidence": confidence_pct,  # Use the percentage form for consistency
                 "signal": signal,  # Add signal field for DecisionAgent
@@ -157,10 +172,13 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             
         except Exception as e:
             logger.error(f"Error analyzing sentiment: {str(e)}", exc_info=True)
-            return self.build_error_response(
+            error_response = self.build_error_response(
                 "SENTIMENT_ANALYSIS_ERROR",
                 f"Error analyzing sentiment: {str(e)}"
             )
+            # Add interval to error response for consistency
+            error_response["interval"] = interval
+            return error_response
     
     def _fetch_market_data(self, symbol: str) -> str:
         """

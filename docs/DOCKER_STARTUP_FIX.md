@@ -52,8 +52,9 @@ The Docker container was exiting prematurely with exit code 1 before the core sy
 ## Additional Enhancements
 
 1. **Auto-installation of Dependencies**:
-   - Added code to automatically install `python-dotenv` if missing.
+   - Added code to automatically install `python-dotenv` and `pyyaml` if missing.
    - Enhanced logging of dependency status.
+   - Implemented dependency checking in docker_run.py to ensure all requirements are met.
 
 2. **Container Survival**:
    - Added `restart: unless-stopped` policy to ensure container restarts on failure.

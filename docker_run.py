@@ -65,6 +65,24 @@ def main():
         f.write(f"{current_timestamp} - INFO - Binance API connection established\n")
     logger.info("Created Binance connection log")
     
+    # Ensure required dependencies are installed
+    try:
+        logger.info("Checking for required dependencies...")
+        import importlib.util
+        
+        # Check for yaml
+        if importlib.util.find_spec("yaml") is None:
+            logger.warning("PyYAML not found, attempting to install...")
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "pyyaml"])
+            logger.info("PyYAML installed successfully")
+        else:
+            logger.info("PyYAML is already installed")
+        
+        # Check for other critical dependencies here as needed
+    except Exception as e:
+        logger.error(f"Error checking/installing dependencies: {e}")
+        logger.warning("Will continue anyway and let fallback handle any issues")
+    
     # Run the main script in test mode
     cmd = [sys.executable, "run.py", "--mode", "test", "--symbol", "BTC/USDT", "--interval", "1h"]
     logger.info(f"Executing: {' '.join(cmd)}")

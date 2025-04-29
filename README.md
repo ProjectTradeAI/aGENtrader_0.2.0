@@ -29,14 +29,14 @@ Key directories:
 
 ### Agents
 
-The system is built around a multi-agent architecture where specialist agents collaborate to make trading decisions:
+The system is built around a multi-agent architecture where specialist analyst agents collaborate to make trading decisions:
 
-- **Technical Analyst Agent**: Performs technical analysis on price data
-- **Sentiment Analyst Agent**: Analyzes market sentiment data
-- **Liquidity Analyst Agent**: Monitors market liquidity conditions
-- **Portfolio Manager Agent**: Manages overall portfolio allocation
-- **Risk Guard Agent**: Enforces risk management rules
-- **Trade Executor Agent**: Executes trading decisions
+- **Technical Analyst Agent**: Performs technical analysis on price data (weight: 1.2)
+- **Sentiment Analyst Agent**: Analyzes market sentiment data (weight: 0.8)
+- **Liquidity Analyst Agent**: Monitors market liquidity conditions (weight: 1.0)
+- **Funding Rate Analyst Agent**: Analyzes funding rate data for futures (weight: 0.8)
+- **Open Interest Analyst Agent**: Monitors open interest trends (weight: 1.0)
+- **Decision Agent**: Processes input from all analysts with weighted confidence scoring
 
 ### Data Providers
 
@@ -124,3 +124,19 @@ For detailed information on deployments and rollbacks, see:
 
 - Python 3.10+
 - See requirements.txt for Python package dependencies
+
+## LLM Integration
+
+The system uses a hierarchical LLM selection process for agent reasoning:
+
+1. **Local Mistral via Ollama** (primary, resource-efficient)
+2. **Grok API** (primary fallback)
+3. **OpenAI API** (secondary fallback)
+
+We've transitioned from Mixtral to Mistral due to memory constraints on EC2 instances (Mixtral requires 25.6GB vs Mistral's ~4GB). For systems with memory constraints, use our provided script:
+
+```bash
+./scripts/switch_to_mistral.sh
+```
+
+See [LLM_SETUP.md](docs/LLM_SETUP.md) for detailed setup instructions.

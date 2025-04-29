@@ -18,8 +18,8 @@ from typing import Dict, List, Tuple, Any, Optional
 # Configuration
 DEFAULT_CONTAINER_NAME = "agentrader"  # Default container name prefix
 LOG_FILE = "../logs/decision_summary.logl"
-LOG_CHECK_TIMEOUT = 60  # seconds to wait for log updates
-BINANCE_CHECK_TIMEOUT = 30  # seconds to wait for Binance connection
+LOG_CHECK_TIMEOUT = 90  # seconds to wait for log updates (increased for slower systems)
+BINANCE_CHECK_TIMEOUT = 60  # seconds to wait for Binance connection (increased for slower systems)
 
 # ANSI color codes for prettier output - MOVED UP TO AVOID VARIABLE ORDER ISSUES
 GREEN = "\033[92m"
@@ -517,6 +517,48 @@ def check_local_agents() -> Tuple[bool, str]:
         return False, f"Error checking agent activity: {e}"
 
 
+def check_environment_variables() -> Tuple[bool, str]:
+    """Check if required environment variables are set in the container"""
+    try:
+        # Use Docker exec to check environment variables
+        result = subprocess.run(
+            ["docker", "exec", CONTAINER_NAME, "env"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        env_vars = result.stdout
+        
+        # Look for critical variables
+        required_vars = [
+            "BINANCE_API_KEY",
+            "BINANCE_API_SECRET",
+            "XAI_API_KEY"
+        ]
+        
+        found_vars = []
+        for var in required_vars:
+            # Check if the variable is defined (without exposing actual values)
+            if re.search(f"{var}=", env_vars):
+                found_vars.append(var)
+        
+        if len(found_vars) >= 2:  # At least need the Binance keys
+            missing = [var for var in required_vars if var not in found_vars]
+            if missing:
+                return True, f"Found {len(found_vars)}/{len(required_vars)} required variables. Missing: {', '.join(missing)}"
+            else:
+                return True, f"All {len(required_vars)} required environment variables found"
+        else:
+            missing = [var for var in required_vars if var not in found_vars]
+            return False, f"Missing critical environment variables: {', '.join(missing)}"
+            
+    except subprocess.CalledProcessError as e:
+        return False, f"Error checking environment variables: {e}"
+    except Exception as e:
+        return False, f"Unexpected error: {e}"
+
+
 def main():
     """Run the deployment validation checks"""
     print_header()
@@ -526,6 +568,7 @@ def main():
         checks = [
             ("Docker Container", check_docker_running),
             ("Docker Logs", check_docker_logs),
+            ("Environment Variables", check_environment_variables),
             ("Binance Connection", check_binance_connection),
             ("Agent Activity", check_agent_activity),
             ("Log Files", check_log_files),

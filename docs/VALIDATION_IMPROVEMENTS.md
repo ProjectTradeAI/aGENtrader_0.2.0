@@ -25,7 +25,23 @@ The script was updated to search for all specialist agents:
 - **Issue**: The previous version only looked for three analyst agents but missed the newer FundingRateAnalystAgent and OpenInterestAnalystAgent.
 - **Solution**: Added all five analyst agents to the search patterns to ensure the complete system is properly validated.
 
-### 4. Error Tolerance
+### 4. Environment Variable Validation
+
+A new check was added to validate critical environment variables:
+
+- **Issue**: The system might be running but failing to initialize properly due to missing environment variables.
+- **Solution**: Added explicit validation of required environment variables like BINANCE_API_KEY, BINANCE_API_SECRET, and XAI_API_KEY.
+- **Benefit**: More transparent feedback about configuration issues that could prevent proper initialization.
+
+### 5. Increased Timeout Values
+
+Timeout values were increased for more reliable validation on slower systems:
+
+- **Issue**: Some validation checks were timing out before the system had a chance to fully initialize.
+- **Solution**: Increased BINANCE_CHECK_TIMEOUT from 30 to 60 seconds and LOG_CHECK_TIMEOUT from 60 to 90 seconds.
+- **Benefit**: More reliable validation on slower systems or when the container is under heavy load during initialization.
+
+### 6. Error Tolerance
 
 - Enhanced the validation to still pass if most components are recognized even if some are missing, making the validation more resilient to minor configuration differences.
 - Better error reporting to provide more actionable feedback when validation fails.

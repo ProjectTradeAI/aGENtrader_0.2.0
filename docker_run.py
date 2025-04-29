@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Docker-specific runner for aGENtrader v2.1
+Docker-specific runner for aGENtrader
 
 This script ensures the system runs in test mode for Docker environments,
 avoiding demo mode which would shut down after a single cycle.
 """
+# Import version information from centralized location
+from core.version import VERSION, get_version_banner
 import os
 import sys
 import time
@@ -32,7 +34,11 @@ def setup_logging():
 def main():
     """Run the main application ensuring it stays in test mode."""
     logger = setup_logging()
-    logger.info("Starting Docker container for aGENtrader v2.1")
+    
+    # Display version banner
+    print(get_version_banner(include_logo=True))
+    
+    logger.info(f"Starting Docker container for aGENtrader {VERSION}")
     
     # Ensure required directories exist
     for directory in ["logs", "data", "config", "reports", "trades"]:

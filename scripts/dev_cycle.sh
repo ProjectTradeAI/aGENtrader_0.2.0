@@ -9,8 +9,10 @@
 # 5. Logs results
 #
 # Author: AI Engineer Team
-# Version: 1.0.0
 # Created: 2025-04-29
+
+# Get version from the centralized version file
+VERSION=$(python3 -c 'from core.version import VERSION; print(VERSION)')
 
 # --- Configuration ---
 CONTAINER_NAME="agentrader"
@@ -142,13 +144,11 @@ check_step() {
 
 # --- Pre-flight Checks ---
 
-# Display banner
+# Display banner using Python to get the ASCII logo from version.py
 echo -e "${CYAN}"
-echo "  _____  _____  _______ _     _ _______  ______ _______ ______  _______  ______"
-echo " |_____] |     | |______  \___/  |______ |_____/ |_____| |     \ |______ |_____/"
-echo " |       |_____| |______       | |______ |    \_ |     | |_____/ |______ |    \_"
+python3 -c "from core.version import MINI_LOGO; print(MINI_LOGO)"
 echo -e "${RESET}"
-echo -e "${BLUE}Automated Development Cycle${RESET} - Started at $(date)\n"
+echo -e "${BLUE}aGENtrader ${VERSION} - Automated Development Cycle${RESET} - Started at $(date)\n"
 
 # Create log file
 touch $LOG_FILE

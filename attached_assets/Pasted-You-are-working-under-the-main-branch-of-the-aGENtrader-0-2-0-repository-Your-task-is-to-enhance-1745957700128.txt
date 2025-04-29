@@ -1,0 +1,85 @@
+You are working under the `main` branch of the aGENtrader_0.2.0 repository.
+
+Your task is to enhance branding consistency and polish the developer experience across all CLI logs and automated scripts.
+
+---
+
+### 🎯 Objectives
+
+✅ Ensure the current system version (e.g., `v2.2.0`) is correctly shown in:
+
+- Dev cycle log headers
+- Docker build banner
+- Deployment summary logs
+- Validation output
+- Decision logs (optional)
+
+✅ Insert an ASCII logo at the top of dev logs (preferably colorized using ANSI escape codes)
+
+✅ Centralize branding version so it can be updated in one place
+
+---
+
+### 📁 Tasks
+
+#### 1. Define a Central Version Constant
+
+In a file like `core/version.py`, define:
+```python
+VERSION = "v2.2.0"
+✅ All other scripts should import from here, including run.py, build_image.sh, validate_deployment.py
+
+2. Sync Branding Usage
+Update all places that currently show version v2.0.2 or older to dynamically use:
+
+bash
+Copy
+Edit
+python -c "from core.version import VERSION; print(VERSION)"
+or in Bash (if parsed from a .txt or .env file)
+
+3. Insert ASCII Logo into scripts/dev_cycle.sh
+Add the previously generated logo as a function (e.g., print_logo) at the top of scripts/dev_cycle.sh
+
+Use ANSI escape codes to colorize:
+
+bash
+Copy
+Edit
+\e[38;5;208m   ₿₿₿   ₿₿₿₿₿ ...
+✅ Display logo + current version immediately after:
+
+bash
+Copy
+Edit
+echo -e "aGENtrader - Version: $(python3 -c 'from core.version import VERSION; print(VERSION)')"
+✅ Ensure logo only prints once and doesn’t clutter logs repeatedly.
+
+4. Update Docker Build and Deploy Logs
+At the top of each output:
+
+Add logo (optional)
+
+Add version banner using shared version constant
+
+bash
+Copy
+Edit
+echo "aGENtrader $(VERSION) - Docker Build Start"
+✅ Helps trace log output to exact version deployed.
+
+5. Optional: Add Branding Footer
+At end of successful deploy or validation:
+
+bash
+Copy
+Edit
+echo "✅ aGENtrader $(VERSION) deployment complete"
+✅ Acceptance Criteria
+Version number appears consistently across all scripts and outputs
+
+ASCII logo is visible at top of dev_cycle.sh log
+
+Docker builds and validations reflect current version correctly
+
+Version can be upgraded in one place (core/version.py) and reflected everywhere

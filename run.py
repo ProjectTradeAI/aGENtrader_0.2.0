@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-aGENtrader v2.1 Main Application
+aGENtrader Main Application
 
-This script serves as the main entry point for the aGENtrader v2.1 trading system
+This script serves as the main entry point for the aGENtrader trading system
 with real technical analysis and sentiment analysis via Grok API.
 """
+# Import version information from centralized location
+from core.version import VERSION, get_version_banner
 import os
 import sys
 import logging
@@ -74,7 +76,7 @@ def setup_logging(log_level=None):
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="aGENtrader v2.1 Trading System")
+    parser = argparse.ArgumentParser(description=f"aGENtrader {VERSION} Trading System")
     
     # Check if we're in Docker, force test mode if true
     in_docker = os.environ.get("IN_DOCKER", "false").lower() == "true"
@@ -301,7 +303,7 @@ class RiskGuardAgent:
 def run_sentiment_demo(symbol="BTC/USDT"):
     """Run a demo of the sentiment analysis functionality."""
     print("=" * 60)
-    print("aGENtrader v2.1 - Sentiment Analysis Demo")
+    print(f"aGENtrader {VERSION} - Sentiment Analysis Demo")
     print("=" * 60)
     
     # Check for XAI API key
@@ -645,7 +647,11 @@ def main():
         logger.warning("Detected demo mode in Docker environment. Forcing test mode for container stability.")
         args.mode = "test"
         
-    logger.info(f"Starting aGENtrader v2.1 in {args.mode} mode {'(Docker environment)' if in_docker else ''}")
+    # Display version banner
+    if os.isatty(sys.stdout.fileno()):  # Only show ASCII logo in interactive terminal
+        print(get_version_banner(include_logo=True, mini=True))
+    
+    logger.info(f"Starting aGENtrader {VERSION} in {args.mode} mode {'(Docker environment)' if in_docker else ''}")
     
     # Run sentiment analysis demo if requested
     if args.sentiment:
@@ -830,11 +836,11 @@ def main():
             logger.info(f"Test duration of {duration_str} completed")
                 
     except KeyboardInterrupt:
-        logger.info("Shutting down aGENtrader v2.1...")
+        logger.info(f"Shutting down aGENtrader {VERSION}...")
     except Exception as e:
         logger.error(f"Error in main loop: {str(e)}", exc_info=True)
     finally:
-        logger.info("aGENtrader v2.1 shutdown complete")
+        logger.info(f"aGENtrader {VERSION} shutdown complete")
 
 if __name__ == "__main__":
     main()

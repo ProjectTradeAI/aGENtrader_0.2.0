@@ -50,7 +50,7 @@ class BinanceDataProvider:
         self, 
         api_key: Optional[str] = None, 
         api_secret: Optional[str] = None,
-        use_testnet: bool = False
+        use_testnet: bool = True  # Default to testnet due to geographical restrictions
     ):
         """
         Initialize the Binance API provider.
@@ -58,7 +58,7 @@ class BinanceDataProvider:
         Args:
             api_key: Binance API key
             api_secret: Binance API secret
-            use_testnet: Whether to use Binance testnet
+            use_testnet: Whether to use Binance testnet (defaults to True to avoid geo restrictions)
         """
         # Use environment variables as fallback
         self.api_key = api_key or os.environ.get("BINANCE_API_KEY")
@@ -71,7 +71,7 @@ class BinanceDataProvider:
         self.last_request_time = 0
         self.min_request_interval = 0.1  # seconds between requests
         
-        logger.info("Initialized Binance Data Provider")
+        logger.info(f"Initialized Binance Data Provider using {'testnet' if use_testnet else 'mainnet'}")
     
     def _generate_signature(self, params: Dict[str, Any]) -> str:
         """
@@ -298,3 +298,91 @@ class BinanceDataProvider:
             Account information
         """
         return self._make_request("/api/v3/account", signed=True)
+        
+    def fetch_market_depth(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
+        """
+        Fetch market depth (order book) data for a symbol.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT")
+            limit: Maximum number of price levels to return (max 5000)
+            
+        Returns:
+            Dictionary containing bids and asks arrays
+        """
+        # Format symbol correctly (remove "/" if present)
+        formatted_symbol = symbol.replace("/", "")
+        
+        # Limit must be one of: 5, 10, 20, 50, 100, 500, 1000, 5000
+        valid_limits = [5, 10, 20, 50, 100, 500, 1000, 5000]
+        if limit not in valid_limits:
+            # Find the closest valid limit
+            limit = min(valid_limits, key=lambda x: abs(x - limit))
+            logger.info(f"Adjusted limit to nearest valid value: {limit}")
+        
+        params = {
+            "symbol": formatted_symbol,
+            "limit": limit
+        }
+        
+        try:
+            # Make request to the order book endpoint
+            depth_data = self._make_request("/api/v3/depth", params=params)
+            
+            # Process the data
+            result = {
+                "timestamp": int(time.time() * 1000),  # Current timestamp in milliseconds
+                "bids": [],
+                "asks": [],
+                "bid_total": 0.0,
+                "ask_total": 0.0,
+                "top_5_bid_volume": 0.0,
+                "top_5_ask_volume": 0.0
+            }
+            
+            # Format bids and calculate totals
+            if "bids" in depth_data:
+                # Bids are in format [price, quantity]
+                result["bids"] = [[float(bid[0]), float(bid[1])] for bid in depth_data["bids"]]
+                
+                # Calculate total volume
+                bid_total = sum(float(bid[0]) * float(bid[1]) for bid in depth_data["bids"])
+                result["bid_total"] = bid_total
+                
+                # Calculate top 5 volume
+                top_5_bid_volume = sum(float(bid[0]) * float(bid[1]) for bid in depth_data["bids"][:5])
+                result["top_5_bid_volume"] = top_5_bid_volume
+                
+            # Format asks and calculate totals
+            if "asks" in depth_data:
+                # Asks are in format [price, quantity]
+                result["asks"] = [[float(ask[0]), float(ask[1])] for ask in depth_data["asks"]]
+                
+                # Calculate total volume
+                ask_total = sum(float(ask[0]) * float(ask[1]) for ask in depth_data["asks"])
+                result["ask_total"] = ask_total
+                
+                # Calculate top 5 volume
+                top_5_ask_volume = sum(float(ask[0]) * float(ask[1]) for ask in depth_data["asks"][:5])
+                result["top_5_ask_volume"] = top_5_ask_volume
+                
+            # Calculate mid price and spread if possible
+            if result["bids"] and result["asks"]:
+                best_bid = float(result["bids"][0][0])
+                best_ask = float(result["asks"][0][0])
+                result["mid_price"] = (best_bid + best_ask) / 2
+                result["spread"] = best_ask - best_bid
+                result["spread_percent"] = (best_ask - best_bid) / best_bid * 100
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error fetching market depth: {str(e)}")
+            # Return empty structure
+            return {
+                "timestamp": int(time.time() * 1000),
+                "bids": [],
+                "asks": [],
+                "bid_total": 0.0,
+                "ask_total": 0.0
+            }

@@ -8,6 +8,7 @@ import os
 import json
 import logging
 import sqlite3
+import time
 import psycopg2
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime, timedelta
@@ -476,13 +477,109 @@ class DatabaseConnector:
             List of market depth records
         """
         try:
-            # In a real implementation, this would query a table with order book snapshots
-            # For now, we'll just return an empty list
-            logger.warning(f"get_market_depth not fully implemented yet for {symbol}")
-            return []
+            # First, check if we have data in the database
+            query = """
+                SELECT * FROM market_depth
+                WHERE symbol = ? AND interval = ?
+                ORDER BY timestamp DESC
+                LIMIT ?
+            """
+            
+            rows = self.fetch_all(query, (symbol, interval, limit))
+            
+            if rows and len(rows) > 0:
+                logger.info(f"Retrieved {len(rows)} market depth records from database for {symbol}")
+                return rows
+            else:
+                # No data in database, fetch from Binance API
+                logger.info(f"No market depth data in database for {symbol}, fetching from Binance...")
+                
+                try:
+                    from market_data_provider_factory import MarketDataProviderFactory
+                    
+                    # Create a factory and fetch data
+                    factory = MarketDataProviderFactory()
+                    depth_data = factory.fetch_market_depth(symbol, limit)
+                    
+                    if depth_data and "bids" in depth_data and depth_data["bids"]:
+                        # Convert to database format
+                        timestamp = depth_data.get("timestamp", int(time.time() * 1000))
+                        
+                        # Prepare for database storage
+                        record = {
+                            "symbol": symbol,
+                            "interval": interval,
+                            "timestamp": timestamp,
+                            "bid_total": depth_data.get("bid_total", 0.0),
+                            "ask_total": depth_data.get("ask_total", 0.0),
+                            "spread": depth_data.get("spread", 0.0),
+                            "mid_price": depth_data.get("mid_price", 0.0),
+                            "top_5_bid_volume": depth_data.get("top_5_bid_volume", 0.0),
+                            "top_5_ask_volume": depth_data.get("top_5_ask_volume", 0.0),
+                            "bids_json": json.dumps(depth_data.get("bids", [])),
+                            "asks_json": json.dumps(depth_data.get("asks", [])),
+                            "created_at": time.time() * 1000
+                        }
+                        
+                        # Store in database (if we have a table)
+                        try:
+                            # Check if the table exists
+                            check_query = "SELECT name FROM sqlite_master WHERE type='table' AND name='market_depth'"
+                            if self.fetch_one(check_query):
+                                # Table exists, insert the record
+                                self.insert("market_depth", record)
+                            else:
+                                # Table doesn't exist, create it first
+                                self._create_market_depth_table()
+                                self.insert("market_depth", record)
+                        except Exception as db_e:
+                            logger.warning(f"Could not store market depth data: {db_e}")
+                        
+                        # Return data formatted as a list of records (just one)
+                        return [depth_data]
+                    else:
+                        logger.warning(f"No market depth data available from Binance API for {symbol}")
+                        return []
+                        
+                except ImportError:
+                    logger.error("MarketDataProviderFactory not available")
+                except Exception as e:
+                    logger.error(f"Error fetching market depth from API: {str(e)}")
+                    
+                return []
         except Exception as e:
             logger.error(f"Error getting market depth: {str(e)}", exc_info=True)
             return []
+            
+    def _create_market_depth_table(self):
+        """Create the market_depth table if it doesn't exist."""
+        if not self.conn:
+            logger.error("Cannot create market_depth table: not connected to database")
+            return
+            
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS market_depth (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    symbol TEXT NOT NULL,
+                    interval TEXT NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    bid_total REAL,
+                    ask_total REAL,
+                    spread REAL,
+                    mid_price REAL,
+                    top_5_bid_volume REAL,
+                    top_5_ask_volume REAL,
+                    bids_json TEXT,
+                    asks_json TEXT,
+                    created_at INTEGER NOT NULL
+                )
+            ''')
+            self.conn.commit()
+            logger.info("Created market_depth table")
+        except Exception as e:
+            logger.error(f"Error creating market_depth table: {str(e)}", exc_info=True)
     
     def get_volume_profile(self, symbol: str, interval: str, time_frame: str = "24h", limit: int = 100) -> List[Dict[str, Any]]:
         """

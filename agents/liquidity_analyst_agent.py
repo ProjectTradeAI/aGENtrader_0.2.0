@@ -28,6 +28,7 @@ sys.path.append(parent_dir)
 from models.llm_client import LLMClient
 from data.database import DatabaseConnector
 from agents.base_agent import BaseAnalystAgent
+from market_data_provider_factory import MarketDataProviderFactory
 
 def json_serializable(obj):
     """Convert objects to JSON serializable types."""
@@ -121,8 +122,32 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                     # Ensure we have non-null values for the parameters
                     sym = str(symbol) if symbol is not None else str(self.default_symbol)
                     intv = str(interval) if interval is not None else str(self.default_interval)
-                    result["market_depth"] = self.db.get_market_depth(sym, intv, limit)
-                    self.logger.info(f"Fetched {len(result['market_depth'])} market depth records")
+                    
+                    # Try fetching from database first
+                    db_records = self.db.get_market_depth(sym, intv, limit)
+                    
+                    if db_records and len(db_records) > 0:
+                        # Use data from database
+                        result["market_depth"] = db_records
+                        self.logger.info(f"Fetched {len(result['market_depth'])} market depth records from database")
+                    else:
+                        # Try direct Binance API call as backup
+                        self.logger.info("No market depth data in database, fetching directly from Binance API")
+                        
+                        try:
+                            # Create factory and fetch data
+                            factory = MarketDataProviderFactory()
+                            depth_data = factory.fetch_market_depth(sym, 100)  # Fetch top 100 bids and asks
+                            
+                            if depth_data and "bids" in depth_data and depth_data["bids"]:
+                                self.logger.info(f"Successfully fetched market depth from Binance API")
+                                result["market_depth"] = [depth_data]  # Store as a list with a single entry
+                            else:
+                                self.logger.warning("No valid market depth data returned from Binance API")
+                                result["market_depth"] = []
+                        except Exception as api_e:
+                            self.logger.warning(f"Failed to fetch market depth from Binance API: {api_e}")
+                            result["market_depth"] = []
                 except Exception as e:
                     self.logger.warning(f"Could not fetch market depth data: {e}")
                     result["market_depth"] = []
@@ -425,137 +450,196 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
         self.logger.info(f"Starting liquidity analysis for {display_symbol} at {interval} interval")
         
-        # Step 1: Get data - either from market_data or fetch from database
-        raw_data = {}
+        # Step 1: Get orderbook data - try multiple sources in order of preference
+        depth_data = None
         
+        # 1.1: Try live market data first if available
         if market_data and 'orderbook' in market_data and market_data['orderbook']:
-            # Use live market data if provided
+            depth_data = market_data['orderbook']
             self.logger.info("Using provided live orderbook data for analysis")
-            
-            try:
-                # First, fetch baseline data
-                raw_data = self.fetch_data(symbol, interval)
-                
-                # Then, add/update with live orderbook data
-                orderbook = market_data['orderbook']
-                
-                # Convert the orderbook data to the format expected by our analysis methods
-                orderbook_data = pd.DataFrame({
-                    'timestamp': [pd.Timestamp(orderbook.get('timestamp', pd.Timestamp.now().isoformat()))],
-                    'bid_total': [float(orderbook.get('bid_total', 0))],
-                    'ask_total': [float(orderbook.get('ask_total', 0))],
-                    'bid_ask_ratio': [float(orderbook.get('bid_ask_ratio', 1.0))]
-                })
-                
-                # Add bids and asks as separate DataFrames if needed
-                bids_data = pd.DataFrame(orderbook.get('bids', []))
-                asks_data = pd.DataFrame(orderbook.get('asks', []))
-                
-                # Update raw_data with live orderbook
-                raw_data['orderbook'] = orderbook_data
-                if not bids_data.empty:
-                    raw_data['bids'] = bids_data
-                if not asks_data.empty:
-                    raw_data['asks'] = asks_data
-                
-                # Add ticker data if available
-                if 'ticker' in market_data and market_data['ticker']:
-                    ticker = market_data['ticker']
-                    ticker_data = pd.DataFrame({
-                        'timestamp': [pd.Timestamp(ticker.get('timestamp', pd.Timestamp.now().isoformat()))],
-                        'price': [float(ticker.get('price', 0))],
-                        'bid': [float(ticker.get('bid', 0))],
-                        'ask': [float(ticker.get('ask', 0))],
-                        'bid_size': [float(ticker.get('bid_size', 0))],
-                        'ask_size': [float(ticker.get('ask_size', 0))]
-                    })
-                    raw_data['ticker'] = ticker_data
-                
-            except Exception as e:
-                self.logger.error(f"Error processing live orderbook data: {e}")
-                # Fall back to just fetching data from database
-                raw_data = self.fetch_data(symbol, interval)
-        else:
-            # Fetch data from database if no live data provided
-            raw_data = self.fetch_data(symbol, interval)
         
-        # Check if we have data
-        if not raw_data:
-            self.logger.warning(f"No raw data available for {symbol} at {interval} interval")
+        # 1.2: If no live data, try our fetch_data method which attempts DB and then Binance API
+        if not depth_data:
+            raw_data = self.fetch_data(symbol, interval)
+            
+            # Check if we got market depth data
+            if "market_depth" in raw_data and raw_data["market_depth"]:
+                if isinstance(raw_data["market_depth"], list) and len(raw_data["market_depth"]) > 0:
+                    if isinstance(raw_data["market_depth"][0], dict) and "bids" in raw_data["market_depth"][0]:
+                        depth_data = raw_data["market_depth"][0]
+                        self.logger.info("Using market depth data from fetch_data method")
+                    else:
+                        self.logger.warning("Market depth data found but in invalid format")
+        
+        # 1.3: If still no depth data, try direct Binance API call
+        if not depth_data:
+            try:
+                self.logger.info("Attempting direct Binance API call for market depth")
+                factory = MarketDataProviderFactory()
+                # Ensure we have a valid symbol string
+                if not symbol:
+                    symbol = self.default_symbol
+                formatted_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+                depth_data = factory.fetch_market_depth(formatted_symbol, 100)
+                
+                if depth_data and "bids" in depth_data and len(depth_data["bids"]) > 0:
+                    self.logger.info("Successfully obtained market depth from direct Binance API call")
+                else:
+                    self.logger.warning("Direct API call returned no valid market depth data")
+                    depth_data = None
+            except Exception as e:
+                self.logger.error(f"Direct Binance API call failed: {e}")
+                depth_data = None
+        
+        # Check if we have valid depth data
+        if not depth_data or not isinstance(depth_data, dict) or "bids" not in depth_data or "asks" not in depth_data:
+            self.logger.warning(f"No valid market depth data available for {display_symbol} at {interval} interval")
             return {
-                "symbol": symbol,
+                "symbol": display_symbol,
                 "interval": interval,
-                "error": "No data available for analysis",
+                "error": "No liquidity data available for analysis",
                 "signal": "NEUTRAL",  # Default to NEUTRAL on error
                 "confidence": 50,
                 "reason": "No liquidity data available for analysis"
             }
-            
-        # Check if all DataFrames are empty
-        empty_dataframes = [key for key, df in raw_data.items() 
-                           if hasattr(df, 'empty') and df.empty]
         
-        if empty_dataframes and len(empty_dataframes) == len(raw_data):
-            self.logger.warning(f"All data sources empty for {symbol} at {interval} interval: {empty_dataframes}")
-            return {
-                "symbol": symbol,
-                "interval": interval,
-                "error": "All data sources returned empty results",
-                "signal": "NEUTRAL",  # Default to NEUTRAL on error
-                "confidence": 50,
-                "reason": "Insufficient liquidity data for analysis"
+        # Step 2: Analyze market depth directly
+        try:
+            # Extract key metrics from depth data
+            bids = depth_data.get("bids", [])
+            asks = depth_data.get("asks", [])
+            
+            # Ensure we have data to work with
+            if not bids or not asks:
+                self.logger.warning(f"Empty bids or asks in market depth data for {display_symbol}")
+                return {
+                    "symbol": display_symbol,
+                    "interval": interval,
+                    "error": "Empty order book data",
+                    "signal": "NEUTRAL",
+                    "confidence": 50,
+                    "reason": "Order book data contains empty bids or asks"
+                }
+            
+            # Calculate key metrics
+            bid_total = depth_data.get("bid_total", 0)
+            ask_total = depth_data.get("ask_total", 0)
+            
+            # If totals not pre-calculated, calculate them
+            if bid_total == 0 and len(bids) > 0:
+                bid_total = sum(float(bid[0]) * float(bid[1]) for bid in bids)
+            
+            if ask_total == 0 and len(asks) > 0:
+                ask_total = sum(float(ask[0]) * float(ask[1]) for ask in asks)
+            
+            # Calculate top 5 volumes if not provided
+            top_5_bid_volume = depth_data.get("top_5_bid_volume", 0)
+            top_5_ask_volume = depth_data.get("top_5_ask_volume", 0)
+            
+            if top_5_bid_volume == 0 and len(bids) >= 5:
+                top_5_bid_volume = sum(float(bid[0]) * float(bid[1]) for bid in bids[:5])
+            
+            if top_5_ask_volume == 0 and len(asks) >= 5:
+                top_5_ask_volume = sum(float(ask[0]) * float(ask[1]) for ask in asks[:5])
+            
+            # Calculate mid price and spread
+            if len(bids) > 0 and len(asks) > 0:
+                best_bid = float(bids[0][0])
+                best_ask = float(asks[0][0])
+                mid_price = (best_bid + best_ask) / 2
+                spread = best_ask - best_bid
+                spread_percent = (spread / mid_price) * 100
+            else:
+                mid_price = 0
+                spread = 0
+                spread_percent = 0
+            
+            # Calculate bid/ask imbalance
+            bid_ask_ratio = bid_total / ask_total if ask_total > 0 else 1.0
+            top_5_bid_ask_ratio = top_5_bid_volume / top_5_ask_volume if top_5_ask_volume > 0 else 1.0
+            
+            # Determine signal based on order book imbalance
+            signal = "NEUTRAL"
+            confidence = 50
+            reason = "Order book is balanced"
+            
+            # Check if we have strong buy/sell signals from top 5 levels (more accurate)
+            if top_5_bid_volume > 0 and top_5_ask_volume > 0:
+                if top_5_bid_ask_ratio > 1.2:  # 20% more bid volume than ask
+                    strength = min(100, int(50 + (top_5_bid_ask_ratio - 1.0) * 100))
+                    signal = "BUY"
+                    confidence = min(95, strength)
+                    reason = f"Strong buying pressure in order book (bid/ask ratio: {top_5_bid_ask_ratio:.2f})"
+                    self.logger.info(f"Detected BUY signal from top 5 order book levels with {confidence}% confidence")
+                    
+                elif top_5_bid_ask_ratio < 0.8:  # 20% more ask volume than bid
+                    strength = min(100, int(50 + (1.0 - top_5_bid_ask_ratio) * 100))
+                    signal = "SELL"
+                    confidence = min(95, strength)
+                    reason = f"Strong selling pressure in order book (bid/ask ratio: {top_5_bid_ask_ratio:.2f})"
+                    self.logger.info(f"Detected SELL signal from top 5 order book levels with {confidence}% confidence")
+                    
+                else:
+                    # Balanced order book
+                    signal = "HOLD"
+                    confidence = int(70 - abs(1.0 - top_5_bid_ask_ratio) * 20)
+                    reason = f"Order book is relatively balanced (bid/ask ratio: {top_5_bid_ask_ratio:.2f})"
+                    self.logger.info(f"Detected HOLD signal from order book with {confidence}% confidence")
+            
+            # If no strong signal from top 5 levels, check overall book
+            elif bid_total > 0 and ask_total > 0:
+                if bid_ask_ratio > 1.2:
+                    signal = "BUY"
+                    confidence = min(85, int(50 + (bid_ask_ratio - 1.0) * 50))
+                    reason = f"More buy orders than sell orders (bid/ask ratio: {bid_ask_ratio:.2f})"
+                elif bid_ask_ratio < 0.8:
+                    signal = "SELL"
+                    confidence = min(85, int(50 + (1.0 - bid_ask_ratio) * 50))
+                    reason = f"More sell orders than buy orders (bid/ask ratio: {bid_ask_ratio:.2f})"
+                else:
+                    signal = "HOLD"
+                    confidence = 60
+                    reason = "Order book is balanced"
+            
+            # Create detailed analysis with all available metrics
+            liquidity_indicators = {
+                "bid_total": bid_total,
+                "ask_total": ask_total,
+                "bid_ask_ratio": bid_ask_ratio,
+                "top_5_bid_volume": top_5_bid_volume,
+                "top_5_ask_volume": top_5_ask_volume,
+                "top_5_bid_ask_ratio": top_5_bid_ask_ratio,
+                "mid_price": mid_price,
+                "spread": spread,
+                "spread_percent": spread_percent,
+                "bids_count": len(bids),
+                "asks_count": len(asks)
             }
             
-        # If some data sources are empty but others have data, log a warning but continue
-        if empty_dataframes:
-            self.logger.warning(f"Some data sources empty for {symbol} at {interval} interval: {empty_dataframes}")
-            # We can continue with the available data
-        
-        # Step 2: Preprocess data
-        processed_data = self.preprocess_data(raw_data)
-        
-        # Step 3: Rule-based analysis
-        rule_analysis = self.analyze_liquidity(processed_data)
-        
-        # Step 4: LLM-enhanced analysis
-        llm_analysis = self.generate_llm_analysis(processed_data, rule_analysis)
-        
-        # Step 5: Combine results
-        result = {
-            "symbol": symbol,
-            "interval": interval,
-            "timestamp": datetime.now().isoformat(),
-            "rule_analysis": rule_analysis,
-            "llm_analysis": llm_analysis
-        }
-        
-        self.logger.info(f"Completed liquidity analysis for {symbol}")
-        
-        # Add signal, confidence and reason for decision agent
-        if "llm_analysis" in result and "sentiment" in result["llm_analysis"]:
-            sentiment = result["llm_analysis"]["sentiment"]
-            if sentiment == "bullish":
-                signal = "BUY"
-                confidence = 70
-            elif sentiment == "bearish":
-                signal = "SELL"
-                confidence = 70
-            else:
-                signal = "NEUTRAL"
-                confidence = 50
+            # Prepare final result
+            result = {
+                "symbol": display_symbol,
+                "interval": interval,
+                "signal": signal,
+                "confidence": confidence,
+                "reason": reason,
+                "liquidity_indicators": liquidity_indicators,
+                "timestamp": datetime.now().isoformat()
+            }
             
-            reason = result["llm_analysis"].get("summary", "Liquidity analysis completed")
-        else:
-            signal = "NEUTRAL"
-            confidence = 30
-            reason = "Limited liquidity data available"
-        
-        # Add required fields
-        result["signal"] = signal
-        result["confidence"] = confidence
-        result["reason"] = reason
-        
-        return result
+            self.logger.info(f"Liquidity analysis complete for {display_symbol}: {signal} with {confidence}% confidence")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing market depth data: {e}", exc_info=True)
+            return {
+                "symbol": display_symbol,
+                "interval": interval,
+                "error": f"Analysis failed: {str(e)}",
+                "signal": "NEUTRAL",
+                "confidence": 50,
+                "reason": "Error in liquidity analysis"
+            }
 
 # Example usage (for demonstration)
 if __name__ == "__main__":

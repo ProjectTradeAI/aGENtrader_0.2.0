@@ -21,6 +21,13 @@ LOG_FILE = "../logs/decision_summary.logl"
 LOG_CHECK_TIMEOUT = 60  # seconds to wait for log updates
 BINANCE_CHECK_TIMEOUT = 30  # seconds to wait for Binance connection
 
+# ANSI color codes for prettier output - MOVED UP TO AVOID VARIABLE ORDER ISSUES
+GREEN = "\033[92m"
+YELLOW = "\033[93m"
+RED = "\033[91m"
+RESET = "\033[0m"
+BLUE = "\033[94m"
+
 # Dynamically detect container name
 def detect_container_name():
     """Try to detect aGENtrader container name from running containers"""
@@ -62,13 +69,6 @@ def is_docker_available():
 # Set container name dynamically
 DOCKER_AVAILABLE = is_docker_available()
 CONTAINER_NAME = detect_container_name() if DOCKER_AVAILABLE else DEFAULT_CONTAINER_NAME
-
-# ANSI color codes for prettier output
-GREEN = "\033[92m"
-YELLOW = "\033[93m"
-RED = "\033[91m"
-RESET = "\033[0m"
-BLUE = "\033[94m"
 
 
 def print_header():

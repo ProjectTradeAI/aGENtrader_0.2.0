@@ -280,7 +280,9 @@ class DecisionAgent:
             "liquidity_analysis": "LiquidityAnalystAgent",
             "technical_analysis": "TechnicalAnalystAgent",
             "sentiment_analysis": "SentimentAnalystAgent",
-            "fundamental_analysis": "FundamentalAnalystAgent"
+            "fundamental_analysis": "FundamentalAnalystAgent",
+            "funding_rate_analysis": "FundingRateAnalystAgent",
+            "open_interest_analysis": "OpenInterestAnalystAgent"
         }
         
         return agent_name_map.get(analysis_key, analysis_key)

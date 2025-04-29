@@ -31,10 +31,15 @@ from agents.base_agent import BaseAnalystAgent
 from agents.technical_analyst_agent import TechnicalAnalystAgent
 from agents.sentiment_aggregator_agent import SentimentAggregatorAgent
 from agents.liquidity_analyst_agent import LiquidityAnalystAgent
+from agents.funding_rate_analyst_agent import FundingRateAnalystAgent
+from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
 from agents.decision_agent import DecisionAgent
 
 # Import the decision logger
 from core.logging.decision_logger import DecisionLogger, decision_logger
+
+# Import the performance tracker
+from analytics.performance_tracker import PerformanceTracker
 
 def setup_logging(log_level=None):
     """Set up logging configuration."""
@@ -403,7 +408,53 @@ def run_liquidity_analysis(symbol, interval, data_provider):
         logging.error(f"Error in liquidity analysis: {str(e)}", exc_info=True)
         return {"error": str(e), "status": "error"}
 
-def process_trading_decision(symbol, interval, data_provider, trade_book_manager, risk_guard):
+def run_funding_rate_analysis(symbol, interval, data_provider):
+    """Run funding rate analysis and log the results."""
+    try:
+        # Initialize the funding rate analyst agent
+        funding_agent = FundingRateAnalystAgent()
+        
+        # Get agent's configured timeframe from its initialization
+        # We don't pass the system interval to respect the agent-specific timeframe
+        logging.info(f"Running funding rate analysis for {symbol} using agent's configured timeframe")
+        result = funding_agent.analyze(symbol=symbol)
+        
+        # Extract the actual interval used for logging purposes
+        used_interval = result.get("interval", "unknown")
+        logging.info(f"Funding rate analysis completed using {used_interval} timeframe")
+        
+        # Log the decision
+        decision_logger.create_summary_from_result("FundingRateAnalystAgent", result, symbol)
+        
+        return result
+    except Exception as e:
+        logging.error(f"Error in funding rate analysis: {str(e)}", exc_info=True)
+        return {"error": str(e), "status": "error"}
+
+def run_open_interest_analysis(symbol, interval, data_provider):
+    """Run open interest analysis and log the results."""
+    try:
+        # Initialize the open interest analyst agent
+        oi_agent = OpenInterestAnalystAgent()
+        
+        # Get agent's configured timeframe from its initialization
+        # We don't pass the system interval to respect the agent-specific timeframe
+        logging.info(f"Running open interest analysis for {symbol} using agent's configured timeframe")
+        result = oi_agent.analyze(symbol=symbol)
+        
+        # Extract the actual interval used for logging purposes
+        used_interval = result.get("interval", "unknown")
+        logging.info(f"Open interest analysis completed using {used_interval} timeframe")
+        
+        # Log the decision
+        decision_logger.create_summary_from_result("OpenInterestAnalystAgent", result, symbol)
+        
+        return result
+    except Exception as e:
+        logging.error(f"Error in open interest analysis: {str(e)}", exc_info=True)
+        return {"error": str(e), "status": "error"}
+
+def process_trading_decision(symbol, interval, data_provider, trade_book_manager, risk_guard, performance_tracker=None):
     """Process trading decisions from all agents and execute trades if approved."""
     try:
         # Get current price
@@ -418,11 +469,19 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
         # Run liquidity analysis
         liquidity_result = run_liquidity_analysis(symbol, interval, data_provider)
         
+        # Run funding rate analysis
+        funding_rate_result = run_funding_rate_analysis(symbol, interval, data_provider)
+        
+        # Run open interest analysis
+        open_interest_result = run_open_interest_analysis(symbol, interval, data_provider)
+        
         # Combine all agent analyses into a single dictionary for the DecisionAgent
         agent_analyses = {
             "technical_analysis": ta_result,
             "sentiment_analysis": sentiment_result, 
-            "liquidity_analysis": liquidity_result
+            "liquidity_analysis": liquidity_result,
+            "funding_rate_analysis": funding_rate_result,
+            "open_interest_analysis": open_interest_result
         }
         
         # Log which agents are contributing to the decision
@@ -457,13 +516,51 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
         # Evaluate trade with risk guard
         risk_evaluation = risk_guard.evaluate_trade(trade_proposal)
         
+        # Prepare the decision data with agent analyses for performance tracking
+        decision_data = {
+            "symbol": symbol,
+            "interval": interval,
+            "price": current_price,
+            "type": trade_proposal["type"],
+            "confidence": trade_proposal["confidence"],
+            "reason": trade_proposal["reason"],
+            "agent_analyses": {
+                "TechnicalAnalystAgent": {
+                    "signal": ta_result.get("signal", "NEUTRAL"),
+                    "confidence": ta_result.get("confidence", 0)
+                },
+                "SentimentAnalystAgent": {
+                    "signal": sentiment_result.get("signal", "NEUTRAL"),
+                    "confidence": sentiment_result.get("confidence", 0)
+                },
+                "LiquidityAnalystAgent": {
+                    "signal": liquidity_result.get("signal", "NEUTRAL"),
+                    "confidence": liquidity_result.get("confidence", 0)
+                },
+                "FundingRateAnalystAgent": {
+                    "signal": funding_rate_result.get("signal", "NEUTRAL"),
+                    "confidence": funding_rate_result.get("confidence", 0)
+                },
+                "OpenInterestAnalystAgent": {
+                    "signal": open_interest_result.get("signal", "NEUTRAL"),
+                    "confidence": open_interest_result.get("confidence", 0)
+                }
+            }
+        }
+        
+        # Record the decision in the performance tracker if available
+        trade_id = None
+        if performance_tracker:
+            trade_id = performance_tracker.record_decision(decision_data)
+            logging.info(f"Decision recorded in performance tracker with ID: {trade_id}")
+        
         if risk_evaluation["approved"] and trade_proposal["type"] in ["BUY", "SELL"]:
-            # Record approved trade
+            # Record approved trade in trade book manager
             trade_book_manager.record_trade(trade_proposal)
             
-            # Generate simulated performance (for demonstration)
+            # Generate simulated performance (for legacy compatibility)
             performance_data = {
-                "trade_id": str(int(time.time())),
+                "trade_id": trade_id or str(int(time.time())),
                 "symbol": symbol,
                 "entry_price": current_price,
                 "entry_time": trade_proposal["timestamp"],
@@ -475,6 +572,7 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
                 "contributing_agents": active_agents
             }
             
+            # Record in legacy trade book
             trade_book_manager.record_performance(performance_data)
             
             logging.info(f"Trade executed: {trade_proposal['type']} {symbol} @ {current_price}")
@@ -488,6 +586,11 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
             else:
                 trade_book_manager.record_rejected_trade(trade_proposal, risk_evaluation["reason"])
                 logging.info(f"Trade rejected: {trade_proposal['type']} {symbol} - Reason: {risk_evaluation['reason']}")
+        
+        # Update performance metrics if using performance tracker
+        if performance_tracker and trade_id:
+            max_hold_time = int(os.getenv("MAX_HOLD_TIME_MINUTES", "60"))
+            performance_tracker.update_performance(data_provider, max_hold_time)
             
         return {
             "trade_proposal": trade_proposal,
@@ -558,6 +661,10 @@ def main():
         trade_book_manager = TradeBookManager()
         logger.info("Trade Book Manager initialized")
         
+        # Initialize performance tracker
+        performance_tracker = PerformanceTracker()
+        logger.info("Performance Tracker initialized")
+        
         # Initialize risk guard
         risk_guard = RiskGuardAgent()
         logger.info("Risk Guard Agent initialized")
@@ -572,7 +679,8 @@ def main():
                 interval, 
                 data_provider, 
                 trade_book_manager, 
-                risk_guard
+                risk_guard,
+                performance_tracker
             )
         
         scheduler.schedule_trigger(args.interval, trigger_callback, args.symbol)
@@ -591,7 +699,8 @@ def main():
                 args.interval, 
                 data_provider, 
                 trade_book_manager, 
-                risk_guard
+                risk_guard,
+                performance_tracker
             )
             logger.info(f"Demo cycle completed with status: {result['status']}")
         else:

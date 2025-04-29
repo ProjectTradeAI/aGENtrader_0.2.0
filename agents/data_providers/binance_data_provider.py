@@ -50,7 +50,7 @@ class BinanceDataProvider:
         self, 
         api_key: Optional[str] = None, 
         api_secret: Optional[str] = None,
-        use_testnet: bool = True  # Default to testnet due to geographical restrictions
+        use_testnet: Optional[bool] = None  # Now determined by DEPLOY_ENV
     ):
         """
         Initialize the Binance API provider.
@@ -58,11 +58,24 @@ class BinanceDataProvider:
         Args:
             api_key: Binance API key
             api_secret: Binance API secret
+            use_testnet: Override environment setting for testnet (if provided)
             use_testnet: Whether to use Binance testnet (defaults to True to avoid geo restrictions)
         """
         # Use environment variables as fallback
         self.api_key = api_key or os.environ.get("BINANCE_API_KEY")
         self.api_secret = api_secret or os.environ.get("BINANCE_API_SECRET")
+        
+        # Determine whether to use testnet based on environment if not explicitly provided
+        if use_testnet is None:
+            # Check DEPLOY_ENV first (ec2 = mainnet, replit/dev = testnet)
+            deploy_env = os.environ.get("DEPLOY_ENV", "dev").lower()
+            if deploy_env == "ec2":
+                use_testnet = False
+                logger.info("Using real Binance API for EC2 deployment")
+            else:
+                # Then check specific BINANCE_USE_TESTNET flag as fallback
+                use_testnet_str = os.environ.get("BINANCE_USE_TESTNET", "true").lower()
+                use_testnet = (use_testnet_str == "true")
         
         # Select base URL based on whether to use testnet
         self.base_url = self.TESTNET_URL if use_testnet else self.BASE_URL
@@ -71,7 +84,7 @@ class BinanceDataProvider:
         self.last_request_time = 0
         self.min_request_interval = 0.1  # seconds between requests
         
-        logger.info(f"Initialized Binance Data Provider using {'testnet' if use_testnet else 'mainnet'}")
+        logger.info(f"Initialized Binance Data Provider using {'testnet' if use_testnet else 'mainnet'} ({self.base_url})")
     
     def _generate_signature(self, params: Dict[str, Any]) -> str:
         """

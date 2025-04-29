@@ -18,6 +18,8 @@ agents:
     - LiquidityAnalyst
     - TechnicalAnalyst
     - SentimentAnalyst
+    - FundingRateAnalyst
+    - OpenInterestAnalyst
     - PortfolioManager
     - RiskGuard
   
@@ -42,6 +44,22 @@ agents:
       Bullish: 0.7
       Neutral: 0.5
       Bearish: 0.6
+      
+  funding_rate_analyst:
+    enabled: true
+    confidence_threshold: 65
+    timeframe: 8h  # Customized timeframe for funding rate analysis
+    lookback_periods: 14
+    high_funding_threshold: 0.01
+    extreme_funding_threshold: 0.03
+    
+  open_interest_analyst:
+    enabled: true
+    confidence_threshold: 65
+    timeframe: 4h  # Customized timeframe for open interest analysis
+    lookback_periods: 20
+    oi_change_threshold: 0.05
+    price_change_threshold: 0.02
 
   market_analyst:
     enabled: false
@@ -117,6 +135,8 @@ agent_weights:
   LiquidityAnalystAgent: 1.0
   TechnicalAnalystAgent: 1.2
   SentimentAnalystAgent: 0.8
+  FundingRateAnalystAgent: 0.8
+  OpenInterestAnalystAgent: 1.0
   # FundamentalAnalystAgent: 1.1  # Uncomment when implemented
 
 # Database Configuration

@@ -78,10 +78,11 @@ class LLMClient:
     # Define environment-specific endpoints
     if DEPLOY_ENV == 'ec2':
         # When running on EC2, try connections within the instance first, then other known locations
+        # Prioritize 127.0.0.1 since that's where Ollama is currently listening
         DEFAULT_ENDPOINTS = [
+            'http://127.0.0.1:11434',  # This is the address Ollama is actually using
             os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434'),
             'http://localhost:11434',
-            'http://127.0.0.1:11434',
             'http://0.0.0.0:11434',
             'http://172.31.16.22:11434'  # EC2 internal IP (might vary)
         ]
@@ -222,9 +223,14 @@ class LLMClient:
             
             Possible causes and solutions:
             1. Ollama service is not running - Run 'sudo systemctl start ollama' on the EC2 instance
-            2. Ollama is running but not on port 11434 - Check 'sudo netstat -tulpn | grep ollama'
+            2. Ollama is running but only on localhost (127.0.0.1) - Run the following commands:
+               sudo systemctl stop ollama
+               sudo mkdir -p /etc/ollama
+               sudo bash -c 'echo "host = \\"0.0.0.0\\"" > /etc/ollama/config'
+               sudo systemctl start ollama
+               sudo netstat -tulpn | grep ollama  # Should show 0.0.0.0:11434
             3. Firewall blocking connections - Check EC2 security group settings
-            4. Mistral model is installed but service is stopped - Run 'ollama serve' on the EC2 instance
+            4. Mistral model is installed but service is stopped - Run 'sudo systemctl status ollama'
             
             Will fallback to using Grok API instead.
             ==========================================

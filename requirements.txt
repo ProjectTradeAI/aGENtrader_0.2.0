@@ -23,3 +23,5 @@ colorama
 numpy
 numpy
 pandas
+numpy
+pandas

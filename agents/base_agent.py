@@ -9,10 +9,58 @@ import json
 import logging
 from typing import Dict, Any, Optional
 
+from agents.agent_interface import AgentInterface, AnalystAgentInterface
+from core.version import VERSION
+
 # Set up logger
 logger = logging.getLogger("aGENtrader.agents.base")
 
-class BaseAnalystAgent:
+class BaseAgent(AgentInterface):
+    """
+    Base class for all aGENtrader agents.
+    
+    This class provides common functionality for all agents including:
+    - Standardized identification
+    - Configuration loading
+    - Error handling
+    - Logging
+    """
+    
+    def __init__(self, agent_name=None):
+        """Initialize the base agent.
+        
+        Args:
+            agent_name: Optional name for the agent (used for agent-specific configurations)
+        """
+        # Set up logger
+        self.logger = logging.getLogger(f"aGENtrader.agents.{self.__class__.__name__}")
+        
+        # Save agent name for agent-specific configurations
+        self._agent_name = agent_name or self.__class__.__name__.lower()
+        
+        # Default properties
+        self._description = "Base aGENtrader agent"
+        
+        # Load default configs
+        self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
+    
+    @property
+    def name(self) -> str:
+        """Get the name of the agent."""
+        return self._agent_name
+    
+    @property
+    def description(self) -> str:
+        """Get the description of the agent."""
+        return self._description
+    
+    @property
+    def version(self) -> str:
+        """Get the version of the agent."""
+        return VERSION
+
+
+class BaseAnalystAgent(BaseAgent, AnalystAgentInterface):
     """
     Base class for all analyst agents.
     
@@ -28,14 +76,41 @@ class BaseAnalystAgent:
         Args:
             agent_name: Optional name for the agent (used for agent-specific configurations)
         """
-        # Set up logger
-        self.logger = logging.getLogger(f"aGENtrader.agents.{self.__class__.__name__}")
+        super().__init__(agent_name=agent_name)
+        self._description = "Base analyst agent for market analysis"
         
-        # Save agent name for agent-specific configurations
-        self.agent_name = agent_name or self.__class__.__name__.lower()
+        # Common properties all analyst agents should have
+        self.symbol = None
+        self.interval = None
+        self.data_provider = None
+    
+    def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Analyze market data and produce results.
         
-        # Load default configs
-        self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
+        This method should be overridden by subclasses to provide specific analysis.
+        The base implementation returns a default HOLD signal.
+        
+        Args:
+            market_data: Dictionary containing market data for analysis
+            
+        Returns:
+            Dictionary with analysis results
+        """
+        self.logger.warning("BaseAnalystAgent.analyze() called - this should be overridden by subclasses")
+        
+        # Extract symbol and interval from market data if available
+        if market_data:
+            self.symbol = market_data.get('symbol', self.symbol)
+            self.interval = market_data.get('interval', self.interval)
+        
+        # Return a default HOLD signal with zero confidence
+        return self.create_standard_result(
+            signal="HOLD",
+            confidence=0,
+            reason="Base implementation - should be overridden",
+            data={"warning": "Using default implementation"}
+        )
         
     def get_agent_config(self) -> Dict[str, Any]:
         """

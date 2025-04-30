@@ -224,15 +224,9 @@ class AgentTestHarness:
         Returns:
             Initialized agent instance
         """
-        agent_kwargs = {
-            'symbol': self.symbol,
-            'interval': self.interval,
-            'data_provider': self.data_provider
-        }
-        
-        # Handle special cases for different agent types
+        # Base parameters for different agent types
         if self.agent_name == 'DecisionAgent':
-            # Decision agent needs analyst results
+            # Decision agent has a unique initialization
             mock_analyst_results = {
                 'technical_analysis': {
                     'signal': 'HOLD',
@@ -251,10 +245,52 @@ class AgentTestHarness:
                     'confidence': 60,
                     'reasoning': 'Mock liquidity analysis for testing',
                     'data': {'bid_ask_ratio': 1.1}
+                },
+                'funding_rate_analysis': {
+                    'signal': 'HOLD',
+                    'confidence': 55,
+                    'reasoning': 'Mock funding rate analysis for testing',
+                    'data': {'funding_rate': 0.01}
+                },
+                'open_interest_analysis': {
+                    'signal': 'HOLD',
+                    'confidence': 58,
+                    'reasoning': 'Mock open interest analysis for testing',
+                    'data': {'open_interest_change': 0.05}
                 }
             }
             
-            agent_kwargs['analyst_results'] = self.data_override.get('analyst_results', mock_analyst_results)
+            analyst_results = self.data_override.get('analyst_results', mock_analyst_results)
+            
+            # Create the decision agent
+            agent = self.agent_class(analyst_results=analyst_results)
+            
+        else:
+            # For analyst agents, check the constructor
+            init_params = inspect.signature(self.agent_class.__init__).parameters
+            agent_kwargs = {}
+            
+            # Check if the agent accepts data_provider/data_fetcher
+            if 'data_provider' in init_params:
+                agent_kwargs['data_provider'] = self.data_provider
+            elif 'data_fetcher' in init_params:
+                agent_kwargs['data_fetcher'] = self.data_provider
+                
+            # Add config with symbol and interval if the agent accepts config
+            if 'config' in init_params:
+                agent_kwargs['config'] = {
+                    'symbol': self.symbol,
+                    'interval': self.interval
+                }
+            
+            # Create the agent
+            agent = self.agent_class(**agent_kwargs)
+            
+            # Store symbol and interval for later use
+            if not hasattr(agent, 'symbol'):
+                agent.symbol = self.symbol
+            if not hasattr(agent, 'interval'):
+                agent.interval = self.interval
         
         # Check for special agent-specific parameters
         if 'SentimentAnalystAgent' in self.agent_name or 'SentimentAggregatorAgent' in self.agent_name:
@@ -265,9 +301,6 @@ class AgentTestHarness:
                     f"{Fore.YELLOW}Warning: XAI_API_KEY not set for sentiment analysis. "
                     f"Results may be limited.{Style.RESET_ALL}"
                 )
-        
-        # Create the agent
-        agent = self.agent_class(**agent_kwargs)
         
         # If agent uses an LLM client, modify temperature
         if hasattr(agent, 'llm_client') and agent.llm_client:
@@ -304,31 +337,42 @@ class AgentTestHarness:
                 market_data = self.data_override['market_data']
                 logger.info(f"{Fore.CYAN}Using overridden market data{Style.RESET_ALL}")
             else:
-                # Fetch real market data
+                # Fetch market data
                 try:
-                    if self.use_mock_data:
-                        market_data = self.data_provider.get_mock_market_data(self.symbol, self.interval)
-                    else:
-                        # Fetch real data from the data provider
-                        ohlcv_data = self.data_provider.fetch_ohlcv(
-                            symbol=self.symbol.replace('/', ''),
-                            interval=self.interval,
-                            limit=100  # Get enough data for analysis
-                        )
-                        
-                        # Format as market data dict
-                        market_data = {
-                            'symbol': self.symbol,
-                            'interval': self.interval,
-                            'ohlcv': ohlcv_data,
-                            'current_price': float(ohlcv_data[-1]['close']) if ohlcv_data else 0.0,
-                            'timestamp': datetime.now().isoformat()
-                        }
+                    # Fetch data from the data provider
+                    ohlcv_data = self.data_provider.fetch_ohlcv(
+                        symbol=self.symbol.replace('/', ''),
+                        interval=self.interval,
+                        limit=100  # Get enough data for analysis
+                    )
+                    
+                    # Format as market data dict
+                    market_data = {
+                        'symbol': self.symbol,
+                        'interval': self.interval,
+                        'ohlcv': ohlcv_data,
+                        'current_price': float(ohlcv_data[-1]['close']) if ohlcv_data else 0.0,
+                        'timestamp': datetime.now().isoformat()
+                    }
                 except Exception as e:
                     logger.error(f"{Fore.RED}Error fetching market data: {str(e)}{Style.RESET_ALL}")
-                    # Fall back to mock data
-                    market_data = self.data_provider.get_mock_market_data(self.symbol, self.interval)
-                    logger.warning(f"{Fore.YELLOW}Falling back to mock data{Style.RESET_ALL}")
+                    # Create basic mock data
+                    current_price = self.data_provider.get_current_price(self.symbol.replace('/', ''))
+                    ohlcv_data = self.data_provider.fetch_ohlcv(
+                        symbol=self.symbol.replace('/', ''),
+                        interval=self.interval,
+                        limit=100
+                    )
+                    
+                    market_data = {
+                        'symbol': self.symbol,
+                        'interval': self.interval,
+                        'ohlcv': ohlcv_data,
+                        'current_price': current_price,
+                        'timestamp': datetime.now().isoformat()
+                    }
+                    
+                    logger.warning(f"{Fore.YELLOW}Using generated mock data{Style.RESET_ALL}")
             
             # Run the analysis
             logger.info(f"{Fore.CYAN}Running {self.agent_name} analysis...{Style.RESET_ALL}")

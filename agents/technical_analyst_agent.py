@@ -101,6 +101,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         self, 
         symbol: Optional[str] = None, 
         interval: Optional[str] = None,
+        market_data: Optional[Dict[str, Any]] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -109,6 +110,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         Args:
             symbol: Trading symbol
             interval: Time interval
+            market_data: Pre-fetched market data (optional)
             **kwargs: Additional parameters
             
         Returns:
@@ -127,15 +129,21 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             )
             
         try:
-            # Fetch market data
-            if not self.data_fetcher:
-                return self.build_error_response(
-                    "DATA_FETCHER_MISSING",
-                    "Data fetcher not provided"
-                )
-            
-            # Get OHLCV data
-            ohlcv_data = self.data_fetcher.fetch_ohlcv(symbol, interval)
+            # Check if we have pre-fetched market data or need to fetch it
+            ohlcv_data = None
+            if market_data and isinstance(market_data, dict) and market_data.get("ohlcv"):
+                ohlcv_data = market_data.get("ohlcv")
+                logger.info(f"Using pre-fetched OHLCV data with {len(ohlcv_data)} records")
+            else:
+                # Fetch market data using data fetcher
+                if not self.data_fetcher:
+                    return self.build_error_response(
+                        "DATA_FETCHER_MISSING",
+                        "Data fetcher not provided"
+                    )
+                
+                logger.info(f"Fetching OHLCV data for {symbol} at {interval} interval")
+                ohlcv_data = self.data_fetcher.fetch_ohlcv(symbol, interval)
             
             if not ohlcv_data or len(ohlcv_data) < 30:  # Need enough data for analysis
                 return self.build_error_response(
@@ -150,7 +158,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             indicators_df = self._calculate_indicators(df)
             
             # Generate trading signals from indicators
-            signals, confidence, explanation = self._generate_signals(indicators_df)
+            signal, confidence, explanations = self._generate_signals(indicators_df)
             
             # Get current price
             current_price = float(df['close'].iloc[-1])
@@ -164,9 +172,9 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                 "symbol": symbol,
                 "interval": interval,
                 "current_price": current_price,
-                "signal": signals,
+                "signal": signal,
                 "confidence": confidence,
-                "explanation": explanation,
+                "explanation": explanations,
                 "indicators": self._get_indicator_values(indicators_df),
                 "execution_time_seconds": execution_time,
                 "status": "success"
@@ -175,12 +183,12 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             # Log decision summary
             try:
                 # Create a concise reason from the first explanation
-                reason = explanation[0] if explanation else "Technical analysis signals"
+                reason = explanations[0] if explanations else "Technical analysis signals"
                 
                 # Log the decision
                 decision_logger.log_decision(
                     agent_name=self.name,
-                    signal=signals,
+                    signal=signal,
                     confidence=confidence,
                     reason=reason,
                     symbol=symbol,
@@ -379,10 +387,11 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             signals.append(("SELL", rsi_config['weight'], f"RSI above overbought threshold ({rsi_config['overbought']})"))
             
         # Calculate MACD signals
+        macd_config = self.indicators['macd']
         if latest['macd'] > latest['macd_signal'] and previous['macd'] <= previous['macd_signal']:
-            signals.append(("BUY", self.indicators['macd']['weight'], "MACD crossed above signal line"))
+            signals.append(("BUY", macd_config['weight'], "MACD crossed above signal line"))
         elif latest['macd'] < latest['macd_signal'] and previous['macd'] >= previous['macd_signal']:
-            signals.append(("SELL", self.indicators['macd']['weight'], "MACD crossed below signal line"))
+            signals.append(("SELL", macd_config['weight'], "MACD crossed below signal line"))
             
         # Calculate Bollinger Band signals
         bb_config = self.indicators['bollinger_bands']
@@ -393,35 +402,38 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             
         # Calculate Volume signals
         vol_config = self.indicators['volume']
-        if latest['volume_ratio'] > 1.5 and latest['close'] > previous['close']:
-            signals.append(("BUY", vol_config['weight'], "High volume on price increase"))
-        elif latest['volume_ratio'] > 1.5 and latest['close'] < previous['close']:
-            signals.append(("SELL", vol_config['weight'], "High volume on price decrease"))
-            
-        # Make a decision based on weighted signals
+        if latest['volume_ratio'] > 1.5:
+            # High volume could confirm existing signals
+            if any(signal[0] == "BUY" for signal in signals):
+                signals.append(("BUY", vol_config['weight'], "Increased volume confirms bullish signals"))
+            elif any(signal[0] == "SELL" for signal in signals):
+                signals.append(("SELL", vol_config['weight'], "Increased volume confirms bearish signals"))
+                
+        # Calculate weighted signal
         if not signals:
-            return "NEUTRAL", 50, ["No clear trading signals detected"]
+            return "NEUTRAL", 50, ["No clear signals detected from technical indicators"]
             
-        # Calculate weighted decision
+        # Count and weight the signals
         buy_weight = sum(weight for signal, weight, _ in signals if signal == "BUY")
         sell_weight = sum(weight for signal, weight, _ in signals if signal == "SELL")
         
-        # Collect explanations
+        # Get explanations
         explanations = [explanation for _, _, explanation in signals]
         
-        # Determine final signal and confidence
-        total_weights = sum(self.indicators[k]['weight'] for k in self.indicators)
-        max_possible_confidence = 99  # Cap confidence at 99%
-        
+        # Determine final signal
+        total_weight = buy_weight + sell_weight
+        if total_weight == 0:
+            return "NEUTRAL", 50, ["Conflicting technical indicators, no clear signal"]
+            
         if buy_weight > sell_weight:
-            confidence = int(min(max_possible_confidence, (buy_weight / total_weights) * 100))
+            confidence = int(min(100, 50 + (buy_weight / total_weight) * 50))
             return "BUY", confidence, explanations
         elif sell_weight > buy_weight:
-            confidence = int(min(max_possible_confidence, (sell_weight / total_weights) * 100))
+            confidence = int(min(100, 50 + (sell_weight / total_weight) * 50))
             return "SELL", confidence, explanations
         else:
-            return "NEUTRAL", 50, explanations
-    
+            return "NEUTRAL", 50, ["Equal buy and sell signals from technical indicators"]
+            
     def _get_indicator_values(self, df: pd.DataFrame) -> Dict[str, Any]:
         """
         Extract the latest values of all calculated indicators.
@@ -432,45 +444,91 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         Returns:
             Dictionary of indicator values
         """
-        if df.empty:
+        if len(df) == 0:
             return {}
             
         latest = df.iloc[-1]
         
-        # Extract relevant indicators
-        sma_config = self.indicators['sma']
-        ema_config = self.indicators['ema']
-        
-        return {
-            "price": {
-                "open": float(latest['open']),
-                "high": float(latest['high']),
-                "low": float(latest['low']),
-                "close": float(latest['close']),
-                "volume": float(latest['volume'])
-            },
-            "sma": {
-                f"{sma_config['short_period']}": float(latest[f'sma_{sma_config["short_period"]}']),
-                f"{sma_config['long_period']}": float(latest[f'sma_{sma_config["long_period"]}'])
-            },
-            "ema": {
-                f"{ema_config['short_period']}": float(latest[f'ema_{ema_config["short_period"]}']),
-                f"{ema_config['long_period']}": float(latest[f'ema_{ema_config["long_period"]}'])
-            },
+        # Get the indicator values that don't require calculation
+        indicators = {
+            "price": float(latest['close']),
+            "volume": float(latest['volume']),
             "rsi": float(latest['rsi']),
-            "macd": {
-                "value": float(latest['macd']),
-                "signal": float(latest['macd_signal']),
-                "histogram": float(latest['macd_histogram'])
-            },
-            "bollinger_bands": {
-                "upper": float(latest['bb_upper']),
-                "middle": float(latest['bb_middle']),
-                "lower": float(latest['bb_lower'])
-            },
-            "volume": {
-                "current": float(latest['volume']),
-                "average": float(latest['volume_sma']),
-                "ratio": float(latest['volume_ratio'])
-            }
+            "macd": float(latest['macd']),
+            "macd_signal": float(latest['macd_signal']),
+            "macd_histogram": float(latest['macd_histogram']),
+            "bb_upper": float(latest['bb_upper']),
+            "bb_middle": float(latest['bb_middle']),
+            "bb_lower": float(latest['bb_lower'])
         }
+        
+        # Add SMA values
+        sma_config = self.indicators['sma']
+        indicators[f"sma_{sma_config['short_period']}"] = float(latest[f"sma_{sma_config['short_period']}"])
+        indicators[f"sma_{sma_config['long_period']}"] = float(latest[f"sma_{sma_config['long_period']}"])
+        
+        # Add EMA values
+        ema_config = self.indicators['ema']
+        indicators[f"ema_{ema_config['short_period']}"] = float(latest[f"ema_{ema_config['short_period']}"])
+        indicators[f"ema_{ema_config['long_period']}"] = float(latest[f"ema_{ema_config['long_period']}"])
+        
+        # Add derived indicators
+        sma_short = indicators[f"sma_{sma_config['short_period']}"]
+        sma_long = indicators[f"sma_{sma_config['long_period']}"]
+        indicators["sma_diff"] = sma_short - sma_long
+        
+        ema_short = indicators[f"ema_{ema_config['short_period']}"]
+        ema_long = indicators[f"ema_{ema_config['long_period']}"]
+        indicators["ema_diff"] = ema_short - ema_long
+        
+        # Add positions relative to Bollinger Bands
+        price = indicators["price"]
+        bb_upper = indicators["bb_upper"]
+        bb_lower = indicators["bb_lower"]
+        bb_middle = indicators["bb_middle"]
+        
+        indicators["bb_width"] = (bb_upper - bb_lower) / bb_middle
+        indicators["bb_position"] = (price - bb_lower) / (bb_upper - bb_lower) if (bb_upper - bb_lower) != 0 else 0.5
+        
+        return indicators
+        
+    def _fetch_market_data(self, symbol: str, **kwargs) -> Dict[str, Any]:
+        """
+        Fetch market data for analysis.
+        
+        Args:
+            symbol: Trading symbol
+            **kwargs: Additional parameters
+            
+        Returns:
+            Market data dictionary
+        """
+        interval = kwargs.get('interval', self.default_interval)
+        
+        if not self.data_fetcher:
+            logger.warning("No data fetcher provided, cannot fetch market data")
+            return {}
+            
+        try:
+            # Fetch OHLCV data
+            ohlcv_data = self.data_fetcher.fetch_ohlcv(symbol, interval)
+            
+            # Fetch additional market data if available
+            market_data = {
+                "ohlcv": ohlcv_data,
+                "interval": interval,
+                "symbol": symbol
+            }
+            
+            # Try to fetch current ticker if available
+            try:
+                ticker = self.data_fetcher.get_ticker(symbol)
+                market_data["ticker"] = ticker
+            except:
+                pass
+                
+            return market_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching market data: {str(e)}")
+            return {}

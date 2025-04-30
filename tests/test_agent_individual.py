@@ -9,7 +9,7 @@ This script allows testing of individual analyst agents in isolation with:
 - Flexible agent selection via CLI
 
 Usage:
-  python tests/test_agent_individual.py \
+  python3 tests/test_agent_individual.py \
     --agent TechnicalAnalystAgent \
     --symbol BTC/USDT \
     --interval 4h \

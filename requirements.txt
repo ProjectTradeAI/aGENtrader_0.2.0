@@ -21,3 +21,5 @@ python-dotenv
 python-dotenv
 colorama
 numpy
+numpy
+pandas

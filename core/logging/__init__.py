@@ -1,24 +1,13 @@
 """
-aGENtrader v2 Logging Module
+Core logging package for aGENtrader v2.
 
-This module provides logging utilities for aGENtrader v2.
+This package provides centralized logging functionality for the trading system.
 """
-
-import logging
 
 from core.logging.decision_logger import DecisionLogger
 
-# Configure root logger once
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-
-# Create a global instance of DecisionLogger for convenient access
+# Create a global instance of the decision logger
 decision_logger = DecisionLogger()
 
-# Export classes and functions
-__all__ = [
-    'DecisionLogger',
-    'decision_logger'
-]
+# Export the decision logger
+__all__ = ['decision_logger', 'DecisionLogger']

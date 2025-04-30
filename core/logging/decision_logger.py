@@ -1,185 +1,279 @@
 """
 aGENtrader v2 Decision Logger
 
-This module provides decision logging functionality to create human-readable summaries
-of agent decisions for monitoring and potential model training.
+This module provides the DecisionLogger class for recording and tracking
+trading decisions made by various agents in the system.
 """
 
 import os
-import logging
 import json
-from datetime import datetime
+import logging
+import time
+import uuid
 from typing import Dict, Any, Optional, List, Union
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 class DecisionLogger:
     """
-    Decision logger that creates human-readable summaries of agent decisions.
+    Logger for recording and tracking trading decisions.
     
-    This class handles logging of agent decisions in a standardized format.
+    This class provides methods to log decisions from various agents,
+    track performance, and provide decision history.
     """
     
-    def __init__(self, log_path: str = 'logs/decision_summary.log'):
+    def __init__(self, log_dir: Optional[str] = None):
         """
         Initialize the decision logger.
         
         Args:
-            log_path: Path to the log file
+            log_dir: Directory for storing decision logs
         """
-        self.log_path = log_path
+        self.log_dir = log_dir or os.environ.get('DECISION_LOG_DIR', 'logs/decisions')
         
-        # Create logs directory if it doesn't exist
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        # Create log directory if it doesn't exist
+        if not os.path.exists(self.log_dir):
+            try:
+                os.makedirs(self.log_dir, exist_ok=True)
+                logger.info(f"Created decision log directory: {self.log_dir}")
+            except Exception as e:
+                logger.warning(f"Failed to create decision log directory: {str(e)}")
+                
+        # Dictionary to store decision history in memory
+        self.decisions = {}
         
-        # Set up logger
-        self.logger = logging.getLogger('decision_logger')
-        self.logger.setLevel(logging.INFO)
+        # Dictionary to track agent contribution metrics
+        self.agent_metrics = {}
         
-        # Add file handler if not already added
-        if not self.logger.handlers:
-            file_handler = logging.FileHandler(log_path)
-            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-            file_handler.setFormatter(formatter)
-            self.logger.addHandler(file_handler)
+        # Load existing decisions if available
+        self._load_decisions()
+        
+    def _load_decisions(self):
+        """Load existing decisions from log files."""
+        try:
+            decisions_file = os.path.join(self.log_dir, 'decisions.json')
+            if os.path.exists(decisions_file):
+                with open(decisions_file, 'r') as f:
+                    self.decisions = json.load(f)
+                logger.info(f"Loaded {len(self.decisions)} historical decisions")
+        except Exception as e:
+            logger.warning(f"Failed to load historical decisions: {str(e)}")
             
-            # Also add console handler
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(formatter)
-            self.logger.addHandler(console_handler)
-            
-        self.logger.info("Decision logger initialized")
-        
-    def log_decision(
-        self,
-        agent_name: str,
-        signal: str,
-        confidence: int,
-        reason: str,
-        symbol: Optional[str] = None,
-        price: Optional[float] = None,
-        timestamp: Optional[str] = None,
-        additional_data: Optional[Dict[str, Any]] = None,
-        interval: Optional[str] = None
-    ) -> Optional[str]:
+    def log_decision(self, 
+                     agent_name: str, 
+                     signal: str, 
+                     confidence: int, 
+                     reason: str, 
+                     symbol: str, 
+                     price: float,
+                     timestamp: Optional[str] = None,
+                     additional_data: Optional[Dict[str, Any]] = None) -> str:
         """
-        Log a decision to the decision summary log.
+        Log a trading decision.
         
         Args:
             agent_name: Name of the agent making the decision
-            signal: Trading signal (BUY, SELL, HOLD, etc.)
-            confidence: Confidence percentage
-            reason: Short reason for the decision (1 sentence max)
-            symbol: Trading symbol (e.g., BTC/USDT)
+            signal: Trading signal (BUY, SELL, NEUTRAL)
+            confidence: Confidence level (0-100)
+            reason: Reason for the decision
+            symbol: Trading symbol
             price: Current price
-            timestamp: Custom timestamp (defaults to current UTC time)
-            additional_data: Additional data to store for future reference
-            interval: Time interval used for the analysis
+            timestamp: Timestamp (optional, will use current time if not provided)
+            additional_data: Additional data to include in the log
             
         Returns:
-            The summary string that was logged or None if an error occurred
+            Decision ID
         """
-        try:
-            # Set defaults
-            if timestamp is None:
-                timestamp = datetime.utcnow().isoformat()
-                
-            # Limit reason to one sentence
-            short_reason = self._limit_to_one_sentence(reason)
+        if timestamp is None:
+            timestamp = datetime.now().isoformat()
             
-            # Format the decision summary
-            summary_parts = []
-            summary_parts.append(f"AGENT: {agent_name}")
-            summary_parts.append(f"SIGNAL: {signal}")
-            summary_parts.append(f"CONFIDENCE: {confidence}%")
+        if additional_data is None:
+            additional_data = {}
             
-            if symbol:
-                summary_parts.append(f"SYMBOL: {symbol}")
-                
-            if price:
-                summary_parts.append(f"PRICE: {price:.2f}")
-                
-            if interval:
-                summary_parts.append(f"INTERVAL: {interval}")
-                
-            summary_parts.append(f"REASON: {short_reason}")
+        # Generate a unique ID for the decision
+        decision_id = f"{symbol.replace('/', '')}-{timestamp}"
+        
+        # Create the decision record
+        decision = {
+            'id': decision_id,
+            'agent': agent_name,
+            'symbol': symbol,
+            'signal': signal,
+            'confidence': confidence,
+            'reason': reason,
+            'price': price,
+            'timestamp': timestamp,
+            'additional_data': additional_data
+        }
+        
+        # Store the decision in memory
+        self.decisions[decision_id] = decision
+        
+        # Log to console
+        logger.info(f"Decision recorded in performance tracker with ID: {decision_id}")
+        logger.info(f"{signal} decision for {symbol} @ {price}")
+        logger.info(f"Reasoning: {reason}")
+        
+        # Update agent metrics
+        if agent_name not in self.agent_metrics:
+            self.agent_metrics[agent_name] = {
+                'total_decisions': 0,
+                'buy_signals': 0,
+                'sell_signals': 0,
+                'neutral_signals': 0,
+                'avg_confidence': 0
+            }
             
-            # Join all parts with separator
-            summary = " | ".join(summary_parts)
+        metrics = self.agent_metrics[agent_name]
+        metrics['total_decisions'] += 1
+        
+        if signal == 'BUY':
+            metrics['buy_signals'] += 1
+        elif signal == 'SELL':
+            metrics['sell_signals'] += 1
+        else:
+            metrics['neutral_signals'] += 1
             
-            # Log the summary
-            self.logger.info(summary)
+        # Update average confidence
+        metrics['avg_confidence'] = (
+            (metrics['avg_confidence'] * (metrics['total_decisions'] - 1) + confidence) / 
+            metrics['total_decisions']
+        )
+        
+        # Save to file periodically
+        if metrics['total_decisions'] % 10 == 0:
+            self._save_decisions()
             
-            # Also log additional data as JSON if provided
-            if additional_data:
-                data_json = json.dumps(additional_data)
-                self.logger.debug(f"Additional data for {agent_name}: {data_json}")
-                
-            return summary
-            
-        except Exception as e:
-            self.logger.error(f"Error logging decision: {str(e)}")
-            return None
-            
-    def _limit_to_one_sentence(self, text: str) -> str:
+        return decision_id
+        
+    def get_decision(self, decision_id: str) -> Optional[Dict[str, Any]]:
         """
-        Limit the text to one sentence.
+        Get a specific decision by ID.
         
         Args:
-            text: The text to limit
+            decision_id: Decision ID
             
         Returns:
-            The first sentence from the text
+            Decision record or None if not found
         """
-        # Simple sentence splitting by common sentence terminators
-        for terminator in ['. ', '! ', '? ']:
-            if terminator in text:
-                return text.split(terminator)[0] + terminator.strip()
-                
-        # If no terminator found, return as is (likely already one sentence)
-        return text
+        return self.decisions.get(decision_id)
         
-    @classmethod
-    def create_summary_from_result(
-        cls,
-        agent_name: str,
-        result: Dict[str, Any],
-        symbol: Optional[str] = None,
-        price: Optional[float] = None
-    ) -> Optional[str]:
+    def get_decisions_by_symbol(self, symbol: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        Create a summary from an agent's result dictionary.
+        Get decisions for a specific symbol.
+        
+        Args:
+            symbol: Trading symbol
+            limit: Maximum number of decisions to return
+            
+        Returns:
+            List of decision records
+        """
+        matching_decisions = [
+            d for d in self.decisions.values() 
+            if d['symbol'] == symbol
+        ]
+        
+        # Sort by timestamp (newest first)
+        matching_decisions.sort(key=lambda d: d['timestamp'], reverse=True)
+        
+        return matching_decisions[:limit]
+        
+    def get_decisions_by_agent(self, agent_name: str, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Get decisions made by a specific agent.
         
         Args:
             agent_name: Name of the agent
-            result: The result dictionary from an agent
-            symbol: Trading symbol
-            price: Current price
+            limit: Maximum number of decisions to return
             
         Returns:
-            The summary string or None if creation failed
+            List of decision records
         """
+        matching_decisions = [
+            d for d in self.decisions.values() 
+            if d['agent'] == agent_name
+        ]
+        
+        # Sort by timestamp (newest first)
+        matching_decisions.sort(key=lambda d: d['timestamp'], reverse=True)
+        
+        return matching_decisions[:limit]
+        
+    def get_agent_metrics(self, agent_name: Optional[str] = None) -> Union[Dict[str, Any], Dict[str, Dict[str, Any]]]:
+        """
+        Get metrics for a specific agent or all agents.
+        
+        Args:
+            agent_name: Name of the agent (optional)
+            
+        Returns:
+            Dictionary of agent metrics
+        """
+        if agent_name:
+            return self.agent_metrics.get(agent_name, {})
+        return self.agent_metrics
+        
+    def _save_decisions(self):
+        """Save decisions to a file."""
         try:
-            # Extract required fields from the result
-            signal = result.get('signal')
-            confidence = result.get('confidence')
-            reasoning = result.get('reasoning')
-            
-            if not all([signal, confidence, reasoning]):
-                raise ValueError(f"Missing required fields in result: {result}")
+            decisions_file = os.path.join(self.log_dir, 'decisions.json')
+            with open(decisions_file, 'w') as f:
+                json.dump(self.decisions, f, indent=2)
                 
-            # Create a logger instance
-            logger = cls()
+            metrics_file = os.path.join(self.log_dir, 'agent_metrics.json')
+            with open(metrics_file, 'w') as f:
+                json.dump(self.agent_metrics, f, indent=2)
+                
+            logger.debug(f"Saved {len(self.decisions)} decisions to {decisions_file}")
+        except Exception as e:
+            logger.warning(f"Failed to save decisions: {str(e)}")
+    
+    def clear_history(self):
+        """Clear decision history."""
+        self.decisions = {}
+        self.agent_metrics = {}
+        logger.info("Decision history cleared")
+        
+    def export_decisions(self, format: str = 'json', output_file: Optional[str] = None) -> Optional[str]:
+        """
+        Export decisions to a file in the specified format.
+        
+        Args:
+            format: Export format ('json' or 'csv')
+            output_file: Output file path (optional)
             
-            # Log the decision
-            return logger.log_decision(
-                agent_name=agent_name,
-                signal=signal,
-                confidence=confidence,
-                reason=reasoning,
-                symbol=symbol,
-                price=price,
-                additional_data=result.get('data')
-            )
+        Returns:
+            Path to the output file if successful, None otherwise
+        """
+        if not output_file:
+            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+            output_file = os.path.join(self.log_dir, f'decisions_export_{timestamp}.{format}')
+            
+        try:
+            if format == 'json':
+                with open(output_file, 'w') as f:
+                    json.dump(list(self.decisions.values()), f, indent=2)
+            elif format == 'csv':
+                import csv
+                with open(output_file, 'w', newline='') as f:
+                    writer = csv.writer(f)
+                    # Write header
+                    header = ['id', 'agent', 'symbol', 'signal', 'confidence', 'reason', 'price', 'timestamp']
+                    writer.writerow(header)
+                    
+                    # Write rows
+                    for d in self.decisions.values():
+                        row = [d.get(h, '') for h in header]
+                        writer.writerow(row)
+            else:
+                logger.warning(f"Unsupported export format: {format}")
+                return None
+                
+            logger.info(f"Exported {len(self.decisions)} decisions to {output_file}")
+            return output_file
             
         except Exception as e:
-            logging.error(f"Error creating summary: {str(e)}")
+            logger.warning(f"Failed to export decisions: {str(e)}")
             return None

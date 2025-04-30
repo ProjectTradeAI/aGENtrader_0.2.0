@@ -8,15 +8,8 @@ of agent decisions for monitoring and potential model training.
 import os
 import logging
 import json
-from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
-
-# Configure logging
-logger = logging.getLogger(__name__)
-
-# Create a singleton instance for easy import
-decision_logger = None
-
+from typing import Dict, Any, Optional, List, Union
 
 class DecisionLogger:
     """
@@ -34,21 +27,26 @@ class DecisionLogger:
         """
         self.log_path = log_path
         
-        # Ensure log directory exists
+        # Create logs directory if it doesn't exist
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         
-        # Initialize file logger
-        self.file_logger = logging.getLogger('decision_logger')
-        self.file_logger.setLevel(logging.INFO)
+        # Set up logger
+        self.logger = logging.getLogger('decision_logger')
+        self.logger.setLevel(logging.INFO)
         
-        # Check if handlers already exist to avoid duplicates
-        if not self.file_logger.handlers:
-            # Add file handler
+        # Add file handler if not already added
+        if not self.logger.handlers:
             file_handler = logging.FileHandler(log_path)
-            file_handler.setLevel(logging.INFO)
-            self.file_logger.addHandler(file_handler)
+            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
             
-        logger.info(f"Decision logger initialized with log path: {log_path}")
+            # Also add console handler
+            console_handler = logging.StreamHandler()
+            console_handler.setFormatter(formatter)
+            self.logger.addHandler(console_handler)
+            
+        self.logger.info("Decision logger initialized")
         
     def log_decision(
         self,
@@ -77,52 +75,48 @@ class DecisionLogger:
             interval: Time interval used for the analysis
             
         Returns:
-            The logged summary string or None if logging failed
+            The summary string that was logged or None if an error occurred
         """
         try:
             # Set defaults
-            if not timestamp:
-                timestamp = datetime.now().isoformat()
+            if timestamp is None:
+                timestamp = datetime.utcnow().isoformat()
                 
-            # Limit reason to one sentence for readability
-            reason = self._limit_to_one_sentence(reason)
+            # Limit reason to one sentence
+            short_reason = self._limit_to_one_sentence(reason)
             
-            # Build log entry
-            entry = {
-                'timestamp': timestamp,
-                'agent': agent_name,
-                'signal': signal.upper(),
-                'confidence': confidence,
-                'reason': reason
-            }
+            # Format the decision summary
+            summary_parts = []
+            summary_parts.append(f"AGENT: {agent_name}")
+            summary_parts.append(f"SIGNAL: {signal}")
+            summary_parts.append(f"CONFIDENCE: {confidence}%")
             
-            # Add optional fields if provided
             if symbol:
-                entry['symbol'] = symbol
-            if price:
-                entry['price'] = price
-            if interval:
-                entry['interval'] = interval
-            if additional_data:
-                entry['data'] = additional_data
+                summary_parts.append(f"SYMBOL: {symbol}")
                 
-            # Convert to string
-            log_str = json.dumps(entry)
+            if price:
+                summary_parts.append(f"PRICE: {price:.2f}")
+                
+            if interval:
+                summary_parts.append(f"INTERVAL: {interval}")
+                
+            summary_parts.append(f"REASON: {short_reason}")
             
-            # Create human-readable summary
-            summary = (
-                f"[{timestamp}] {agent_name}: {signal} {symbol or ''} "
-                f"with {confidence}% confidence - {reason}"
-            )
+            # Join all parts with separator
+            summary = " | ".join(summary_parts)
             
-            # Log both machine-readable and human-readable formats
-            self.file_logger.info(log_str)
-            logger.info(summary)
+            # Log the summary
+            self.logger.info(summary)
             
+            # Also log additional data as JSON if provided
+            if additional_data:
+                data_json = json.dumps(additional_data)
+                self.logger.debug(f"Additional data for {agent_name}: {data_json}")
+                
             return summary
             
         except Exception as e:
-            logger.error(f"Error logging decision: {str(e)}")
+            self.logger.error(f"Error logging decision: {str(e)}")
             return None
             
     def _limit_to_one_sentence(self, text: str) -> str:
@@ -135,13 +129,12 @@ class DecisionLogger:
         Returns:
             The first sentence from the text
         """
-        # Basic sentence splitting - can be improved
-        sentence_endings = ['. ', '! ', '? ']
-        for ending in sentence_endings:
-            if ending in text:
-                return text.split(ending)[0] + ending.strip()
+        # Simple sentence splitting by common sentence terminators
+        for terminator in ['. ', '! ', '? ']:
+            if terminator in text:
+                return text.split(terminator)[0] + terminator.strip()
                 
-        # If no sentence ending found, return as is
+        # If no terminator found, return as is (likely already one sentence)
         return text
         
     @classmethod
@@ -165,24 +158,28 @@ class DecisionLogger:
             The summary string or None if creation failed
         """
         try:
-            # Extract info from result
-            signal = result.get('signal', 'UNKNOWN')
-            confidence = result.get('confidence', 0)
-            reason = result.get('reasoning', 'No reason provided')
-            timestamp = result.get('timestamp', datetime.now().isoformat())
+            # Extract required fields from the result
+            signal = result.get('signal')
+            confidence = result.get('confidence')
+            reasoning = result.get('reasoning')
             
-            # Create summary
-            summary = (
-                f"[{timestamp}] {agent_name}: {signal} {symbol or ''} "
-                f"with {confidence}% confidence - {reason}"
+            if not all([signal, confidence, reasoning]):
+                raise ValueError(f"Missing required fields in result: {result}")
+                
+            # Create a logger instance
+            logger = cls()
+            
+            # Log the decision
+            return logger.log_decision(
+                agent_name=agent_name,
+                signal=signal,
+                confidence=confidence,
+                reason=reasoning,
+                symbol=symbol,
+                price=price,
+                additional_data=result.get('data')
             )
             
-            return summary
-            
         except Exception as e:
-            logger.error(f"Error creating summary: {str(e)}")
+            logging.error(f"Error creating summary: {str(e)}")
             return None
-
-
-# Initialize the singleton instance
-decision_logger = DecisionLogger()

@@ -1,107 +1,125 @@
-# Git Branch Instructions for Agent Architecture Migration
+# Branch Management Guidelines
 
-This document provides step-by-step instructions for creating the `v2.2.1` branch for the agent architecture migration. These steps should be performed manually as automated Git operations are restricted in the current environment.
+This document provides guidelines for managing branches during the migration to the new agent architecture. The goal is to maintain a stable main branch while implementing significant architectural changes.
 
-## Before You Begin
+## Branch Strategy
 
-1. Ensure you have write access to the repository
-2. Make sure you have the latest changes from the `main` branch
-3. Verify that Git is properly configured on your machine
+We're using the following branch structure:
 
-## Step 1: Tag Current Stable State
+1. **main** - The stable production branch (v2.2.0-stable)
+2. **v2.2.1-agent-migration** - Branch for agent architecture migration
+3. **feature/[feature-name]** - Branches for individual features
 
-First, tag the current stable state of the `main` branch for future reference:
+## Current Branches
+
+| Branch Name | Version | Purpose | Status |
+|-------------|---------|---------|--------|
+| main | v2.2.0 | Production-ready code | Stable |
+| v2.2.1-agent-migration | v2.2.1-dev | Agent architecture migration | In Progress |
+
+## Creating the Migration Branch
+
+If you haven't already created the migration branch, follow these steps:
 
 ```bash
-# Ensure you're on the main branch
+# Make sure you're on the main branch and up to date
 git checkout main
-
-# Pull latest changes
 git pull origin main
 
-# Tag the current stable state
-git tag -a v2.2.0-stable -m "Stable version before agent architecture migration"
+# Create the migration branch
+git checkout -b v2.2.1-agent-migration
 
-# Push the tag to remote
-git push origin v2.2.0-stable
+# Push the branch to remote
+git push -u origin v2.2.1-agent-migration
 ```
 
-## Step 2: Create and Switch to New Branch
+## Working on the Migration
 
-Create the new branch for the agent architecture migration:
+When working on the agent architecture migration:
 
-```bash
-# Create and switch to new branch
-git checkout -b v2.2.1
-
-# Verify you're on the new branch
-git branch
-```
-
-## Step 3: Commit Your Changes
-
-Make sure all changes to the agent architecture are committed:
+1. **Always work on the v2.2.1-agent-migration branch**
+2. Make small, incremental commits with clear messages
+3. Keep the branch up to date with main by regularly merging changes from main
 
 ```bash
-# Check status of changes
-git status
-
-# Add all changes
-git add .
-
-# Create a commit with descriptive message
-git commit -m "Implement standardized agent architecture with interfaces and base classes"
-```
-
-## Step 4: Push the Branch to Remote
-
-Push the new branch to the remote repository:
-
-```bash
-# Push the branch
-git push origin v2.2.1
-
-# Verify the branch was pushed
-git branch -a
-```
-
-## Step 5: Create Pull Request (Optional)
-
-If using GitHub or similar platform, create a pull request for code review before merging to `main`:
-
-1. Go to the repository on GitHub
-2. Click "Compare & pull request" for the v2.2.1 branch
-3. Add description of the changes and request reviewers
-4. Leave as draft until fully tested on EC2
-
-## Testing Process
-
-Before merging this branch to `main`, ensure:
-
-1. All agents are properly migrated to the new architecture
-2. The system functions correctly on EC2 with the new architecture
-3. All tests pass, including the new agent test framework
-
-## Rollback Instructions
-
-If issues are discovered, you can roll back to the stable tag:
-
-```bash
-# Checkout the stable tag
-git checkout v2.2.0-stable
-
-# Create a new branch from the stable tag if needed
-git checkout -b hotfix-from-stable
-
-# OR return to main branch
+# Update your local copy of main
 git checkout main
+git pull origin main
+
+# Switch back to the migration branch
+git checkout v2.2.1-agent-migration
+
+# Merge changes from main (resolve conflicts if needed)
+git merge main
 ```
 
-## Documentation Updates
+## Testing During Migration
 
-The following documentation has been updated to reflect the architecture changes:
+Always test your changes on the migration branch:
 
-1. `README.md`: Added agent architecture section and updated recent changes
-2. `docs/DEV_NOTES.md`: Created with migration details and development notes
-3. `docs/AGENT_MIGRATION_GUIDE.md`: Created with step-by-step migration instructions
-4. `tests/README.md`: Added for test framework documentation
+1. Run the test harness for individual agents:
+   ```bash
+   python tests/test_agent_individual.py --agent BaseAnalystAgent --mock-data
+   ```
+
+2. Test with real agents as they are migrated:
+   ```bash
+   python tests/test_agent_individual.py --agent TechnicalAnalystAgent
+   ```
+
+3. Run the full system tests:
+   ```bash
+   python tests/test_system.py
+   ```
+
+## Merging Migration Changes Back to Main
+
+Once the migration is complete and thoroughly tested:
+
+1. Create a pull request from v2.2.1-agent-migration to main
+2. Have someone else review the changes
+3. Run the full test suite on the PR
+4. When all tests pass and the PR is approved, merge the changes
+5. Tag the main branch with the new version:
+   ```bash
+   git checkout main
+   git pull origin main
+   git tag -a v2.2.1 -m "Agent architecture migration"
+   git push origin v2.2.1
+   ```
+
+## Emergency Fixes During Migration
+
+If you need to fix a critical issue in the main branch while migration is in progress:
+
+1. Create a hotfix branch from main:
+   ```bash
+   git checkout main
+   git checkout -b hotfix/issue-description
+   ```
+
+2. Make the necessary changes and commit them
+
+3. Create a PR to merge the hotfix into main
+
+4. After merging to main, update the migration branch:
+   ```bash
+   git checkout v2.2.1-agent-migration
+   git merge main
+   ```
+
+## Version Numbering
+
+We follow semantic versioning:
+
+- **MAJOR** version for incompatible API changes
+- **MINOR** version for new functionality in a backward-compatible manner
+- **PATCH** version for backward-compatible bug fixes
+
+For the agent migration, we're incrementing the MINOR version since it adds new functionality while maintaining backward compatibility.
+
+## Further Resources
+
+- [Git Branching Guide](https://git-scm.com/book/en/v2/Git-Branching-Branching-Workflows)
+- [Semantic Versioning](https://semver.org/)
+- [Pull Request Best Practices](https://opensource.com/article/19/7/create-pull-request-github)

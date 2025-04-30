@@ -47,7 +47,7 @@ from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
 from agents.decision_agent import DecisionAgent
 
 # Import the decision logger
-from core.logging.decision_logger import DecisionLogger, decision_logger
+from core.logging import DecisionLogger, decision_logger
 
 # Import the performance tracker
 from analytics.performance_tracker import PerformanceTracker

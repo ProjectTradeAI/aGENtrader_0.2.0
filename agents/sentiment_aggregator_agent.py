@@ -14,7 +14,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 from agents.base_agent import BaseAnalystAgent
-from core.logging.decision_logger import decision_logger
+from core.logging import decision_logger
 from models.llm_client import LLMClient
 
 # Configure logging

@@ -1,192 +1,272 @@
-# aGENtrader v2 Agent Migration Guide
+# Agent Migration Guide
 
-This guide explains how to migrate existing agents to the new standardized agent architecture introduced in aGENtrader v0.2.0.
+This guide provides instructions for migrating existing agent implementations to use the new standardized interfaces and base classes. The new architecture simplifies agent development, improves error handling, and enables more advanced testing capabilities.
 
-## Overview of Changes
+## Why Migrate?
 
-The new agent architecture introduces:
+The new architecture offers several benefits:
 
-1. **Standardized interfaces** for all agent types
-2. **Clear inheritance hierarchy** with base classes
-3. **Consistent naming and method signatures** across agents
-4. **Better type hints** for improved IDE support and error detection
-5. **Improved error handling** and logging across all agents
-
-## Major Interface Changes
-
-We now have the following main interfaces:
-
-- `AgentInterface`: Base interface for all agents
-- `AnalystAgentInterface`: Interface for market analysis agents 
-- `DecisionAgentInterface`: Interface for trading decision agents
-- `ExecutionAgentInterface`: Interface for trade execution agents
+1. **Standardized Interfaces**: Consistent method signatures and return values across all agents
+2. **Improved Error Handling**: Built-in error handling and validation
+3. **Testing Support**: Easy integration with the test harness for isolated testing
+4. **Backward Compatibility**: Legacy methods and attributes are preserved
+5. **Simplified Development**: Common functionality is implemented in base classes
 
 ## Migration Steps
 
-### 1. Update Agent Imports
+Follow these steps to migrate your agent to the new architecture:
 
-Replace direct imports of specific agent classes with interface imports:
+### 1. Identify the Agent Type
+
+Determine which type of agent you're migrating:
+
+- **Analyst Agent**: Analyzes market data and returns a signal (e.g., TechnicalAnalystAgent)
+- **Decision Agent**: Consolidates signals from analyst agents (e.g., DecisionAgent)
+- **Execution Agent**: Executes trades based on decisions
+
+### 2. Update the Import Statements
 
 ```python
 # Old imports
-from agents.technical_analyst_agent import TechnicalAnalystAgent
+from some_module import BaseAgent
 
 # New imports
-from agents.base_agent import BaseAnalystAgent
-from agents.agent_interface import AnalystAgentInterface
+from agents.agent_interface import AnalystAgentInterface  # Or appropriate interface
+from agents.base_agent import BaseAnalystAgent  # Or appropriate base class
 ```
 
-### 2. Update Class Inheritance
-
-Change your agent's inheritance to use the appropriate base classes:
+### 3. Update the Class Definition
 
 ```python
-# Old class definition
-class MyCustomAgent:
-    def __init__(self, data_fetcher=None):
-        self.data_fetcher = data_fetcher
-        
-# New class definition
-class MyCustomAgent(BaseAnalystAgent, AnalystAgentInterface):
-    def __init__(self, data_fetcher=None):
-        super().__init__(agent_name="my_custom_agent")
-        self.data_fetcher = data_fetcher
+# Old definition
+class MyAnalystAgent(BaseAgent):
+    # ...
+
+# New definition
+class MyAnalystAgent(BaseAnalystAgent):  # Use appropriate base class
+    # ...
 ```
 
-### 3. Implement Required Methods
-
-Ensure your agent implements all required methods from its interfaces:
+### 4. Update Constructor Parameters
 
 ```python
-# Required AgentInterface properties
-@property
-def name(self) -> str:
-    return self._agent_name
-    
-@property
-def description(self) -> str:
-    return "My custom trading agent that analyzes XYZ"
-    
-@property
-def version(self) -> str:
-    from core.version import VERSION
-    return VERSION
+# Old constructor
+def __init__(self, name="MyAnalystAgent", config=None):
+    # ...
 
-# Required AnalystAgentInterface methods
-def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
-    # Your analysis logic here
-    result = {
-        'signal': 'HOLD', 
-        'confidence': 75,
-        'reasoning': 'Analysis shows...',
-        'data': {'indicator1': 0.5, 'indicator2': 0.8}
+# New constructor
+def __init__(
+    self,
+    name: str = "MyAnalystAgent",
+    config: Optional[Dict[str, Any]] = None,
+    data_provider: Optional[Any] = None,
+    symbol: str = "BTC/USDT",
+    interval: str = "1h",
+    llm_client: Optional[Any] = None,
+    **kwargs
+):
+    # Call the parent constructor with all parameters
+    super().__init__(
+        name=name,
+        config=config,
+        data_provider=data_provider,
+        symbol=symbol,
+        interval=interval,
+        llm_client=llm_client,
+        **kwargs
+    )
+    
+    # Add agent-specific initialization
+    # ...
+```
+
+### 5. Update the Analysis Method (for Analyst Agents)
+
+```python
+# Old method
+def analyze(self, market_data):
+    # ...
+    return {
+        'signal': signal,
+        'confidence': confidence,
+        'reasoning': reasoning
     }
+
+# New method
+def analyze(self, market_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    """
+    Analyze market data and return insights.
+    
+    Args:
+        market_data: Dictionary containing market data
+        
+    Returns:
+        Dictionary with analysis results
+    """
+    # ...
+    result = {
+        'signal': signal,
+        'confidence': confidence,
+        'reasoning': reasoning,
+        'data': {}  # Add any additional data for debugging/tracking
+    }
+    
+    # Validate the result format
+    self.validate_analysis_result(result)
+    
     return result
 ```
 
-### 4. Use Standardized Result Format
-
-All agent results should follow the standardized format:
+### 6. Update the Decision Method (for Decision Agents)
 
 ```python
-# Analyst agent results
-{
-    'signal': 'BUY',  # One of: 'BUY', 'SELL', 'HOLD', 'NEUTRAL'
-    'confidence': 85,  # Integer 0-100
-    'reasoning': 'Price is above moving averages and momentum is strong',
-    'timestamp': '2025-04-30T12:34:56',  # ISO format timestamp
-    'data': {  # Optional supporting data
-        'indicators': {'rsi': 65, 'macd': 0.5},
-        'metrics': {'risk_ratio': 1.5}
-    }
-}
-
-# Decision agent results
-{
-    'signal': 'BUY',
-    'confidence': 80,
-    'reasoning': 'Strong buy signals from technical and sentiment analysis',
-    'timestamp': '2025-04-30T12:34:56',
-    'contributions': {  # Weighted contributions from analysts
-        'technical_analysis': {'signal': 'BUY', 'confidence': 85, 'contribution': 25.5},
-        'sentiment_analysis': {'signal': 'BUY', 'confidence': 75, 'contribution': 15.0}
-    },
-    'data': {
-        'signal_scores': {'BUY': 65.5, 'SELL': 12.0, 'HOLD': 22.5},
-        'analyst_data': {...}  # Collected from analyst results
-    }
-}
-```
-
-### 5. Use Helper Methods from Base Classes
-
-The base classes provide helpful methods for common operations:
-
-```python
-# Create standardized result
-result = self.create_standard_result(
-    signal='BUY',
-    confidence=85,
-    reason='Price is above moving averages and momentum is strong',
-    data={'indicators': {'rsi': 65, 'macd': 0.5}}
-)
-
-# Handle errors consistently
-try:
-    # Analysis code
-except Exception as e:
-    return self.handle_analysis_error(e, 'technical')
-    
-# Validate input parameters
-if not self.validate_input(symbol, interval):
-    return self.build_error_response('INVALID_INPUT', 'Symbol and interval are required')
-    
-# Validate agent results
-result = self.validate_result(result)
-```
-
-### 6. Update Decision Agents
-
-Decision agents now collect and weigh analyst results explicitly:
-
-```python
-# Old decision making
+# Old method
 def make_decision(self, analyst_results):
-    # Direct processing of results
+    # ...
+
+# New method
+def make_decision(self, analyst_results: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+    """
+    Make a trading decision based on analyst results.
     
-# New decision making pattern
-def add_analyst_result(self, analysis_type: str, result: Dict[str, Any]) -> None:
-    self.analyst_results[analysis_type] = result
+    Args:
+        analyst_results: Dictionary containing outputs from analyst agents
+        
+    Returns:
+        Dictionary with decision results
+    """
+    # ...
+    result = {
+        'signal': signal,
+        'confidence': confidence,
+        'reasoning': reasoning,
+        'contributions': contributions  # How each analyst contributed
+    }
     
-def make_decision(self) -> Dict[str, Any]:
-    # Process collected results from self.analyst_results
-    # Calculate weighted scores
-    # Return standardized decision
+    # Validate the result format
+    self.validate_decision_result(result)
+    
+    return result
 ```
 
-## Testing Your Migration
+### 7. Remove Redundant Methods
 
-Use the new test harness to verify your migrated agents:
+The following methods are now provided by the base classes and can be removed from your implementation:
+
+- `get_agent_config()` - Use the one provided by BaseAgent
+- `run()` - Use the one provided by BaseAgent, which calls your `analyze()` or `make_decision()`
+- Basic validation methods - Use `validate_analysis_result()` or `validate_decision_result()`
+
+### 8. Test the Migration
+
+Use the test harness to verify your migrated agent works correctly:
 
 ```bash
-python tests/test_agent_individual.py --agent YourCustomAgent --mock-data --explain
+python tests/test_agent_individual.py --agent MyAnalystAgent --mock-data --explain
 ```
 
-This will run your agent in isolation and show detailed information about its operation, including any errors or warnings.
+## Example: Before and After Migration
 
-## Common Migration Issues
+### Before Migration
 
-1. **Missing properties**: Ensure all required properties (`name`, `description`, `version`) are implemented
-2. **Method signature mismatches**: Double-check that method signatures match the interfaces exactly
-3. **Incorrect result formats**: Verify that your agent returns results in the standardized format
-4. **Initialization errors**: Make sure to call `super().__init__()` in your constructor
-5. **Import errors**: Update imports to use the new module structure
+```python
+class TechnicalAnalystAgent:
+    def __init__(self, config=None):
+        self.config = config or {}
+        self.agent_config = self.get_agent_config()
+        # ...
+        
+    def get_agent_config(self):
+        return {
+            "name": "TechnicalAnalystAgent",
+            "provider": "mistral",
+            # ...
+        }
+        
+    def analyze(self, market_data):
+        # Analysis logic...
+        return {
+            'signal': 'BUY',
+            'confidence': 75,
+            'reasoning': 'Technical indicators suggest upward momentum.'
+        }
+```
 
-## Getting Help
+### After Migration
 
-If you encounter issues with the migration, please create detailed error reports in GitHub Issues with:
+```python
+from typing import Dict, Any, Optional
+from agents.base_agent import BaseAnalystAgent
 
-1. The original agent code
-2. Your migration attempt
-3. The exact error message or unexpected behavior
-4. Environment details (OS, Python version, etc.)
+class TechnicalAnalystAgent(BaseAnalystAgent):
+    def __init__(
+        self,
+        name: str = "TechnicalAnalystAgent",
+        config: Optional[Dict[str, Any]] = None,
+        data_provider: Optional[Any] = None,
+        symbol: str = "BTC/USDT",
+        interval: str = "1h",
+        llm_client: Optional[Any] = None,
+        **kwargs
+    ):
+        # Call the parent constructor
+        super().__init__(
+            name=name,
+            config=config,
+            data_provider=data_provider,
+            symbol=symbol,
+            interval=interval,
+            llm_client=llm_client,
+            **kwargs
+        )
+        
+        # Add agent-specific initialization
+        self.indicators = self.config.get('indicators', ['rsi', 'macd', 'ema'])
+        
+    def analyze(self, market_data: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+        """
+        Analyze market data using technical indicators.
+        
+        Args:
+            market_data: Dictionary containing market data
+            
+        Returns:
+            Dictionary with technical analysis results
+        """
+        # Analysis logic...
+        result = {
+            'signal': 'BUY',
+            'confidence': 75,
+            'reasoning': 'Technical indicators suggest upward momentum.',
+            'data': {
+                'indicators': {
+                    'rsi': 65,
+                    'macd': 0.5,
+                    'ema': 'bullish'
+                }
+            }
+        }
+        
+        # Validate the result format
+        self.validate_analysis_result(result)
+        
+        return result
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Missing attributes**: If your agent uses attributes from the old BaseAgent that aren't in the new base classes, you can add them in your constructor.
+
+2. **Method signature mismatches**: Make sure your methods have the correct signatures, especially type hints and return types.
+
+3. **Validation errors**: If `validate_analysis_result()` fails, check that your result dictionary has all required keys and proper values.
+
+### Getting Help
+
+If you encounter issues during migration, you can:
+
+1. Check the base class implementations for reference
+2. Look at other migrated agents for examples
+3. Run the test harness with `--explain` to see detailed diagnostics

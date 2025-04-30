@@ -47,19 +47,114 @@ logger = logging.getLogger('agent_test')
 
 # Import necessary modules
 try:
-    from agents.base_agent import BaseAnalystAgent
-    from agents.technical_analyst_agent import TechnicalAnalystAgent
-    from agents.sentiment_analyst_agent import SentimentAnalystAgent
-    from agents.sentiment_aggregator_agent import SentimentAggregatorAgent
-    from agents.liquidity_analyst_agent import LiquidityAnalystAgent
-    from agents.funding_rate_analyst_agent import FundingRateAnalystAgent
-    from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
-    from agents.decision_agent import DecisionAgent
-    from utils.mock_data_provider import MockDataProvider
-    from binance_data_provider import BinanceDataProvider
+    # Import agent interfaces and base classes
+    from agents.agent_interface import AgentInterface, AnalystAgentInterface, DecisionAgentInterface
+    from agents.base_agent import BaseAgent, BaseAnalystAgent, BaseDecisionAgent
+    
+    # Import specialist agents (these may not all exist yet)
+    # If any are missing, they will be set to None in AVAILABLE_AGENTS
+    try:
+        from agents.technical_analyst_agent import TechnicalAnalystAgent
+    except ImportError:
+        TechnicalAnalystAgent = None
+        
+    try:
+        from agents.sentiment_analyst_agent import SentimentAnalystAgent
+    except ImportError:
+        SentimentAnalystAgent = None
+        
+    try:
+        from agents.sentiment_aggregator_agent import SentimentAggregatorAgent
+    except ImportError:
+        SentimentAggregatorAgent = None
+        
+    try:
+        from agents.liquidity_analyst_agent import LiquidityAnalystAgent
+    except ImportError:
+        LiquidityAnalystAgent = None
+        
+    try:
+        from agents.funding_rate_analyst_agent import FundingRateAnalystAgent
+    except ImportError:
+        FundingRateAnalystAgent = None
+        
+    try:
+        from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
+    except ImportError:
+        OpenInterestAnalystAgent = None
+        
+    try:
+        from agents.decision_agent import DecisionAgent
+    except ImportError:
+        DecisionAgent = None
+    
+    # Import data providers
+    try:
+        from utils.mock_data_provider import MockDataProvider
+    except ImportError:
+        # Create a simple mock provider if the imported one is not available
+        logger.warning(f"{Fore.YELLOW}Mock data provider not found. Using simplified version.{Style.RESET_ALL}")
+        
+        class MockDataProvider:
+            def __init__(self, symbol="BTC/USDT", **kwargs):
+                self.symbol = symbol
+                
+            def get_current_price(self, symbol=None):
+                return 50000.0
+                
+            def fetch_ohlcv(self, symbol=None, interval="1h", limit=100, **kwargs):
+                # Generate simple mock candlestick data
+                import time
+                from datetime import datetime, timedelta
+                
+                symbol = symbol or self.symbol
+                now = int(time.time() * 1000)
+                result = []
+                
+                for i in range(limit):
+                    timestamp = now - ((limit - i) * 3600 * 1000)  # Go back in time
+                    result.append({
+                        "timestamp": timestamp,
+                        "datetime": datetime.fromtimestamp(timestamp / 1000).isoformat(),
+                        "open": 50000.0 + (i * 100),
+                        "high": 50000.0 + (i * 100) + 500,
+                        "low": 50000.0 + (i * 100) - 500,
+                        "close": 50000.0 + (i * 100) + 200,
+                        "volume": 100.0 + (i * 10)
+                    })
+                    
+                return result
+                
+            def fetch_market_depth(self, symbol=None, limit=100):
+                return {
+                    "bids": [[49900.0, 1.0], [49800.0, 2.0]],
+                    "asks": [[50100.0, 1.0], [50200.0, 2.0]]
+                }
+    
+    try:
+        from binance_data_provider import BinanceDataProvider
+    except ImportError:
+        BinanceDataProvider = None
     
     # Other necessary imports
-    from models.llm_client import LLMClient
+    try:
+        from models.llm_client import LLMClient
+    except ImportError:
+        # Create minimal LLM client for testing if not available
+        logger.warning(f"{Fore.YELLOW}LLMClient not found. Using mock version.{Style.RESET_ALL}")
+        
+        class LLMClient:
+            def __init__(self, provider="mock", model="mock-model"):
+                self.provider = provider
+                self.model = model
+                self.temperature = 0.0
+                
+            def query(self, prompt, **kwargs):
+                return {
+                    "content": "This is a mock response for testing purposes.",
+                    "model": self.model,
+                    "provider": self.provider
+                }
     
     IMPORTED_SUCCESSFULLY = True
 except ImportError as e:
@@ -69,6 +164,12 @@ except ImportError as e:
 
 # Map of available agent classes
 AVAILABLE_AGENTS = {
+    # Base classes
+    'BaseAgent': BaseAgent if IMPORTED_SUCCESSFULLY else None,
+    'BaseAnalystAgent': BaseAnalystAgent if IMPORTED_SUCCESSFULLY else None,
+    'BaseDecisionAgent': BaseDecisionAgent if IMPORTED_SUCCESSFULLY else None,
+    
+    # Specialized agents
     'TechnicalAnalystAgent': TechnicalAnalystAgent if IMPORTED_SUCCESSFULLY else None,
     'SentimentAnalystAgent': SentimentAnalystAgent if IMPORTED_SUCCESSFULLY else None,
     'SentimentAggregatorAgent': SentimentAggregatorAgent if IMPORTED_SUCCESSFULLY else None,
@@ -553,8 +654,54 @@ def main():
     """Main function."""
     args = parse_arguments()
     
-    if args.list and not args.agent:
+    # If --list flag is provided, list available agents and exit
+    if args.list:
+        # Filter out None values
+        available_agents = sorted([agent for agent, cls in AVAILABLE_AGENTS.items() if cls is not None])
+        
+        if not available_agents:
+            logger.info(f"{Fore.YELLOW}No agents available. You may need to implement them first.{Style.RESET_ALL}")
+            logger.info(f"{Fore.YELLOW}The framework has these agent classes defined:{Style.RESET_ALL}")
+            for agent in sorted(AVAILABLE_AGENTS.keys()):
+                status = f"{Fore.GREEN}Available{Style.RESET_ALL}" if AVAILABLE_AGENTS[agent] else f"{Fore.RED}Not implemented{Style.RESET_ALL}"
+                logger.info(f"- {agent}: {status}")
+        else:
+            logger.info(f"{Fore.GREEN}Available Agents:{Style.RESET_ALL}")
+            for agent in available_agents:
+                logger.info(f"- {agent}")
         return
+    
+    # Ensure we have an agent to test
+    if not args.agent:
+        logger.error(f"{Fore.RED}Error: No agent specified. Use --agent AGENT_NAME or --list to see available agents.{Style.RESET_ALL}")
+        return
+        
+    # Check if the agent is available
+    if args.agent not in AVAILABLE_AGENTS:
+        logger.error(f"{Fore.RED}Error: Unknown agent '{args.agent}'.{Style.RESET_ALL}")
+        logger.info(f"{Fore.YELLOW}Use --list to see available agents.{Style.RESET_ALL}")
+        return
+        
+    if AVAILABLE_AGENTS[args.agent] is None:
+        logger.error(f"{Fore.RED}Error: Agent '{args.agent}' is defined but not implemented yet.{Style.RESET_ALL}")
+        
+        # For BaseAgent or BaseAnalystAgent, we can use them directly
+        if args.agent == 'BaseAgent':
+            logger.info(f"{Fore.YELLOW}Using BaseAgent for testing...{Style.RESET_ALL}")
+            AVAILABLE_AGENTS[args.agent] = BaseAgent
+        elif args.agent == 'BaseAnalystAgent':
+            logger.info(f"{Fore.YELLOW}Using BaseAnalystAgent for testing...{Style.RESET_ALL}")
+            AVAILABLE_AGENTS[args.agent] = BaseAnalystAgent
+        elif args.agent == 'BaseDecisionAgent':
+            logger.info(f"{Fore.YELLOW}Using BaseDecisionAgent for testing...{Style.RESET_ALL}")
+            AVAILABLE_AGENTS[args.agent] = BaseDecisionAgent
+        else:
+            available = sorted([a for a in AVAILABLE_AGENTS.keys() if AVAILABLE_AGENTS[a] is not None])
+            if not available:
+                logger.info(f"{Fore.YELLOW}No implemented agents found. Implement '{args.agent}' or another agent first.{Style.RESET_ALL}")
+            else:
+                logger.info(f"{Fore.YELLOW}Available agents: {', '.join(available)}{Style.RESET_ALL}")
+            return
     
     # Validate temperature
     if args.temperature < 0.0 or args.temperature > 1.0:

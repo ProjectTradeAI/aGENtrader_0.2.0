@@ -277,3 +277,69 @@ class DecisionLogger:
         except Exception as e:
             logger.warning(f"Failed to export decisions: {str(e)}")
             return None
+            
+    def create_summary_from_result(
+        self,
+        agent_name: str,
+        result: Dict[str, Any],
+        symbol: Optional[str] = None,
+        price: Optional[float] = None
+    ) -> Optional[str]:
+        """
+        Create a summary from an agent's result dictionary.
+        
+        Args:
+            agent_name: Name of the agent
+            result: The result dictionary from an agent
+            symbol: Trading symbol
+            price: Current price
+            
+        Returns:
+            The summary string or None if creation failed
+        """
+        try:
+            # Extract common fields
+            signal = result.get('signal', 'UNKNOWN')
+            confidence = result.get('confidence', 0)
+            timestamp = result.get('timestamp', datetime.now().isoformat())
+            
+            # Extract reason based on result format
+            reason = None
+            if 'explanation' in result and isinstance(result['explanation'], list):
+                # Join explanations for technical analysis
+                reason = '; '.join(result['explanation'][:1])  # Take just the first explanation
+            elif 'explanation' in result:
+                reason = result['explanation']
+            elif 'analysis_summary' in result:
+                # For sentiment analysis
+                reason = result['analysis_summary']
+            elif 'summary' in result:
+                reason = result['summary']
+            elif 'message' in result:
+                reason = result['message']
+            else:
+                reason = f"{signal} signal generated"
+            
+            # Get symbol from result if not provided
+            if symbol is None and 'symbol' in result:
+                symbol = result['symbol']
+            
+            # Get price from result if not provided
+            if price is None and 'current_price' in result:
+                price = result['current_price']
+            
+            # Log the decision
+            return self.log_decision(
+                agent_name=agent_name,
+                signal=signal,
+                confidence=confidence,
+                reason=reason,
+                symbol=symbol,
+                price=price,
+                timestamp=timestamp,
+                additional_data=result
+            )
+            
+        except Exception as e:
+            logger.error(f"Error creating summary from result: {str(e)}")
+            return None

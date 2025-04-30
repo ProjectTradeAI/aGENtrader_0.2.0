@@ -1,15 +1,31 @@
-Repository reorganization for v2.2 release
+Implement standardized agent architecture (v2.2.1)
 
-- Implemented standardized directory structure (agents, core, data, etc.)
-- Moved documentation files to docs directory with symbolic links
-- Created proper deployment scripts and configurations
-- Relocated key Python files to appropriate modules
-- Updated import paths in main.py and run.py
-- Added comprehensive .gitignore and placeholder files
-- Created detailed REPOSITORY_STRUCTURE.md documentation
-- Organized deployment, scripts, and Docker files
-- Created symbolic links for backward compatibility
+This commit implements a complete overhaul of the agent architecture with:
 
-This change follows the guidelines in v2.2.0-RC1-RELEASE.md to ensure
-a cleaner, more maintainable repository structure while preserving
-backward compatibility.
+- Standardized interfaces for all agent types:
+  - AgentInterface as the base interface
+  - AnalystAgentInterface for market analysis agents
+  - DecisionAgentInterface for trading decision agents
+  - ExecutionAgentInterface for trade execution agents
+
+- Enhanced base classes:
+  - BaseAgent with core functionality for all agents
+  - BaseAnalystAgent for market analysis agents
+  - BaseDecisionAgent for trading decision agents
+
+- Improved testing framework:
+  - Individual agent testing via tests/test_agent_individual.py
+  - Support for real or mock data sources
+  - Detailed logging of agent reasoning
+
+- Comprehensive documentation:
+  - Agent Migration Guide (docs/AGENT_MIGRATION_GUIDE.md)
+  - Development Notes (docs/DEV_NOTES.md)
+  - Test Suite Documentation (tests/README.md)
+  - Updated README.md with architecture details
+
+This architecture facilitates better maintainability, improved testing, and
+standardized interfaces across all agent implementations.
+
+Related to: #123
+Part of: Agent Architecture Refactoring

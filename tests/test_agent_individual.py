@@ -55,8 +55,8 @@ try:
     from agents.funding_rate_analyst_agent import FundingRateAnalystAgent
     from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
     from agents.decision_agent import DecisionAgent
-    from agents.data_providers.mock_data_provider import MockDataProvider
-    from agents.data_providers.binance_data_provider import BinanceDataProvider
+    from utils.mock_data_provider import MockDataProvider
+    from binance_data_provider import BinanceDataProvider
     
     # Other necessary imports
     from models.llm_client import LLMClient

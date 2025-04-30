@@ -1,147 +1,177 @@
 """
-aGENtrader v2 Agent Interface Module
+aGENtrader v2 Agent Interface
 
-This module defines the standard interfaces that all agents must implement.
-These interfaces promote consistency across agent implementations and
-make the system more maintainable.
+This module defines the base interfaces for all agent types in the system.
+These interfaces ensure consistent API across different agent implementations.
 """
 
-import abc
-from typing import Dict, Any, Optional, List, Union
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List, Optional, Union
 
-class AgentInterface(abc.ABC):
+
+class AgentInterface(ABC):
     """
-    Base interface that all aGENtrader agents must implement.
+    Base interface for all agents in the system.
     
-    This interface defines the minimal contract that all agents
-    must fulfill to be compatible with the system.
+    This interface defines the minimal contract that all agents must fulfill.
     """
     
     @property
-    @abc.abstractmethod
+    @abstractmethod
     def name(self) -> str:
-        """
-        Get the name of the agent.
-        
-        Returns:
-            String name of the agent
-        """
+        """Agent name for identification and logging"""
         pass
-    
+        
     @property
-    @abc.abstractmethod
+    @abstractmethod
     def description(self) -> str:
-        """
-        Get the description of the agent.
-        
-        Returns:
-            String description of the agent's functionality
-        """
+        """Description of agent's purpose and function"""
         pass
-    
-    @property
-    @abc.abstractmethod
-    def version(self) -> str:
-        """
-        Get the version of the agent.
         
-        Returns:
-            String version of the agent implementation
-        """
+    @property
+    @abstractmethod
+    def version(self) -> str:
+        """Agent version, typically aligned with system version"""
         pass
 
 
 class AnalystAgentInterface(AgentInterface):
     """
-    Interface for analyst agents that produce market analysis.
+    Interface for agents that analyze specific aspects of market data.
     
-    Analyst agents examine market data and produce analysis results
-    with trading signals and confidence levels.
+    These agents provide signal, confidence, and reasoning based on their analysis.
     """
     
-    @abc.abstractmethod
+    @abstractmethod
     def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze market data and produce results.
+        Analyze market data and produce a signal with confidence.
         
         Args:
-            market_data: Dictionary containing market data for analysis
+            market_data: Dictionary containing market data, including:
+                - symbol: Trading symbol (e.g., BTC/USDT)
+                - interval: Time interval (e.g., 1h, 4h, 1d)
+                - ohlcv: List of OHLCV data
+                - current_price: Current price
+                - timestamp: Timestamp of the data
+                
+        Returns:
+            Dictionary containing analysis results, including:
+                - signal: Trading signal (BUY, SELL, HOLD, NEUTRAL)
+                - confidence: Confidence level (0-100 integer)
+                - reasoning: Explanation for the signal
+                - data: Additional data and metrics from the analysis
+                - timestamp: Analysis timestamp
+        """
+        pass
+        
+    @abstractmethod
+    def create_standard_result(
+        self, 
+        signal: str, 
+        confidence: int, 
+        reason: str, 
+        data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Create a standardized result dictionary.
+        
+        Args:
+            signal: Trading signal (BUY, SELL, HOLD, NEUTRAL)
+            confidence: Confidence level (0-100 integer)
+            reason: Explanation for the signal
+            data: Additional data and metrics from the analysis
             
         Returns:
-            Dictionary with analysis results including at minimum:
-            - signal: String trading signal (BUY, SELL, HOLD)
-            - confidence: Integer confidence level (0-100)
-            - reasoning: String explanation of the analysis
-            - data: Optional dictionary with supporting data
+            Standardized result dictionary
+        """
+        pass
+        
+    @abstractmethod
+    def handle_analysis_error(self, error: Exception, analysis_type: str) -> Dict[str, Any]:
+        """
+        Create an error result when analysis fails.
+        
+        Args:
+            error: The exception that occurred
+            analysis_type: Type of analysis that failed
+            
+        Returns:
+            Error result dictionary with HOLD signal and 0 confidence
         """
         pass
 
 
 class DecisionAgentInterface(AgentInterface):
     """
-    Interface for decision agents that synthesize analysis results.
+    Interface for agents that make trading decisions based on analyst inputs.
     
-    Decision agents take in the results of various analyst agents
-    and produce a final trading decision.
+    These agents aggregate and weigh signals from multiple analyst agents.
     """
     
-    @abc.abstractmethod
-    def make_decision(self) -> Dict[str, Any]:
-        """
-        Make a trading decision based on analyst results.
-        
-        Returns:
-            Dictionary with decision results including at minimum:
-            - signal: String trading signal (BUY, SELL, HOLD)
-            - confidence: Integer confidence level (0-100)
-            - reasoning: String explanation of the decision
-            - data: Optional dictionary with supporting data
-            - contributions: Dictionary mapping analyst names to their contribution weight
-        """
-        pass
-    
-    @abc.abstractmethod
+    @abstractmethod
     def add_analyst_result(self, analysis_type: str, result: Dict[str, Any]) -> None:
         """
-        Add an analyst result to be considered in decision making.
+        Add an analyst's result to be considered in decision making.
         
         Args:
             analysis_type: Type of analysis (e.g., 'technical', 'sentiment')
-            result: Dictionary with analysis results
+            result: Analyst result dictionary
+        """
+        pass
+        
+    @abstractmethod
+    def make_decision(self) -> Dict[str, Any]:
+        """
+        Make a trading decision based on collected analyst results.
+        
+        Returns:
+            Dictionary containing the decision, including:
+                - signal: Trading signal (BUY, SELL, HOLD)
+                - confidence: Overall confidence level (0-100)
+                - reasoning: Explanation for the decision
+                - contributions: How each analyst contributed
+                - timestamp: Decision timestamp
+        """
+        pass
+        
+    @abstractmethod
+    def clear_analyst_results(self) -> None:
+        """
+        Clear all collected analyst results.
         """
         pass
 
 
 class ExecutionAgentInterface(AgentInterface):
     """
-    Interface for execution agents that handle trade execution.
+    Interface for agents that execute trading decisions.
     
-    Execution agents take trading decisions and execute them on
-    the target exchange, handling order management and monitoring.
+    These agents handle trade execution, position management, and risk control.
     """
     
-    @abc.abstractmethod
+    @abstractmethod
     def execute_trade(self, decision: Dict[str, Any]) -> Dict[str, Any]:
         """
         Execute a trade based on a decision.
         
         Args:
-            decision: Dictionary with trading decision
+            decision: Trading decision dictionary
             
         Returns:
-            Dictionary with execution results
+            Dictionary containing execution results
         """
         pass
-    
-    @abc.abstractmethod
-    def get_position_status(self, symbol: str) -> Dict[str, Any]:
+        
+    @abstractmethod
+    def get_position(self, symbol: str) -> Dict[str, Any]:
         """
-        Get the current position status for a symbol.
+        Get current position for a trading symbol.
         
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (e.g., BTC/USDT)
             
         Returns:
-            Dictionary with position information
+            Dictionary containing position information
         """
         pass

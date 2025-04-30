@@ -20,3 +20,4 @@ python-dotenv
 python-dotenv
 python-dotenv
 colorama
+numpy

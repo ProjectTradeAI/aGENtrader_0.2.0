@@ -6,13 +6,17 @@ of agent decisions for monitoring and potential model training.
 """
 
 import os
-import json
 import logging
-from typing import Dict, Any, Optional
+import json
+from typing import Dict, Any, List, Optional, Union
 from datetime import datetime
 
-# Set up logger
-logger = logging.getLogger("decision_logger")
+# Configure logging
+logger = logging.getLogger(__name__)
+
+# Create a singleton instance for easy import
+decision_logger = None
+
 
 class DecisionLogger:
     """
@@ -30,16 +34,20 @@ class DecisionLogger:
         """
         self.log_path = log_path
         
-        # Create log directory if it doesn't exist
-        log_dir = os.path.dirname(self.log_path)
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-            
-        # Set up file logging
-        self.logger = logging.getLogger("decision_logger")
-        self.logger.setLevel(logging.INFO)
+        # Ensure log directory exists
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
         
-        # Initialize
+        # Initialize file logger
+        self.file_logger = logging.getLogger('decision_logger')
+        self.file_logger.setLevel(logging.INFO)
+        
+        # Check if handlers already exist to avoid duplicates
+        if not self.file_logger.handlers:
+            # Add file handler
+            file_handler = logging.FileHandler(log_path)
+            file_handler.setLevel(logging.INFO)
+            self.file_logger.addHandler(file_handler)
+            
         logger.info(f"Decision logger initialized with log path: {log_path}")
         
     def log_decision(
@@ -72,52 +80,49 @@ class DecisionLogger:
             The logged summary string or None if logging failed
         """
         try:
-            # Format timestamp
+            # Set defaults
             if not timestamp:
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
+                timestamp = datetime.now().isoformat()
                 
-            # Format symbol
-            symbol_str = f"{symbol} @ {price:.2f}" if symbol and price else symbol or "Unknown"
+            # Limit reason to one sentence for readability
+            reason = self._limit_to_one_sentence(reason)
             
-            # Format interval
-            interval_str = f" ({interval})" if interval else ""
+            # Build log entry
+            entry = {
+                'timestamp': timestamp,
+                'agent': agent_name,
+                'signal': signal.upper(),
+                'confidence': confidence,
+                'reason': reason
+            }
             
-            # Format reason (limit to one sentence)
-            short_reason = self._limit_to_one_sentence(reason)
-            
-            # Create summary line
-            summary = f"[{timestamp}] {agent_name}: {signal} ({confidence}%) - {short_reason} - {symbol_str}{interval_str}"
-            
-            # Log to file
-            with open(self.log_path, "a") as f:
-                f.write(summary + "\n")
-                
-            # Also log to console
-            self.logger.info(summary)
-            
-            # Log additional data as JSON if provided
+            # Add optional fields if provided
+            if symbol:
+                entry['symbol'] = symbol
+            if price:
+                entry['price'] = price
+            if interval:
+                entry['interval'] = interval
             if additional_data:
-                try:
-                    data_path = f"{os.path.splitext(self.log_path)[0]}_data.jsonl"
-                    with open(data_path, "a") as f:
-                        entry = {
-                            "timestamp": timestamp,
-                            "agent": agent_name,
-                            "signal": signal,
-                            "confidence": confidence,
-                            "symbol": symbol,
-                            "price": price,
-                            "interval": interval,
-                            "data": additional_data
-                        }
-                        f.write(json.dumps(entry) + "\n")
-                except Exception as e:
-                    self.logger.warning(f"Failed to log additional data: {str(e)}")
-                    
+                entry['data'] = additional_data
+                
+            # Convert to string
+            log_str = json.dumps(entry)
+            
+            # Create human-readable summary
+            summary = (
+                f"[{timestamp}] {agent_name}: {signal} {symbol or ''} "
+                f"with {confidence}% confidence - {reason}"
+            )
+            
+            # Log both machine-readable and human-readable formats
+            self.file_logger.info(log_str)
+            logger.info(summary)
+            
             return summary
             
         except Exception as e:
-            self.logger.error(f"Failed to log decision: {str(e)}")
+            logger.error(f"Error logging decision: {str(e)}")
             return None
             
     def _limit_to_one_sentence(self, text: str) -> str:
@@ -130,14 +135,11 @@ class DecisionLogger:
         Returns:
             The first sentence from the text
         """
-        if not text:
-            return "No reason provided"
-            
-        # Simple sentence splitting (looking for first ., ! or ?)
-        end_markers = ['. ', '! ', '? ']
-        for marker in end_markers:
-            if marker in text:
-                return text.split(marker)[0] + marker.rstrip()
+        # Basic sentence splitting - can be improved
+        sentence_endings = ['. ', '! ', '? ']
+        for ending in sentence_endings:
+            if ending in text:
+                return text.split(ending)[0] + ending.strip()
                 
         # If no sentence ending found, return as is
         return text
@@ -163,52 +165,24 @@ class DecisionLogger:
             The summary string or None if creation failed
         """
         try:
-            if not result:
-                return None
-                
+            # Extract info from result
             signal = result.get('signal', 'UNKNOWN')
             confidence = result.get('confidence', 0)
-            reason = result.get('reason', result.get('reasoning', 'No reason provided'))
+            reason = result.get('reasoning', 'No reason provided')
+            timestamp = result.get('timestamp', datetime.now().isoformat())
             
-            # Format symbol
-            symbol_str = f"{symbol} @ {price:.2f}" if symbol and price else symbol or "Unknown"
-            
-            # Format reason (limit to one sentence)
-            # Using a simple method for class method without instance
-            short_reason = cls._limit_text_to_one_sentence(reason)
-            
-            # Create summary line
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC")
-            summary = f"[{timestamp}] {agent_name}: {signal} ({confidence}%) - {short_reason} - {symbol_str}"
+            # Create summary
+            summary = (
+                f"[{timestamp}] {agent_name}: {signal} {symbol or ''} "
+                f"with {confidence}% confidence - {reason}"
+            )
             
             return summary
             
         except Exception as e:
-            logger.error(f"Failed to create summary: {str(e)}")
+            logger.error(f"Error creating summary: {str(e)}")
             return None
-            
-    @classmethod
-    def _limit_text_to_one_sentence(cls, text: str) -> str:
-        """
-        Static helper method to limit text to one sentence.
-        
-        Args:
-            text: The text to limit
-            
-        Returns:
-            The first sentence from the text
-        """
-        if not text:
-            return "No reason provided"
-            
-        # Simple sentence splitting (looking for first ., ! or ?)
-        end_markers = ['. ', '! ', '? ']
-        for marker in end_markers:
-            if marker in text:
-                return text.split(marker)[0] + marker.rstrip()
-                
-        # If no sentence ending found, return as is
-        return text
 
-# Global instance
+
+# Initialize the singleton instance
 decision_logger = DecisionLogger()

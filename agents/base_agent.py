@@ -1,303 +1,381 @@
 """
-Base Agent Module for aGENtrader v2
+aGENtrader v2 Base Agent
 
-This module provides the base agent classes that other agents inherit from.
+This module provides base implementations for the agent interfaces.
+These base classes handle common functionality for all agent types.
 """
 
-import os
-import json
 import logging
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, List, Optional, Union
+from datetime import datetime
+from .agent_interface import AgentInterface, AnalystAgentInterface, DecisionAgentInterface
 
-from agents.agent_interface import AgentInterface, AnalystAgentInterface
-from core.version import VERSION
+# Configure logging
+logger = logging.getLogger(__name__)
 
-# Set up logger
-logger = logging.getLogger("aGENtrader.agents.base")
 
-class BaseAgent(AgentInterface):
+class BaseAgent:
     """
-    Base class for all aGENtrader agents.
+    Base class for all agents in the system.
     
-    This class provides common functionality for all agents including:
-    - Standardized identification
-    - Configuration loading
-    - Error handling
-    - Logging
+    This class implements the common functionality required by all agents.
     """
     
-    def __init__(self, agent_name=None):
-        """Initialize the base agent.
+    def __init__(self, agent_name: str):
+        """
+        Initialize the base agent.
         
         Args:
-            agent_name: Optional name for the agent (used for agent-specific configurations)
+            agent_name: Name of the agent
         """
-        # Set up logger
-        self.logger = logging.getLogger(f"aGENtrader.agents.{self.__class__.__name__}")
+        self._agent_name = agent_name
+        self._init_time = time.time()
         
-        # Save agent name for agent-specific configurations
-        self._agent_name = agent_name or self.__class__.__name__.lower()
+        # Initialize logger
+        self._logger = logging.getLogger(f"aGENtrader.agents.{agent_name}")
         
-        # Default properties
-        self._description = "Base aGENtrader agent"
-        
-        # Load default configs
-        self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
-    
     @property
     def name(self) -> str:
-        """Get the name of the agent."""
+        """Get the agent's name."""
         return self._agent_name
-    
+        
     @property
     def description(self) -> str:
-        """Get the description of the agent."""
-        return self._description
-    
+        """Get the agent's description."""
+        return "Base agent implementation"
+        
     @property
     def version(self) -> str:
-        """Get the version of the agent."""
-        return VERSION
+        """Get the agent's version."""
+        try:
+            from core.version import VERSION
+            return VERSION
+        except ImportError:
+            return "0.2.0"  # Default version if version module not found
+            
+    def get_current_timestamp(self) -> str:
+        """
+        Get the current timestamp in ISO format.
+        
+        Returns:
+            Timestamp string in ISO format
+        """
+        return datetime.now().isoformat()
+        
+    def validate_input(self, *args, **kwargs) -> bool:
+        """
+        Validate input parameters.
+        
+        Args:
+            *args: Positional arguments to validate
+            **kwargs: Keyword arguments to validate
+            
+        Returns:
+            True if all inputs are valid, False otherwise
+        """
+        # Basic implementation, subclasses should override with specific validation
+        return all(arg is not None for arg in args) and all(kwarg is not None for kwarg in kwargs.values())
+        
+    def build_error_response(
+        self, 
+        error_code: str, 
+        error_message: str, 
+        signal: str = "HOLD"
+    ) -> Dict[str, Any]:
+        """
+        Build a standardized error response.
+        
+        Args:
+            error_code: Error code
+            error_message: Error message
+            signal: Default signal to use (usually HOLD)
+            
+        Returns:
+            Standardized error response dictionary
+        """
+        return {
+            "signal": signal,
+            "confidence": 0,
+            "reasoning": f"Error: {error_message}",
+            "timestamp": self.get_current_timestamp(),
+            "error": {
+                "code": error_code,
+                "message": error_message
+            }
+        }
+        
+    def validate_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate and normalize a result dictionary.
+        
+        Args:
+            result: Result dictionary to validate
+            
+        Returns:
+            Validated and normalized result dictionary
+        """
+        # Ensure required fields are present
+        if "signal" not in result:
+            result["signal"] = "HOLD"
+            
+        if "confidence" not in result:
+            result["confidence"] = 0
+            
+        if "reasoning" not in result:
+            result["reasoning"] = "No reasoning provided"
+            
+        if "timestamp" not in result:
+            result["timestamp"] = self.get_current_timestamp()
+            
+        # Normalize signal to uppercase
+        result["signal"] = result["signal"].upper()
+        
+        # Ensure confidence is an integer between 0 and 100
+        try:
+            result["confidence"] = int(result["confidence"])
+            result["confidence"] = max(0, min(100, result["confidence"]))
+        except (ValueError, TypeError):
+            result["confidence"] = 0
+            
+        return result
 
 
 class BaseAnalystAgent(BaseAgent, AnalystAgentInterface):
     """
-    Base class for all analyst agents.
+    Base class for analyst agents that perform market analysis.
     
-    This class provides common functionality for all analyst agents including:
-    - Configuration loading
-    - Error handling
-    - Standard analysis result structure
+    This class implements common functionality for all analyst agents.
     """
     
-    def __init__(self, agent_name=None):
-        """Initialize the base analyst agent.
+    def __init__(self, agent_name: str, data_provider=None, config=None):
+        """
+        Initialize the base analyst agent.
         
         Args:
-            agent_name: Optional name for the agent (used for agent-specific configurations)
+            agent_name: Name of the agent
+            data_provider: Provider for market data
+            config: Configuration dictionary
         """
-        super().__init__(agent_name=agent_name)
-        self._description = "Base analyst agent for market analysis"
+        super().__init__(agent_name)
+        self.data_provider = data_provider
+        self.config = config or {}
         
-        # Common properties all analyst agents should have
-        self.symbol = None
-        self.interval = None
-        self.data_provider = None
-    
+        # Extract common config values
+        self.symbol = self.config.get("symbol", "BTC/USDT")
+        self.interval = self.config.get("interval", "1h")
+        
     def analyze(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze market data and produce results.
+        Analyze market data and produce a signal with confidence.
         
-        This method should be overridden by subclasses to provide specific analysis.
-        The base implementation returns a default HOLD signal.
+        This is a placeholder implementation. Subclasses should override this method.
         
         Args:
-            market_data: Dictionary containing market data for analysis
+            market_data: Dictionary containing market data
             
         Returns:
-            Dictionary with analysis results
+            Dictionary containing analysis results
         """
-        self.logger.warning("BaseAnalystAgent.analyze() called - this should be overridden by subclasses")
-        
-        # Extract symbol and interval from market data if available
-        if market_data:
-            self.symbol = market_data.get('symbol', self.symbol)
-            self.interval = market_data.get('interval', self.interval)
-        
-        # Return a default HOLD signal with zero confidence
+        self._logger.warning(f"{self.name} is using the base implementation of analyze()")
         return self.create_standard_result(
             signal="HOLD",
             confidence=0,
-            reason="Base implementation - should be overridden",
-            data={"warning": "Using default implementation"}
+            reason="Base implementation - no analysis performed",
+            data={"warning": "Subclass should override analyze method"}
         )
         
-    def get_agent_config(self) -> Dict[str, Any]:
-        """
-        Load agent configuration from config file.
-        
-        Returns:
-            Dictionary with agent configuration
-        """
-        try:
-            # First try to load from settings.yaml which is our new config format
-            yaml_config_path = os.path.join(self.config_dir, "settings.yaml")
-            if os.path.exists(yaml_config_path):
-                try:
-                    import yaml
-                    with open(yaml_config_path, "r") as f:
-                        config = yaml.safe_load(f)
-                    # Get the 'agents' section from settings.yaml
-                    return config.get("agents", {})
-                except ImportError:
-                    self.logger.warning("PyYAML not installed, falling back to JSON config")
-                    
-            # Fall back to agents.json if settings.yaml isn't available
-            json_config_path = os.path.join(self.config_dir, "agents.json")
-            if os.path.exists(json_config_path):
-                with open(json_config_path, "r") as f:
-                    config = json.load(f)
-                return config.get(self.__class__.__name__, {})
-                
-            return {}
-        except Exception as e:
-            self.logger.warning(f"Error loading agent config: {str(e)}")
-            return {}
-            
-    def get_trading_config(self) -> Dict[str, Any]:
-        """
-        Load trading configuration from config file.
-        
-        Returns:
-            Dictionary with trading configuration
-        """
-        try:
-            # First try to load from settings.yaml which is our new config format
-            yaml_config_path = os.path.join(self.config_dir, "settings.yaml")
-            if os.path.exists(yaml_config_path):
-                try:
-                    import yaml
-                    with open(yaml_config_path, "r") as f:
-                        config = yaml.safe_load(f)
-                    # Get the 'trading' section from settings.yaml
-                    return config.get("trading", {})
-                except ImportError:
-                    self.logger.warning("PyYAML not installed, falling back to JSON config")
-            
-            # Fall back to trading.json if settings.yaml isn't available
-            json_config_path = os.path.join(self.config_dir, "trading.json")
-            if os.path.exists(json_config_path):
-                with open(json_config_path, "r") as f:
-                    return json.load(f)
-            return {}
-        except Exception as e:
-            self.logger.warning(f"Error loading trading config: {str(e)}")
-            return {}
-    
-    def create_standard_result(self, 
-                              signal: str, 
-                              confidence: int, 
-                              reason: str,
-                              data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def create_standard_result(
+        self, 
+        signal: str, 
+        confidence: int, 
+        reason: str, 
+        data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         """
         Create a standardized result dictionary.
         
         Args:
-            signal: Trading signal (BUY, SELL, HOLD)
-            confidence: Confidence level (0-100)
-            reason: Reason for the signal
-            data: Additional data to include
+            signal: Trading signal (BUY, SELL, HOLD, NEUTRAL)
+            confidence: Confidence level (0-100 integer)
+            reason: Explanation for the signal
+            data: Additional data and metrics from the analysis
             
         Returns:
             Standardized result dictionary
         """
         result = {
-            "signal": signal,
-            "confidence": confidence,
-            "reason": reason,
-            "timestamp": None,  # Will be filled by the agent
-            "data": data or {}
+            "signal": signal.upper(),
+            "confidence": max(0, min(100, confidence)),
+            "reasoning": reason,
+            "timestamp": self.get_current_timestamp()
         }
+        
+        if data:
+            result["data"] = data
+            
         return result
         
-    def handle_analysis_error(self, error: Exception, agent_type: str) -> Dict[str, Any]:
+    def handle_analysis_error(self, error: Exception, analysis_type: str) -> Dict[str, Any]:
         """
-        Create standardized error result.
+        Create an error result when analysis fails.
         
         Args:
-            error: Exception that occurred
-            agent_type: Type of analysis that failed
+            error: The exception that occurred
+            analysis_type: Type of analysis that failed
             
         Returns:
-            Error result dictionary
+            Error result dictionary with HOLD signal and 0 confidence
         """
-        error_name = f"{agent_type.upper()}_ERROR"
-        error_msg = f"Error performing {agent_type}: {str(error)}"
+        error_message = f"{analysis_type} analysis failed: {str(error)}"
+        self._logger.error(error_message, exc_info=True)
         
-        self.logger.error(f"{error_name}: {error_msg}")
+        return self.create_standard_result(
+            signal="HOLD",
+            confidence=0,
+            reason=f"Error in {analysis_type} analysis",
+            data={
+                "error": str(error),
+                "error_type": error.__class__.__name__
+            }
+        )
+
+
+class BaseDecisionAgent(BaseAgent, DecisionAgentInterface):
+    """
+    Base class for decision agents that make trading decisions.
+    
+    This class implements common functionality for making decisions based on analyst inputs.
+    """
+    
+    def __init__(self, agent_name: str, analyst_results: Optional[Dict[str, Dict[str, Any]]] = None):
+        """
+        Initialize the base decision agent.
         
+        Args:
+            agent_name: Name of the agent
+            analyst_results: Initial analyst results
+        """
+        super().__init__(agent_name)
+        self.analyst_results = analyst_results or {}
+        self.weights = self._default_weights()
+        
+    def _default_weights(self) -> Dict[str, float]:
+        """
+        Get default weights for different analysis types.
+        
+        Returns:
+            Dictionary mapping analysis types to weights
+        """
         return {
-            "error": error_name,
-            "error_message": error_msg,
-            "signal": "HOLD",  # Default to HOLD on error
-            "confidence": 0,
-            "reason": f"Analysis failed: {str(error)}"
+            "technical_analysis": 0.30,
+            "sentiment_analysis": 0.20,
+            "liquidity_analysis": 0.20,
+            "funding_rate_analysis": 0.15,
+            "open_interest_analysis": 0.15
         }
         
-    def validate_input(self, symbol: Optional[str], interval: Optional[str]) -> bool:
+    def add_analyst_result(self, analysis_type: str, result: Dict[str, Any]) -> None:
         """
-        Validate input parameters for analysis.
+        Add an analyst's result to be considered in decision making.
         
         Args:
-            symbol: Trading symbol
-            interval: Time interval
-            
+            analysis_type: Type of analysis (e.g., 'technical', 'sentiment')
+            result: Analyst result dictionary
+        """
+        self.analyst_results[analysis_type] = self.validate_result(result)
+        
+    def clear_analyst_results(self) -> None:
+        """
+        Clear all collected analyst results.
+        """
+        self.analyst_results = {}
+        
+    def make_decision(self) -> Dict[str, Any]:
+        """
+        Make a trading decision based on collected analyst results.
+        
+        This is a simple implementation that weighs signals by confidence and weights.
+        Subclasses can override with more sophisticated decision algorithms.
+        
         Returns:
-            True if input is valid, False otherwise
+            Dictionary containing the decision
         """
-        if not symbol:
-            self.logger.error("Symbol is required for analysis")
-            return False
-        
-        if not interval:
-            self.logger.error("Interval is required for analysis")
-            return False
+        if not self.analyst_results:
+            return self.build_error_response(
+                "NO_ANALYST_RESULTS",
+                "No analyst results available for decision making",
+                "HOLD"
+            )
             
-        return True
+        # Calculate weighted scores for each possible signal
+        signal_scores = {"BUY": 0.0, "SELL": 0.0, "HOLD": 0.0}
+        contributions = {}
         
-    def build_error_response(self, error_code: str, error_message: str) -> Dict[str, Any]:
-        """
-        Build standardized error response.
-        
-        Args:
-            error_code: Error code
-            error_message: Error message
-            
-        Returns:
-            Error response dictionary
-        """
-        self.logger.error(f"{error_code}: {error_message}")
-        
-        return {
-            "error": error_code,
-            "error_message": error_message,
-            "signal": "HOLD",  # Default to HOLD on error
-            "confidence": 0,
-            "reason": f"Analysis failed: {error_message}",
-            "status": "error"
-        }
-        
-    def validate_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Validate analysis result and ensure it has required fields.
-        
-        Args:
-            result: Analysis result dictionary
-            
-        Returns:
-            Validated result dictionary
-        """
-        required_fields = ["signal", "confidence", "reason"]
-        
-        # Check for error
-        if "error" in result:
-            return result
-            
-        # Check for required fields
-        for field in required_fields:
-            if field not in result:
-                return self.build_error_response(
-                    "INVALID_RESULT", 
-                    f"Analysis result missing required field: {field}"
-                )
+        for analysis_type, result in self.analyst_results.items():
+            # Skip results with errors
+            if "error" in result:
+                continue
                 
-        # Ensure signal is valid
-        valid_signals = ["BUY", "SELL", "HOLD", "NEUTRAL"]
-        if result["signal"] not in valid_signals:
-            result["signal"] = "HOLD"
+            signal = result.get("signal", "HOLD").upper()
+            confidence = result.get("confidence", 0)
             
-        # Ensure confidence is within range
-        if not isinstance(result["confidence"], (int, float)) or result["confidence"] < 0 or result["confidence"] > 100:
-            result["confidence"] = 50
+            # Get weight for this analysis type
+            weight = self.weights.get(analysis_type, 0.1)
             
-        return result
+            # Calculate contribution
+            contribution = confidence * weight
+            
+            # Add contribution to appropriate signal
+            if signal in signal_scores:
+                signal_scores[signal] += contribution
+            else:
+                # Handle non-standard signals (NEUTRAL, etc.)
+                signal_scores["HOLD"] += contribution
+                
+            # Record contribution
+            contributions[analysis_type] = {
+                "signal": signal,
+                "confidence": confidence,
+                "contribution": contribution
+            }
+            
+        # Determine overall signal based on highest score
+        decision_signal = max(signal_scores.items(), key=lambda x: x[1])[0]
+        
+        # Calculate total confidence (normalize to 0-100 scale)
+        total_contribution = sum(signal_scores.values())
+        total_possible = sum(self.weights.values()) * 100
+        overall_confidence = int((total_contribution / total_possible) * 100) if total_possible > 0 else 0
+        
+        # Build reasoning text
+        reasoning_parts = []
+        for analysis_type, contrib_data in contributions.items():
+            signal = contrib_data["signal"]
+            confidence = contrib_data["confidence"]
+            contribution = contrib_data["contribution"]
+            
+            reasoning_parts.append(
+                f"{analysis_type} gives {signal} with {confidence}% confidence "
+                f"(contribution: {contribution:.1f})"
+            )
+        
+        reasoning = "Decision based on: " + ". ".join(reasoning_parts)
+        
+        # Build final decision
+        decision = {
+            "signal": decision_signal,
+            "confidence": overall_confidence,
+            "reasoning": reasoning,
+            "timestamp": self.get_current_timestamp(),
+            "contributions": contributions,
+            "data": {
+                "signal_scores": signal_scores,
+                "analyst_data": {
+                    analysis_type: result.get("data", {})
+                    for analysis_type, result in self.analyst_results.items()
+                }
+            }
+        }
+        
+        return decision

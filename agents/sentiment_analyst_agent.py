@@ -171,7 +171,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             logger.error(f"Error saving sentiment data: {e}")
     
     def analyze(self, 
-               symbol: Optional[str] = None, 
+               symbol: Optional[Union[str, Dict[str, Any]]] = None, 
                market_data: Optional[Dict[str, Any]] = None,
                interval: Optional[str] = None,
                **kwargs) -> Dict[str, Any]:
@@ -179,7 +179,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         Perform sentiment analysis for the given symbol and interval.
         
         Args:
-            symbol: Trading symbol (e.g., 'BTCUSDT')
+            symbol: Trading symbol (e.g., 'BTCUSDT') or market_data dictionary
             market_data: Pre-fetched market data (optional)
             interval: Time interval (e.g., '1h', '15m')
             **kwargs: Additional parameters specific to the agent
@@ -187,6 +187,14 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         Returns:
             Dictionary with sentiment analysis results
         """
+        # Handle case where market_data is passed as first parameter (common in test harness)
+        if isinstance(symbol, dict) and 'symbol' in symbol:
+            # First parameter is actually market_data
+            market_data = symbol
+            symbol = market_data.get('symbol')
+            if 'interval' in market_data and not interval:
+                interval = market_data.get('interval')
+                
         # Use default values if not provided
         symbol_str = symbol or self.default_symbol
         interval_str = interval or self.default_interval
@@ -448,6 +456,14 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             # Default if not a number
             result["analysis"]["confidence"] = 50
             
+        # Map 'action' to 'signal' for consistent interface with test harness
+        if "action" in result["analysis"] and "signal" not in result["analysis"]:
+            result["analysis"]["signal"] = result["analysis"]["action"]
+            
+        # Ensure reasoning field is present for test harness
+        if "reason" in result["analysis"] and "reasoning" not in result["analysis"]:
+            result["analysis"]["reasoning"] = result["analysis"]["reason"]
+            
         return result
         
     def process_sentiment_data(self, 
@@ -518,8 +534,10 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         analysis = {
             "sentiment": str(sentiment_state),
             "action": action,
+            "signal": action,  # Direct mapping for test harness
             "confidence": scaled_confidence,
             "reason": reason,
+            "reasoning": reason,  # Direct mapping for test harness
             "insights": insights
         }
         

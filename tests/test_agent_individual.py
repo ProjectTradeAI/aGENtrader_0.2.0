@@ -565,24 +565,37 @@ class AgentTestHarness:
         
         # Display the analysis result
         analysis = result['result']
-        signal = analysis.get('signal', 'UNKNOWN')
-        confidence = analysis.get('confidence', 0)
         
-        # Get reasoning from various possible fields
-        reasoning = analysis.get('reasoning', None)
-        if reasoning is None:
-            # Try to get explanation field
-            explanation = analysis.get('explanation', None)
-            if explanation is not None:
-                # Handle both string and list explanations
-                if isinstance(explanation, list) and len(explanation) > 0:
-                    reasoning = explanation[0]
-                elif isinstance(explanation, str):
-                    reasoning = explanation
+        # Handle different result structures based on agent type
+        if 'analysis' in analysis:
+            # For agents that return nested results inside an 'analysis' key (like SentimentAnalystAgent)
+            signal = analysis['analysis'].get('signal', 'UNKNOWN')
+            confidence = analysis['analysis'].get('confidence', 0)
+            
+            # Get reasoning from various possible fields
+            reasoning = analysis['analysis'].get('reasoning', None)
+            if reasoning is None:
+                reasoning = analysis['analysis'].get('reason', 'No reasoning provided')
+        else:
+            # For agents that return results at the top level
+            signal = analysis.get('signal', 'UNKNOWN')
+            confidence = analysis.get('confidence', 0)
+            
+            # Get reasoning from various possible fields
+            reasoning = analysis.get('reasoning', None)
+            if reasoning is None:
+                # Try to get explanation field
+                explanation = analysis.get('explanation', None)
+                if explanation is not None:
+                    # Handle both string and list explanations
+                    if isinstance(explanation, list) and len(explanation) > 0:
+                        reasoning = explanation[0]
+                    elif isinstance(explanation, str):
+                        reasoning = explanation
+                    else:
+                        reasoning = 'No reasoning provided'
                 else:
                     reasoning = 'No reasoning provided'
-            else:
-                reasoning = 'No reasoning provided'
         
         # Color-code based on signal and confidence
         if signal == 'BUY':

@@ -78,7 +78,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
     def analyze(
         self, 
-        symbol: Optional[str] = None,
+        symbol: Optional[Union[str, Dict[str, Any]]] = None,
         market_data: Optional[Dict[str, Any]] = None,
         interval: Optional[str] = None,
         **kwargs
@@ -87,7 +87,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         Analyze market liquidity conditions.
         
         Args:
-            symbol: Trading symbol (optional if included in market_data)
+            symbol: Trading symbol (optional if included in market_data) or the entire market_data dict
             market_data: Pre-fetched market data (optional)
             interval: Time interval (used for consistency, but less relevant for liquidity)
             **kwargs: Additional parameters
@@ -97,8 +97,15 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         """
         start_time = time.time()
         
-        # Extract symbol from market_data if provided
-        if market_data and isinstance(market_data, dict) and 'symbol' in market_data:
+        # Handle case where market_data is passed as first parameter (common in test harness)
+        if isinstance(symbol, dict) and 'symbol' in symbol:
+            # First parameter is actually market_data
+            market_data = symbol
+            symbol = market_data.get('symbol')
+            if 'interval' in market_data and not interval:
+                interval = market_data.get('interval')
+        # Otherwise, extract symbol from market_data if provided
+        elif market_data and isinstance(market_data, dict) and 'symbol' in market_data:
             symbol = symbol or market_data['symbol']
             
         # Use agent-specific timeframe if none provided
@@ -112,7 +119,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             )
             
         # Normalize symbol format if needed
-        symbol = symbol.replace('_', '/')
+        if isinstance(symbol, str):
+            symbol = symbol.replace('_', '/')
             
         try:
             # Check if we have pre-fetched market data or need to fetch it

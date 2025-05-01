@@ -206,6 +206,12 @@ class BinanceDataProvider:
                 except:
                     pass  # If we can't parse the error, continue with normal handling
             
+            # Handle 451 Geographic Restriction errors specially
+            elif e.response.status_code == 451:
+                logger.error(f"API access restricted due to geographic restrictions (451 error)")
+                # This is a case where we should try a different API or proxy
+                raise Exception("Geographic restriction (451) detected - Binance API not available in this region")
+            
             logger.error(f"API request failed: {str(e)}")
             raise Exception(f"Binance API request failed: {str(e)}")
             

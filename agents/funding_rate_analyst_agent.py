@@ -10,7 +10,7 @@ import time
 import json
 import logging
 import numpy as np
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime, timedelta
 
 from agents.base_agent import BaseAnalystAgent
@@ -426,24 +426,29 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
             logger.error(f"Error fetching market data: {str(e)}")
             return {}
             
-    def _generate_mock_funding_data(self, symbol: str) -> List[Dict[str, Any]]:
+    def _generate_mock_funding_data(self, symbol: Union[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Generate mock funding rate data for testing purposes.
         
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (string or market data dictionary)
             
         Returns:
             List of mock funding rate records
         """
+        # Extract symbol string if market_data dictionary was passed
+        symbol_str = symbol
+        if isinstance(symbol, dict):
+            symbol_str = symbol.get('symbol', 'BTC/USDT')
+        
         # Start from 30 periods ago
         current_time = datetime.now()
         funding_data = []
         
         # Base funding rate on the symbol's sentiment
-        if "BTC" in symbol.upper():
+        if isinstance(symbol_str, str) and "BTC" in symbol_str.upper():
             base_rate = 0.0001  # Slightly positive
-        elif "ETH" in symbol.upper():
+        elif isinstance(symbol_str, str) and "ETH" in symbol_str.upper():
             base_rate = -0.0002  # Slightly negative
         else:
             base_rate = 0  # Neutral

@@ -7,7 +7,7 @@ It's used for testing and demonstration purposes only.
 import time
 import random
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 
 # Configure logging
@@ -320,12 +320,12 @@ class MockDataProvider:
         
         return data
     
-    def fetch_funding_rates(self, symbol: Optional[str] = None, limit: int = 30) -> List[Dict[str, Any]]:
+    def fetch_funding_rates(self, symbol: Union[str, Dict[str, Any], None] = None, limit: int = 30) -> List[Dict[str, Any]]:
         """
         Fetch simulated funding rates data.
         
         Args:
-            symbol: Trading symbol (e.g., "BTCUSDT")
+            symbol: Trading symbol (e.g., "BTCUSDT") or market data dictionary
             limit: Maximum number of records to return
             
         Returns:
@@ -334,9 +334,15 @@ class MockDataProvider:
         now = datetime.now()
         data = []
         
+        # Extract symbol string if market_data dictionary was passed
+        symbol_str = symbol
+        if isinstance(symbol, dict):
+            symbol_str = symbol.get('symbol', self.symbol)
+            
         # Base values for simulation
-        symbol_str = symbol or self.symbol
-        symbol_str = symbol_str.replace("/", "")
+        symbol_str = symbol_str or self.symbol
+        if isinstance(symbol_str, str):
+            symbol_str = symbol_str.replace("/", "")
         
         # Generate data
         for i in range(limit):

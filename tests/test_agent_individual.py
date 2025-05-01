@@ -7,6 +7,7 @@ This script allows testing of individual analyst agents in isolation with:
 - Full visibility into decision processes
 - Deterministic testing for reproducibility
 - Flexible agent selection via CLI
+- Full decision cycle testing with multiple agents
 
 Usage:
   python3 tests/test_agent_individual.py \
@@ -253,6 +254,7 @@ class AgentTestHarness:
         self.temperature = temperature
         self.explain = explain
         self.data_override = data_override or {}
+        self.full_cycle = False  # Whether to run full decision cycle with all agents
         
         # Check if agent is valid
         if agent_name not in AVAILABLE_AGENTS:
@@ -457,6 +459,9 @@ class AgentTestHarness:
         Returns:
             Dictionary with test results
         """
+        # Check if we're running a full decision cycle with all agents
+        if hasattr(self, 'full_cycle') and getattr(self, 'full_cycle', False):
+            return self._run_full_cycle_test()
         start_time = time.time()
         
         # Create the agent
@@ -591,6 +596,274 @@ class AgentTestHarness:
         self.test_results.append(test_record)
         
         return test_record
+        
+    def _run_full_cycle_test(self) -> Dict[str, Any]:
+        """
+        Run a full decision cycle with all analyst agents and the decision agent.
+        
+        Returns:
+            Dictionary with test results
+        """
+        logger.info(f"{Fore.CYAN}Running full agent decision cycle test{Style.RESET_ALL}")
+        
+        start_time = time.time()
+        timestamp = datetime.now().isoformat()
+        
+        # Get current price for reference
+        try:
+            current_price = self.data_provider.get_current_price(self.symbol.replace('/', ''))
+        except Exception as e:
+            logger.warning(f"{Fore.YELLOW}Could not get current price: {str(e)}{Style.RESET_ALL}")
+            current_price = 0.0
+            
+        # List of analyst agents to run
+        analyst_agents = [
+            'TechnicalAnalystAgent', 
+            'SentimentAnalystAgent',
+            'SentimentAggregatorAgent',
+            'LiquidityAnalystAgent', 
+            'OpenInterestAnalystAgent',
+            'FundingRateAnalystAgent'
+        ]
+        
+        # Check which agents are available
+        available_analyst_agents = []
+        for agent_name in analyst_agents:
+            if agent_name in AVAILABLE_AGENTS and AVAILABLE_AGENTS[agent_name] is not None:
+                available_analyst_agents.append(agent_name)
+                
+        if not available_analyst_agents:
+            logger.error(f"{Fore.RED}No analyst agents available for full cycle test{Style.RESET_ALL}")
+            return {
+                "status": "error",
+                "agent": "All Agents (Decision Cycle)",
+                "symbol": self.symbol,
+                "interval": self.interval,
+                "use_mock_data": self.use_mock_data,
+                "temperature": self.temperature,
+                "timestamp": datetime.now().isoformat(),
+                "elapsed_time": 0.0,
+                "message": "No analyst agents available for full cycle test"
+            }
+            
+        # Dictionary to store analysis results from each agent
+        analyses = {}
+        all_results = {}
+        
+        # Fetch market data once for all agents
+        try:
+            # Fetch data from the data provider
+            ohlcv_data = self.data_provider.fetch_ohlcv(
+                symbol=self.symbol.replace('/', ''),
+                interval=self.interval,
+                limit=100  # Get enough data for analysis
+            )
+            
+            # Format as market data dict
+            market_data = {
+                'symbol': self.symbol,
+                'interval': self.interval,
+                'ohlcv': ohlcv_data,
+                'current_price': float(ohlcv_data[-1]['close']) if ohlcv_data else current_price,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"{Fore.RED}Error fetching market data: {str(e)}{Style.RESET_ALL}")
+            # Create basic mock data
+            try:
+                current_price = self.data_provider.get_current_price(self.symbol.replace('/', ''))
+                ohlcv_data = self.data_provider.fetch_ohlcv(
+                    symbol=self.symbol.replace('/', ''),
+                    interval=self.interval,
+                    limit=100
+                )
+                
+                market_data = {
+                    'symbol': self.symbol,
+                    'interval': self.interval,
+                    'ohlcv': ohlcv_data,
+                    'current_price': current_price,
+                    'timestamp': datetime.now().isoformat()
+                }
+                
+                logger.warning(f"{Fore.YELLOW}Using generated mock data{Style.RESET_ALL}")
+            except Exception as e2:
+                logger.error(f"{Fore.RED}Error creating market data: {str(e2)}{Style.RESET_ALL}")
+                return {
+                    "status": "error",
+                    "agent": "All Agents (Decision Cycle)",
+                    "symbol": self.symbol,
+                    "interval": self.interval,
+                    "use_mock_data": self.use_mock_data,
+                    "temperature": self.temperature,
+                    "timestamp": datetime.now().isoformat(),
+                    "message": f"Failed to create market data: {str(e2)}"
+                }
+        
+        # Run each available analyst agent
+        for agent_name in available_analyst_agents:
+            logger.info(f"{Fore.CYAN}Running {agent_name}...{Style.RESET_ALL}")
+            
+            try:
+                # Create agent instance
+                agent_class = AVAILABLE_AGENTS[agent_name]
+                
+                # Check if the agent accepts data_provider/data_fetcher
+                init_params = inspect.signature(agent_class.__init__).parameters
+                agent_kwargs = {}
+                
+                if 'data_provider' in init_params:
+                    agent_kwargs['data_provider'] = self.data_provider
+                elif 'data_fetcher' in init_params:
+                    agent_kwargs['data_fetcher'] = self.data_provider
+                    
+                # Add config with symbol and interval if the agent accepts config
+                if 'config' in init_params:
+                    agent_kwargs['config'] = {
+                        'symbol': self.symbol,
+                        'interval': self.interval,
+                        'temperature': self.temperature
+                    }
+                
+                agent_instance = agent_class(**agent_kwargs)
+                
+                # If the agent has a llm_client attribute, set its temperature
+                if hasattr(agent_instance, 'llm_client'):
+                    agent_instance.llm_client.temperature = self.temperature
+                
+                # Run agent's analyze method
+                agent_result = agent_instance.analyze(market_data)
+                
+                # Map agent name to standard analysis key
+                analysis_key_map = {
+                    'TechnicalAnalystAgent': 'technical_analysis',
+                    'SentimentAnalystAgent': 'sentiment_analysis',
+                    'SentimentAggregatorAgent': 'sentiment_aggregator_analysis',
+                    'LiquidityAnalystAgent': 'liquidity_analysis',
+                    'OpenInterestAnalystAgent': 'open_interest_analysis',
+                    'FundingRateAnalystAgent': 'funding_rate_analysis'
+                }
+                
+                # Store the result
+                analysis_key = analysis_key_map.get(agent_name, agent_name.lower().replace('agent', '_analysis'))
+                analyses[analysis_key] = agent_result
+                all_results[agent_name] = agent_result
+                
+                # Print agent result summary
+                agent_signal = agent_result.get('signal', 'N/A')
+                agent_confidence = agent_result.get('confidence', 0)
+                agent_reasoning = agent_result.get('reasoning', 'No reasoning provided')
+                if not agent_reasoning:
+                    agent_reasoning = agent_result.get('reason', 'No reasoning provided')
+                    
+                logger.info(f"{Fore.GREEN}{agent_name} Result:{Style.RESET_ALL}")
+                logger.info(f"Signal: {agent_signal}, Confidence: {agent_confidence}")
+                logger.info(f"Reasoning: {agent_reasoning[:100]}..." if len(agent_reasoning) > 100 else f"Reasoning: {agent_reasoning}")
+                logger.info("-" * 40)
+                
+            except Exception as e:
+                import traceback
+                logger.error(f"{Fore.RED}Error running {agent_name}: {str(e)}{Style.RESET_ALL}")
+                logger.debug(traceback.format_exc())
+                
+                # Add error result to analyses
+                analysis_key = analysis_key_map.get(agent_name, agent_name.lower().replace('agent', '_analysis'))
+                analyses[analysis_key] = {
+                    "signal": "ERROR",
+                    "confidence": 0,
+                    "reasoning": f"Error: {str(e)}"
+                }
+        
+        # Now run the Decision Agent with all the analyses
+        logger.info(f"{Fore.CYAN}Running DecisionAgent with all analysis results...{Style.RESET_ALL}")
+        
+        try:
+            decision_agent_class = AVAILABLE_AGENTS.get('DecisionAgent')
+            if decision_agent_class is None:
+                logger.error(f"{Fore.RED}DecisionAgent is not available{Style.RESET_ALL}")
+                end_time = time.time()
+                elapsed_time = end_time - start_time
+                
+                return {
+                    "status": "error",
+                    "agent": "All Agents (Decision Cycle)",
+                    "symbol": self.symbol,
+                    "interval": self.interval,
+                    "use_mock_data": self.use_mock_data,
+                    "temperature": self.temperature,
+                    "timestamp": timestamp,
+                    "elapsed_time": elapsed_time,
+                    "message": "DecisionAgent is not available",
+                    "partial_results": analyses
+                }
+                
+            decision_agent = decision_agent_class()
+            
+            # If the agent has a llm_client attribute, set its temperature
+            if hasattr(decision_agent, 'llm_client'):
+                decision_agent.llm_client.temperature = self.temperature
+                
+            decision = decision_agent.make_decision(
+                agent_analyses=analyses,
+                symbol=self.symbol,
+                interval=self.interval
+            )
+            
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
+            # Format the final result with all data
+            result = {
+                "status": "success",
+                "agent": "All Agents (Decision Cycle)",
+                "symbol": self.symbol,
+                "interval": self.interval,
+                "use_mock_data": self.use_mock_data,
+                "temperature": self.temperature,
+                "timestamp": timestamp,
+                "elapsed_time": elapsed_time,
+                "current_price": current_price,
+                "result": {
+                    "decision": decision,
+                    "analyses": analyses,
+                    "signal": decision.get("signal", "UNKNOWN"),
+                    "confidence": decision.get("confidence", 0),
+                    "reasoning": decision.get("reasoning", "No reasoning provided")
+                },
+                "all_results": all_results
+            }
+            
+            # Store for possible trace saving
+            self.test_results.append(result)
+            
+            return result
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"{Fore.RED}Error running full decision cycle: {str(e)}{Style.RESET_ALL}")
+            logger.error(traceback.format_exc())
+            
+            end_time = time.time()
+            elapsed_time = end_time - start_time
+            
+            result = {
+                "status": "error",
+                "agent": "All Agents (Decision Cycle)",
+                "symbol": self.symbol,
+                "interval": self.interval,
+                "use_mock_data": self.use_mock_data,
+                "temperature": self.temperature,
+                "timestamp": timestamp,
+                "elapsed_time": elapsed_time,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "partial_results": analyses
+            }
+            
+            # Store for possible trace saving
+            self.test_results.append(result)
+            
+            return result
     
     def display_results(self, result: Dict[str, Any]):
         """
@@ -611,6 +884,11 @@ class AgentTestHarness:
         # Display the analysis result
         analysis = result['result']
         
+        # Check if this is a full cycle test result
+        if result['agent'] == "All Agents (Decision Cycle)":
+            self._display_full_cycle_results(result)
+            return
+            
         # Handle different result structures based on agent type
         if 'analysis' in analysis:
             # For agents that return nested results inside an 'analysis' key (like SentimentAnalystAgent)
@@ -725,6 +1003,96 @@ class AgentTestHarness:
             
         print("\n" + "="*80 + "\n")
     
+    def _display_full_cycle_results(self, result: Dict[str, Any]):
+        """
+        Display the results from a full agent decision cycle test.
+        
+        Args:
+            result: The full cycle test result dictionary
+        """
+        if result['status'] == 'error':
+            print(f"\n{Fore.RED}Error running full agent decision cycle:{Style.RESET_ALL}")
+            print(f"{result.get('message', result.get('error', 'Unknown error'))}")
+            if 'partial_results' in result:
+                print(f"\n{Fore.YELLOW}Partial results from analyst agents:{Style.RESET_ALL}")
+                for agent_name, analysis in result['partial_results'].items():
+                    if isinstance(analysis, dict):
+                        signal = analysis.get('signal', 'N/A')
+                        confidence = analysis.get('confidence', 0)
+                        print(f"  {agent_name}: {signal} (Confidence: {confidence}%)")
+            return
+            
+        # Display the final decision
+        decision = result['result'].get('decision', {})
+        signal = decision.get('signal', 'UNKNOWN')
+        confidence = decision.get('confidence', 0)
+        reasoning = decision.get('reasoning', 'No reasoning provided')
+        
+        # Color-code based on signal and confidence
+        if signal == 'BUY':
+            signal_color = Fore.GREEN
+        elif signal == 'SELL':
+            signal_color = Fore.RED
+        else:  # HOLD or others
+            signal_color = Fore.YELLOW
+            
+        # Confidence color
+        if confidence >= 80:
+            confidence_color = Fore.GREEN
+        elif confidence >= 60:
+            confidence_color = Fore.YELLOW
+        else:
+            confidence_color = Fore.RED
+        
+        print(f"\n{Fore.CYAN}## FINAL DECISION ##")
+        print(f"Signal:     {signal_color}{signal}{Style.RESET_ALL}")
+        print(f"Confidence: {confidence_color}{confidence}%{Style.RESET_ALL}")
+        print(f"Reasoning:  {Fore.WHITE}{reasoning}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}####################{Style.RESET_ALL}")
+        
+        # Display individual agent results
+        print(f"\n{Fore.CYAN}## Individual Agent Results ##")
+        
+        analyses = result['result'].get('analyses', {})
+        for agent_name, analysis in analyses.items():
+            # Skip if analysis is None or not a dict
+            if not analysis or not isinstance(analysis, dict):
+                continue
+                
+            # Extract key data
+            agent_signal = analysis.get('signal', 'UNKNOWN')
+            agent_confidence = analysis.get('confidence', 0)
+            agent_reasoning = analysis.get('reasoning', 'No reasoning provided')
+            if not agent_reasoning:
+                agent_reasoning = analysis.get('reason', 'No reasoning provided')
+                
+            # Color-code based on signal
+            if agent_signal == 'BUY':
+                agent_signal_color = Fore.GREEN
+            elif agent_signal == 'SELL':
+                agent_signal_color = Fore.RED
+            else:  # HOLD or others
+                agent_signal_color = Fore.YELLOW
+                
+            # Confidence color
+            if agent_confidence >= 80:
+                agent_confidence_color = Fore.GREEN
+            elif agent_confidence >= 60:
+                agent_confidence_color = Fore.YELLOW
+            else:
+                agent_confidence_color = Fore.RED
+                
+            print(f"\n{Fore.WHITE}{agent_name.replace('_', ' ').title()}{Style.RESET_ALL}")
+            print(f"  Signal:     {agent_signal_color}{agent_signal}{Style.RESET_ALL}")
+            print(f"  Confidence: {agent_confidence_color}{agent_confidence}%{Style.RESET_ALL}")
+            # Truncate reasoning if it's too long
+            if len(agent_reasoning) > 100:
+                print(f"  Reasoning:  {agent_reasoning[:100]}...")
+            else:
+                print(f"  Reasoning:  {agent_reasoning}")
+                
+        print("\n" + "="*80 + "\n")
+        
     def cleanup(self):
         """Clean up resources and restore original functionality."""
         self._restore_llm_client()
@@ -894,23 +1262,36 @@ def run_interactive_mode():
     if not available_agents:
         print(f"{Fore.RED}No implemented agents found.{Style.RESET_ALL}")
         return args
+    
+    # Add the "All Agents" option for full decision cycle
+    display_agents = ["All Agents (Full Decision Cycle)"] + available_agents
         
     # Show available agents
     print(f"{Fore.GREEN}Available Agents:{Style.RESET_ALL}")
-    for i, agent in enumerate(available_agents):
+    for i, agent in enumerate(display_agents):
         print(f"{i+1}. {agent}")
         
     # Select agent
     try:
-        agent_idx = int(input(f"\n{Fore.YELLOW}Select agent (1-{len(available_agents)}): {Style.RESET_ALL}")) - 1
-        if agent_idx < 0 or agent_idx >= len(available_agents):
+        agent_idx = int(input(f"\n{Fore.YELLOW}Select agent (1-{len(display_agents)}): {Style.RESET_ALL}")) - 1
+        if agent_idx < 0 or agent_idx >= len(display_agents):
             print(f"{Fore.RED}Invalid selection. Using first agent.{Style.RESET_ALL}")
             agent_idx = 0
-        args.agent = available_agents[agent_idx]
+            
+        if agent_idx == 0:
+            # User selected "All Agents"
+            args.full_cycle = True
+            args.agent = "DecisionAgent"  # We'll use the DecisionAgent as the main entry point
+            print(f"{Fore.CYAN}Running full agent decision cycle using DecisionAgent{Style.RESET_ALL}")
+        else:
+            # User selected a specific agent
+            args.full_cycle = False
+            args.agent = available_agents[agent_idx - 1]  # Subtract 1 to account for "All Agents" option
     except ValueError:
         if available_agents:
             print(f"{Fore.RED}Invalid input. Using first agent.{Style.RESET_ALL}")
             args.agent = available_agents[0]
+            args.full_cycle = False
         else:
             print(f"{Fore.RED}No agents available.{Style.RESET_ALL}")
             return args
@@ -1025,6 +1406,7 @@ Examples:
   python tests/test_agent_individual.py --agent TechnicalAnalystAgent --symbol BTC/USDT --interval 4h --data-source mock --explain
   python tests/test_agent_individual.py --agent SentimentAnalystAgent --symbol ETH/USDT --repeat 3 --save-trace
   python tests/test_agent_individual.py --interactive
+  python tests/test_agent_individual.py --agent DecisionAgent --full-cycle --symbol BTC/USDT --interval 1h
 """
     )
     
@@ -1057,6 +1439,7 @@ Examples:
     meta_group.add_argument('--list', action='store_true', help='List available agent classes')
     meta_group.add_argument('--quick', action='store_true', help='Run a quick test with default settings')
     meta_group.add_argument('--interactive', action='store_true', help='Run in interactive mode with prompts')
+    meta_group.add_argument('--full-cycle', action='store_true', help='Run full decision cycle with all agents')
     
     args = parser.parse_args()
     
@@ -1169,6 +1552,11 @@ def main():
             temperature=args.temperature,
             explain=args.explain
         )
+        
+        # Set full_cycle attribute if specified
+        if hasattr(args, 'full_cycle') and args.full_cycle:
+            harness.full_cycle = True
+            logger.info(f"{Fore.CYAN}Running full agent decision cycle test{Style.RESET_ALL}")
         
         # Check if we're doing temperature comparison
         if args.compare_temps:

@@ -768,6 +768,99 @@ def save_trace_to_file(test_results, output_dir):
     
     print(f"{Fore.GREEN}Test trace saved to: {filename}{Style.RESET_ALL}")
 
+def save_config(args, filename=None):
+    """
+    Save the current configuration to a JSON file.
+    
+    Args:
+        args: The configuration namespace
+        filename: Optional filename to save to
+        
+    Returns:
+        str: Path to the saved configuration file
+    """
+    if not filename:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"agent_test_config_{timestamp}.json"
+    
+    # Create configs directory if it doesn't exist
+    config_dir = os.path.join(os.path.dirname(__file__), 'configs')
+    os.makedirs(config_dir, exist_ok=True)
+    
+    # Full path to config file
+    config_path = os.path.join(config_dir, filename)
+    
+    # Convert args namespace to dict
+    config_dict = vars(args)
+    
+    try:
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f, indent=2)
+        print(f"{Fore.GREEN}Configuration saved to {config_path}{Style.RESET_ALL}")
+        return config_path
+    except Exception as e:
+        print(f"{Fore.RED}Error saving configuration: {str(e)}{Style.RESET_ALL}")
+        return None
+
+def load_config(filename=None):
+    """
+    Load a configuration from a JSON file.
+    
+    Args:
+        filename: The filename to load from. If None, lists available configs and prompts user.
+        
+    Returns:
+        argparse.Namespace: The loaded configuration
+    """
+    config_dir = os.path.join(os.path.dirname(__file__), 'configs')
+    
+    # Create directory if it doesn't exist
+    os.makedirs(config_dir, exist_ok=True)
+    
+    # If no filename provided, list available configs
+    if not filename:
+        config_files = [f for f in os.listdir(config_dir) if f.endswith('.json')]
+        
+        if not config_files:
+            print(f"{Fore.YELLOW}No saved configurations found.{Style.RESET_ALL}")
+            return None
+            
+        print(f"{Fore.GREEN}Available configurations:{Style.RESET_ALL}")
+        for i, f in enumerate(config_files):
+            # Try to extract timestamp from filename
+            try:
+                timestamp = f.split('_')[2:]
+                timestamp = '_'.join(timestamp).replace('.json', '')
+                timestamp_str = datetime.strptime(timestamp, "%Y%m%d_%H%M%S").strftime("%Y-%m-%d %H:%M:%S")
+                print(f"{i+1}. {f} (saved on {timestamp_str})")
+            except:
+                print(f"{i+1}. {f}")
+                
+        try:
+            choice = int(input(f"{Fore.YELLOW}Select configuration (1-{len(config_files)}, 0 to cancel): {Style.RESET_ALL}"))
+            if choice == 0:
+                return None
+            if choice < 1 or choice > len(config_files):
+                print(f"{Fore.RED}Invalid selection.{Style.RESET_ALL}")
+                return None
+            filename = config_files[choice-1]
+        except ValueError:
+            print(f"{Fore.RED}Invalid input.{Style.RESET_ALL}")
+            return None
+    
+    # Load the selected configuration
+    config_path = os.path.join(config_dir, filename)
+    try:
+        with open(config_path, 'r') as f:
+            config_dict = json.load(f)
+        
+        args = argparse.Namespace(**config_dict)
+        print(f"{Fore.GREEN}Configuration loaded from {config_path}{Style.RESET_ALL}")
+        return args
+    except Exception as e:
+        print(f"{Fore.RED}Error loading configuration: {str(e)}{Style.RESET_ALL}")
+        return None
+
 def run_interactive_mode():
     """
     Run interactive mode to prompt user for test parameters.
@@ -777,8 +870,23 @@ def run_interactive_mode():
     """
     print(f"{Fore.CYAN}=== aGENtrader Agent Test Interactive Mode ==={Style.RESET_ALL}")
     
-    # Create empty namespace
-    args = argparse.Namespace()
+    # Ask if user wants to load a saved configuration
+    load_saved = input(f"{Fore.YELLOW}Load a saved configuration? (y/n, default: n): {Style.RESET_ALL}").lower()
+    if load_saved.startswith('y'):
+        loaded_args = load_config()
+        if loaded_args:
+            # Ask if user wants to modify the loaded configuration
+            modify = input(f"{Fore.YELLOW}Do you want to modify this configuration? (y/n, default: n): {Style.RESET_ALL}").lower()
+            if not modify.startswith('y'):
+                return loaded_args
+            # If user wants to modify, we'll use the loaded args as defaults
+            args = loaded_args
+        else:
+            # Create empty namespace
+            args = argparse.Namespace()
+    else:
+        # Create empty namespace
+        args = argparse.Namespace()
     
     # Get available agents
     available_agents = sorted([agent for agent, cls in AVAILABLE_AGENTS.items() if cls is not None])
@@ -891,6 +999,16 @@ def run_interactive_mode():
         empty_args.interactive = True
         empty_args.list = True  # This ensures we don't get the error about missing --agent
         return empty_args
+    
+    # Ask if user wants to save the configuration
+    save_config_prompt = input(f"\n{Fore.YELLOW}Save this configuration for future use? (y/n, default: n): {Style.RESET_ALL}").lower()
+    if save_config_prompt.startswith('y'):
+        config_name = input(f"{Fore.YELLOW}Enter a name for this configuration (or leave blank for timestamp): {Style.RESET_ALL}")
+        if config_name:
+            filename = f"agent_test_config_{config_name}.json"
+        else:
+            filename = None  # Will use timestamp-based naming
+        save_config(args, filename)
         
     return args
 

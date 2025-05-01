@@ -176,12 +176,12 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             error_response["interval"] = interval
             return error_response
     
-    def _fetch_market_data(self, symbol: str) -> str:
+    def _fetch_market_data(self, symbol) -> str:
         """
         Fetch market news and social media data related to the symbol.
         
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (can be string or dictionary)
             
         Returns:
             String containing market news and social media data
@@ -189,8 +189,20 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         # In a production environment, this would connect to real news APIs
         # For now, we'll use a template approach that provides meaningful context
         
+        # Handle case where symbol is a dictionary (e.g., from test harness)
+        if isinstance(symbol, dict):
+            # Extract symbol from market_data dictionary if available
+            if 'symbol' in symbol:
+                symbol_str = symbol['symbol']
+            else:
+                # Default to BTC/USDT if no symbol found
+                symbol_str = "BTC/USDT"
+                logger.warning(f"Received dict instead of string for symbol. Using default: {symbol_str}")
+        else:
+            symbol_str = str(symbol) if symbol is not None else "BTC/USDT"
+        
         # Remove the slash that might be in symbols like "BTC/USDT"
-        clean_symbol = symbol.replace("/", "")
+        clean_symbol = symbol_str.replace("/", "")
         base_asset = clean_symbol.split("USDT")[0] if "USDT" in clean_symbol else clean_symbol
         
         market_data = f"""
@@ -209,20 +221,26 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         
         return market_data
         
-    def _analyze_sentiment_with_grok(self, symbol: str, market_data: str) -> Dict[str, Any]:
+    def _analyze_sentiment_with_grok(self, symbol, market_data: str) -> Dict[str, Any]:
         """
         Analyze sentiment using Grok AI via the LLM client.
         
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (can be string or dictionary)
             market_data: Market data string
             
         Returns:
             Dictionary containing sentiment analysis results
         """
         try:
+            # Handle case where symbol is a dictionary
+            if isinstance(symbol, dict):
+                symbol_str = symbol.get('symbol', "BTC/USDT")
+            else:
+                symbol_str = str(symbol) if symbol is not None else "BTC/USDT"
+                
             # Define the system prompt for sentiment analysis
-            clean_symbol = symbol.replace("/", "")
+            clean_symbol = symbol_str.replace("/", "")
             
             system_prompt = (
                 "You are a financial sentiment analysis expert. "
@@ -306,18 +324,24 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 ]
             }
     
-    def _log_sentiment_data(self, symbol: str, sentiment_result: Dict[str, Any]) -> None:
+    def _log_sentiment_data(self, symbol, sentiment_result: Dict[str, Any]) -> None:
         """
         Log sentiment data to a file.
         
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (can be string or dictionary)
             sentiment_result: Sentiment analysis result
         """
         try:
+            # Handle case where symbol is a dictionary
+            if isinstance(symbol, dict):
+                symbol_str = symbol.get('symbol', "BTC/USDT")
+            else:
+                symbol_str = str(symbol) if symbol is not None else "BTC/USDT"
+                
             log_entry = {
                 "timestamp": datetime.now().isoformat(),
-                "symbol": symbol,
+                "symbol": symbol_str,
                 "sentiment_score": sentiment_result["rating"],
                 "confidence": sentiment_result["confidence"],
                 "summary": sentiment_result["summary"],

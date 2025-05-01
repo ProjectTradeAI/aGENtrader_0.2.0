@@ -98,11 +98,21 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
         # Use agent-specific timeframe if none provided
         interval = interval or self.default_interval
         
-        # Validate input
-        if not self.validate_input(symbol, interval):
+        # Handle and validate input symbol
+        symbol_value = symbol
+        if isinstance(symbol, dict):
+            # Extract symbol from dictionary if needed
+            if 'symbol' in symbol:
+                symbol_value = symbol['symbol']
+            else:
+                logger.warning(f"Received dictionary for symbol but 'symbol' key not found. Using BTC/USDT as default.")
+                symbol_value = "BTC/USDT"
+                
+        # Now validate with proper symbol string
+        if not self.validate_input(symbol_value, interval):
             return self.build_error_response(
                 "INVALID_INPUT", 
-                f"Invalid input parameters: symbol={symbol}, interval={interval}"
+                f"Invalid input parameters: symbol={symbol_value}, interval={interval}"
             )
             
         try:
@@ -120,8 +130,14 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
                         "Data fetcher not provided"
                     )
                 
-                # Format symbol for futures market if needed
-                futures_symbol = f"{symbol}:USDT" if "/" in symbol else symbol
+                # Format symbol for futures market if needed (ensure it's a string first)
+                if isinstance(symbol_value, str) and "/" in symbol_value:
+                    base_asset = symbol_value.split("/")[0]
+                    futures_symbol = f"{base_asset}USDT"
+                else:
+                    futures_symbol = symbol_value
+                    
+                logger.debug(f"Using futures symbol: {futures_symbol} (converted from {symbol_value})")
                 
                 try:
                     # Use debug level for verbose logging to reduce console clutter
@@ -151,11 +167,17 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
             current_price = 0
             try:
                 if self.data_fetcher:
-                    current_price = self.data_fetcher.get_current_price(symbol)
+                    # Use the string symbol value for fetching price
+                    current_price = self.data_fetcher.get_current_price(symbol_value)
             except Exception as e:
                 logger.warning(f"Unable to fetch current price: {str(e)}")
                 if market_data and market_data.get("ticker") and market_data.get("ticker").get("last"):
                     current_price = float(market_data.get("ticker").get("last"))
+                    
+            # Use default price if we couldn't get one
+            if current_price == 0:
+                current_price = 50000.0  # Default BTC price as fallback
+                logger.info(f"Using default price for {symbol_value}: {current_price}")
             
             # Generate a trading signal based on the funding rate analysis
             signal, confidence, explanation = self._generate_signal(analysis_result)
@@ -166,7 +188,7 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
             results = {
                 "agent": self.name,
                 "timestamp": datetime.now().isoformat(),
-                "symbol": symbol,
+                "symbol": symbol_value,  # Use the clean string symbol value
                 "interval": interval,
                 "current_price": current_price,
                 "signal": signal,
@@ -179,12 +201,17 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
             
             # Log decision summary
             try:
+                # Ensure we have a string symbol for logging
+                symbol_str = symbol_value
+                if not isinstance(symbol_str, str):
+                    symbol_str = str(symbol_value)
+                
                 decision_logger.log_decision(
                     agent_name=self.name,
                     signal=signal,
                     confidence=confidence,
                     reason=explanation,
-                    symbol=symbol,
+                    symbol=symbol_str,
                     price=current_price,
                     timestamp=results["timestamp"],
                     additional_data={

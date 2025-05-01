@@ -25,6 +25,7 @@ import argparse
 import importlib
 import inspect
 import json
+import re
 import time
 import logging
 from datetime import datetime
@@ -243,6 +244,8 @@ class AgentTestHarness:
             explain: Whether to print detailed explanations
             data_override: Override input data for the agent
         """
+        # Initialize test results storage
+        self.test_results = []
         self.agent_name = agent_name
         self.symbol = symbol
         self.interval = interval
@@ -401,7 +404,7 @@ class AgentTestHarness:
             analyst_results = self.data_override.get('analyst_results', mock_analyst_results)
             
             # Create the decision agent
-            agent = self.agent_class(analyst_results=analyst_results)
+            agent = self.agent_class()
             
         else:
             # For analyst agents, check the constructor
@@ -463,13 +466,17 @@ class AgentTestHarness:
         timestamp = datetime.now().isoformat()
         
         # Get the analysis method for the agent
-        if self.agent_name == 'DecisionAgent':
-            analysis_method = agent.make_decision
+        if self.agent_name == 'DecisionAgent' or self.agent_name == 'BaseDecisionAgent':
+            analysis_method = agent.make_decision if hasattr(agent, 'make_decision') else None
         else:
-            analysis_method = agent.analyze
+            analysis_method = agent.analyze if hasattr(agent, 'analyze') else None
+            
+        # Check if we have a valid analysis method
+        if analysis_method is None:
+            raise ValueError(f"Agent {self.agent_name} does not have a valid analysis method (analyze or make_decision)")
         
         # Prepare market data if needed
-        if self.agent_name != 'DecisionAgent':
+        if self.agent_name != 'DecisionAgent' and self.agent_name != 'BaseDecisionAgent':
             # For analyst agents, we need market data
             if self.data_override and 'market_data' in self.data_override:
                 market_data = self.data_override['market_data']
@@ -516,9 +523,44 @@ class AgentTestHarness:
             logger.info(f"{Fore.CYAN}Running {self.agent_name} analysis...{Style.RESET_ALL}")
             result = analysis_method(market_data)
         else:
-            # For decision agent, we don't need market data directly
+            # For decision agent, we need to prepare analyses from other agents
             logger.info(f"{Fore.CYAN}Running {self.agent_name} decision making...{Style.RESET_ALL}")
-            result = analysis_method()
+            
+            # Create mock analyses for testing decision agents
+            mock_analyses = {
+                'technical_analysis': {
+                    'signal': 'HOLD',
+                    'confidence': 60,
+                    'reasoning': 'Technical indicators show neutral trend'
+                },
+                'sentiment_analysis': {
+                    'signal': 'BUY',
+                    'confidence': 75,
+                    'reasoning': 'Positive sentiment detected in news and social media'
+                },
+                'liquidity_analysis': {
+                    'signal': 'HOLD',
+                    'confidence': 65,
+                    'reasoning': 'Average liquidity with balanced order book'
+                },
+                'open_interest_analysis': {
+                    'signal': 'HOLD',
+                    'confidence': 50,
+                    'reasoning': 'No significant change in open interest'
+                },
+                'funding_rate_analysis': {
+                    'signal': 'SELL',
+                    'confidence': 40,
+                    'reasoning': 'Slightly negative funding rates'
+                }
+            }
+            
+            # Call make_decision with required arguments
+            result = analysis_method(
+                agent_analyses=mock_analyses,
+                symbol=self.symbol,
+                interval=self.interval
+            )
         
         # Calculate timing
         elapsed_time = time.time() - start_time
@@ -544,6 +586,9 @@ class AgentTestHarness:
                 }
                 for i, prompt in enumerate(self.captured_prompts)
             ]
+        
+        # Store the test result for possible trace saving
+        self.test_results.append(test_record)
         
         return test_record
     
@@ -596,6 +641,13 @@ class AgentTestHarness:
                         reasoning = 'No reasoning provided'
                 else:
                     reasoning = 'No reasoning provided'
+        
+        # Store the extracted display information for use in temperature comparison
+        result['display_data'] = {
+            'signal': signal,
+            'confidence': confidence,
+            'reasoning': reasoning
+        }
         
         # Color-code based on signal and confidence
         if signal == 'BUY':
@@ -689,28 +741,241 @@ def list_available_agents():
     print("\nExample usage:")
     print(f"{Fore.YELLOW}python tests/test_agent_individual.py --agent TechnicalAnalystAgent --symbol BTC/USDT --interval 4h{Style.RESET_ALL}")
     print("")
+    
+def save_trace_to_file(test_results, output_dir):
+    """
+    Save test results to a JSONL file.
+    
+    Args:
+        test_results: List of test result dictionaries
+        output_dir: Directory to save the file
+    """
+    import os
+    import json
+    from datetime import datetime
+    
+    # Create directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Create filename with timestamp
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = os.path.join(output_dir, f"agent_trace_{timestamp}.jsonl")
+    
+    # Write results to JSONL file
+    with open(filename, 'w') as f:
+        for result in test_results:
+            f.write(json.dumps(result) + '\n')
+    
+    print(f"{Fore.GREEN}Test trace saved to: {filename}{Style.RESET_ALL}")
+
+def run_interactive_mode():
+    """
+    Run interactive mode to prompt user for test parameters.
+    
+    Returns:
+        argparse.Namespace: Arguments from interactive input
+    """
+    print(f"{Fore.CYAN}=== aGENtrader Agent Test Interactive Mode ==={Style.RESET_ALL}")
+    
+    # Create empty namespace
+    args = argparse.Namespace()
+    
+    # Get available agents
+    available_agents = sorted([agent for agent, cls in AVAILABLE_AGENTS.items() if cls is not None])
+    
+    if not available_agents:
+        print(f"{Fore.RED}No implemented agents found.{Style.RESET_ALL}")
+        return args
+        
+    # Show available agents
+    print(f"{Fore.GREEN}Available Agents:{Style.RESET_ALL}")
+    for i, agent in enumerate(available_agents):
+        print(f"{i+1}. {agent}")
+        
+    # Select agent
+    try:
+        agent_idx = int(input(f"\n{Fore.YELLOW}Select agent (1-{len(available_agents)}): {Style.RESET_ALL}")) - 1
+        if agent_idx < 0 or agent_idx >= len(available_agents):
+            print(f"{Fore.RED}Invalid selection. Using first agent.{Style.RESET_ALL}")
+            agent_idx = 0
+        args.agent = available_agents[agent_idx]
+    except ValueError:
+        if available_agents:
+            print(f"{Fore.RED}Invalid input. Using first agent.{Style.RESET_ALL}")
+            args.agent = available_agents[0]
+        else:
+            print(f"{Fore.RED}No agents available.{Style.RESET_ALL}")
+            return args
+            
+    # Select symbol
+    symbol = input(f"\n{Fore.YELLOW}Enter trading symbol (default: BTC/USDT): {Style.RESET_ALL}")
+    args.symbol = symbol if symbol else "BTC/USDT"
+    
+    # Select interval
+    intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w", "1M"]
+    print(f"\n{Fore.GREEN}Available Intervals:{Style.RESET_ALL}")
+    for i, interval in enumerate(intervals):
+        print(f"{i+1}. {interval}")
+        
+    try:
+        interval_idx = int(input(f"\n{Fore.YELLOW}Select interval (1-{len(intervals)}): {Style.RESET_ALL}")) - 1
+        if interval_idx < 0 or interval_idx >= len(intervals):
+            print(f"{Fore.RED}Invalid selection. Using 4h.{Style.RESET_ALL}")
+            args.interval = "4h"
+        else:
+            args.interval = intervals[interval_idx]
+    except ValueError:
+        print(f"{Fore.RED}Invalid input. Using 4h.{Style.RESET_ALL}")
+        args.interval = "4h"
+        
+    # Select data source
+    data_source = input(f"\n{Fore.YELLOW}Use mock data? (y/n, default: n): {Style.RESET_ALL}").lower()
+    args.data_source = "mock" if data_source.startswith("y") else "live"
+    
+    # Test settings
+    temp = input(f"\n{Fore.YELLOW}LLM temperature (0.0-1.0, default: 0.0): {Style.RESET_ALL}")
+    try:
+        args.temperature = float(temp) if temp else 0.0
+        if args.temperature < 0.0 or args.temperature > 1.0:
+            print(f"{Fore.RED}Invalid temperature. Using 0.0.{Style.RESET_ALL}")
+            args.temperature = 0.0
+    except ValueError:
+        print(f"{Fore.RED}Invalid input. Using temperature 0.0.{Style.RESET_ALL}")
+        args.temperature = 0.0
+        
+    # Ask about temperature comparison
+    compare_temps = input(f"\n{Fore.YELLOW}Compare results with different temperatures? (y/n, default: n): {Style.RESET_ALL}").lower()
+    args.compare_temps = compare_temps.startswith('y')
+    
+    if args.compare_temps:
+        temp_range = input(f"{Fore.YELLOW}Enter temperature values (comma-separated, default: 0.0,0.5,1.0): {Style.RESET_ALL}")
+        args.temp_range = temp_range if temp_range else "0.0,0.5,1.0"
+        print(f"Temperature comparison will use values: {args.temp_range}")
+        
+    # Repeat count
+    repeat = input(f"\n{Fore.YELLOW}Number of test iterations (default: 1): {Style.RESET_ALL}")
+    try:
+        args.repeat = int(repeat) if repeat else 1
+        if args.repeat < 1:
+            print(f"{Fore.RED}Invalid repeat count. Using 1.{Style.RESET_ALL}")
+            args.repeat = 1
+    except ValueError:
+        print(f"{Fore.RED}Invalid input. Using 1 iteration.{Style.RESET_ALL}")
+        args.repeat = 1
+        
+    # Output options
+    explain = input(f"\n{Fore.YELLOW}Show detailed explanation? (y/n, default: n): {Style.RESET_ALL}").lower()
+    args.explain = explain.startswith("y")
+    
+    save_trace = input(f"\n{Fore.YELLOW}Save test trace to file? (y/n, default: n): {Style.RESET_ALL}").lower()
+    args.save_trace = save_trace.startswith("y")
+    
+    print(f"\n{Fore.GREEN}Test Configuration:{Style.RESET_ALL}")
+    print(f"Agent:       {args.agent}")
+    print(f"Symbol:      {args.symbol}")
+    print(f"Interval:    {args.interval}")
+    print(f"Data Source: {'Mock' if args.data_source == 'mock' else 'Live'}")
+    print(f"Temperature: {args.temperature}")
+    if args.compare_temps:
+        print(f"Temp Range:  {args.temp_range}")
+    print(f"Iterations:  {args.repeat}")
+    print(f"Explain:     {'Yes' if args.explain else 'No'}")
+    print(f"Save Trace:  {'Yes' if args.save_trace else 'No'}")
+    
+    confirm = input(f"\n{Fore.YELLOW}Proceed with this configuration? (y/n, default: y): {Style.RESET_ALL}").lower()
+    if confirm.startswith("n"):
+        print(f"{Fore.RED}Test cancelled.{Style.RESET_ALL}")
+        # Create new namespace with empty but valid options
+        empty_args = argparse.Namespace()
+        empty_args.agent = None
+        empty_args.interactive = True
+        empty_args.list = True  # This ensures we don't get the error about missing --agent
+        return empty_args
+        
+    return args
 
 
 def parse_arguments():
     """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Test individual agents in isolation')
+    parser = argparse.ArgumentParser(
+        description='aGENtrader Individual Agent Test Utility',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python tests/test_agent_individual.py --list
+  python tests/test_agent_individual.py --quick
+  python tests/test_agent_individual.py --agent TechnicalAnalystAgent --symbol BTC/USDT --interval 4h --data-source mock --explain
+  python tests/test_agent_individual.py --agent SentimentAnalystAgent --symbol ETH/USDT --repeat 3 --save-trace
+  python tests/test_agent_individual.py --interactive
+"""
+    )
     
+    # Main parameters
     parser.add_argument('--agent', type=str, help='Agent class name to test')
     parser.add_argument('--symbol', type=str, default='BTC/USDT', help='Trading symbol (e.g., BTC/USDT)')
     parser.add_argument('--interval', type=str, default='4h', help='Time interval (e.g., 1h, 4h, 1d)')
-    parser.add_argument('--mock-data', action='store_true', help='Use mock data instead of real API')
-    parser.add_argument('--temperature', type=float, default=0.0, help='LLM temperature (0.0-1.0)')
-    parser.add_argument('--explain', action='store_true', help='Show detailed explanation of prompts and responses')
-    parser.add_argument('--repeat', type=int, default=1, help='Run N iterations to observe variability')
-    parser.add_argument('--list', action='store_true', help='List available agent classes')
+    
+    # Data source options
+    data_group = parser.add_argument_group('Data Source Options')
+    data_source = data_group.add_mutually_exclusive_group()
+    data_source.add_argument('--data-source', type=str, choices=['mock', 'live'], help='Data source to use')
+    data_source.add_argument('--mock-data', action='store_true', help='Use mock data (legacy option, use --data-source=mock)')
+    
+    # Test execution options
+    test_group = parser.add_argument_group('Test Execution Options')
+    test_group.add_argument('--temperature', type=float, default=0.0, help='LLM temperature (0.0-1.0)')
+    test_group.add_argument('--repeat', type=int, default=1, help='Run N iterations to observe variability')
+    test_group.add_argument('--compare-temps', action='store_true', help='Compare results across different temperature settings')
+    test_group.add_argument('--temp-range', type=str, default='0.0,0.5,1.0', help='Temperature range for comparison (comma-separated values)')
+    
+    # Output options
+    output_group = parser.add_argument_group('Output Options')
+    output_group.add_argument('--explain', action='store_true', help='Show detailed explanation of prompts and responses')
+    output_group.add_argument('--save-trace', action='store_true', help='Save test results to JSONL file')
+    output_group.add_argument('--output-dir', type=str, default='logs', help='Directory for saving traces')
+    
+    # Meta options
+    meta_group = parser.add_argument_group('Meta Options')
+    meta_group.add_argument('--list', action='store_true', help='List available agent classes')
+    meta_group.add_argument('--quick', action='store_true', help='Run a quick test with default settings')
+    meta_group.add_argument('--interactive', action='store_true', help='Run in interactive mode with prompts')
     
     args = parser.parse_args()
     
-    # Show list of agents if requested or if no agent is specified
-    if args.list or not args.agent:
+    # Process quick test flag
+    if args.quick:
+        # Override with default quick test settings
+        args.agent = args.agent or 'TechnicalAnalystAgent'
+        args.symbol = 'BTC/USDT'
+        args.interval = '1h'
+        args.data_source = 'mock'
+        args.temperature = 0.0
+        args.repeat = 1
+        print(f"{Fore.CYAN}Running quick test with: {args.agent} on {args.symbol} @ {args.interval}{Style.RESET_ALL}")
+    
+    # Handle data source options
+    if args.mock_data:
+        args.data_source = 'mock'
+    elif not args.data_source:
+        args.data_source = 'live'  # Default to live if not specified
+        
+    # Show list of agents if requested
+    if args.list:
         list_available_agents()
-        if not args.agent:
-            parser.error('--agent is required unless --list is specified')
+        if not args.agent and not args.interactive:
+            return args
+    
+    # Handle interactive mode
+    if args.interactive:
+        interactive_args = run_interactive_mode()
+        # Update args with interactive selections
+        for key, value in vars(interactive_args).items():
+            if value is not None:  # Only override if value was provided
+                setattr(args, key, value)
+    
+    # Validate required args
+    if not args.agent and not args.list:
+        parser.error('--agent is required unless --list or --interactive is specified')
     
     return args
 
@@ -774,28 +1039,178 @@ def main():
         return
     
     try:
+        # Determine mock data flag from data source parameter
+        use_mock_data = args.data_source == 'mock' if args.data_source else args.mock_data
+        
         # Initialize test harness
         harness = AgentTestHarness(
             agent_name=args.agent,
             symbol=args.symbol,
             interval=args.interval,
-            use_mock_data=args.mock_data,
+            use_mock_data=use_mock_data,
             temperature=args.temperature,
             explain=args.explain
         )
         
-        # Run the tests
-        for i in range(args.repeat):
-            if args.repeat > 1:
-                logger.info(f"{Fore.CYAN}Running test iteration {i+1}/{args.repeat}{Style.RESET_ALL}")
+        # Check if we're doing temperature comparison
+        if args.compare_temps:
+            # Parse temperature range values
+            try:
+                temp_values = [float(t) for t in args.temp_range.split(',')]
+                # Validate temperature values
+                for temp in temp_values:
+                    if temp < 0.0 or temp > 1.0:
+                        logger.error(f"{Fore.RED}Temperature {temp} is out of range (0.0-1.0){Style.RESET_ALL}")
+                        return
+                
+                logger.info(f"{Fore.CYAN}Running temperature comparison with values: {temp_values}{Style.RESET_ALL}")
+                
+                # Store results for each temperature
+                all_results = []
+                
+                # Run tests at each temperature
+                for temp in temp_values:
+                    logger.info(f"{Fore.CYAN}Testing with temperature = {temp}{Style.RESET_ALL}")
+                    harness.temperature = temp
+                    result = harness.run_test()
+                    harness.display_results(result)
+                    all_results.append((temp, result))
+                
+                # Print comparison summary
+                print("\n" + "="*80)
+                print(f"{Fore.CYAN}## Temperature Comparison Summary ##")
+                print(f"Agent: {args.agent}, Symbol: {args.symbol}, Interval: {args.interval}{Style.RESET_ALL}")
+                print("="*80)
+                
+                print(f"\n{'Temperature':<12} {'Signal':<10} {'Confidence':<12} {'Reasoning'}")
+                print(f"{'-'*12} {'-'*10} {'-'*12} {'-'*40}")
+                
+                for temp, res in all_results:
+                    # Use the display_data that was stored during display_results
+                    if 'display_data' in res:
+                        display_data = res['display_data']
+                        signal = display_data.get('signal', 'UNKNOWN')
+                        confidence = display_data.get('confidence', 0)
+                        reasoning = display_data.get('reasoning', 'No reasoning provided')
+                    # Fallback to the old method if display_data is not available
+                    else:
+                        # Extract results the same way as display_results
+                        if 'analysis' in res['result']:
+                            signal = res['result']['analysis'].get('signal', 'UNKNOWN')
+                            confidence = res['result']['analysis'].get('confidence', 0)
+                            reasoning = res['result']['analysis'].get('reasoning', 'No reasoning provided')
+                            if reasoning is None:
+                                reasoning = res['result']['analysis'].get('reason', 'No reasoning provided')
+                        else:
+                            signal = res['result'].get('signal', 'UNKNOWN')
+                            confidence = res['result'].get('confidence', 0)
+                            reasoning = res['result'].get('reasoning', 'No reasoning provided')
+                            if reasoning is None:
+                                explanation = res['result'].get('explanation', None)
+                                if explanation is not None:
+                                    if isinstance(explanation, list) and len(explanation) > 0:
+                                        reasoning = explanation[0]
+                                    elif isinstance(explanation, str):
+                                        reasoning = explanation
+                                    
+                    # Additional check to extract reasoning from nested data structure
+                    if reasoning == 'No reasoning provided' and 'result' in res:
+                        result = res['result']
+                        if isinstance(result, dict):
+                            if 'reasoning' in result:
+                                reasoning = result['reasoning']
+                            # Check for reasoning in nested structure inside the test results
+                            elif 'reason' in result:
+                                reasoning = result['reason']
+                                
+                    # Look for reasoning in the decision summary in the console output
+                    if reasoning == 'No reasoning provided':
+                        # First check the full response for decision logs
+                        full_output = str(res)
+                        if 'Decision recorded in performance tracker' in full_output:
+                            for line in full_output.split('\n'):
+                                if 'Reasoning:' in line:
+                                    reasoning = line.split('Reasoning:')[1].strip()
+                                    break
+                                    
+                        # Also check for 'reason:' in output
+                        if reasoning == 'No reasoning provided':
+                            matches = re.findall(r'reason[ing]*:\s*(.*)', full_output, re.IGNORECASE)
+                            if matches:
+                                reasoning = matches[0].strip()
+                                
+                        # For technical analyst logs
+                        if reasoning == 'No reasoning provided' and ("TechnicalAnalystAgent" in full_output or "technical_analyst" in full_output):
+                            for line in full_output.split('\n'):
+                                if "decision for" in line.lower() and "@" in line:
+                                    reasoning_line = next((l for l in full_output.split('\n')[full_output.split('\n').index(line)+1:] 
+                                                        if "reasoning:" in l.lower()), None)
+                                    if reasoning_line:
+                                        reasoning = reasoning_line.split("Reasoning:")[1].strip()
+                                        break
+                    
+                    # Store the display results directly when running tests
+                    if reasoning == 'No reasoning provided' and hasattr(res, 'get'):
+                        # Try direct access to display_results attributes
+                        display_data = res.get('display_data', None)
+                        if display_data and isinstance(display_data, dict):
+                            if 'reasoning' in display_data:
+                                reasoning = display_data['reasoning']
+                        
+                    # Try to extract from display_results output
+                    if reasoning == 'No reasoning provided':
+                        # Find it in the Analysis Result section
+                        if 'Analysis Result:' in str(res):
+                            analysis_output = str(res).split('Analysis Result:')[1].split('================================================================================')[0]
+                            reasoning_section = re.findall(r'Reasoning:\s*(.*?)$', analysis_output, re.MULTILINE)
+                            if reasoning_section:
+                                reasoning = reasoning_section[0].strip()
+                                
+                    # Or extract from decision record
+                    if reasoning == 'No reasoning provided':
+                        decision_output = re.findall(r'Decision recorded in performance tracker.*\nSELL|BUY|NEUTRAL|HOLD decision for.*\nReasoning: (.*)$', str(res), re.MULTILINE)
+                        if decision_output:
+                            reasoning = decision_output[0].strip()
+                    
+                    # Truncate reasoning for display
+                    short_reason = reasoning[:40] + "..." if len(reasoning) > 40 else reasoning
+                    
+                    # Color-code based on signal
+                    if signal == 'BUY':
+                        signal_color = Fore.GREEN
+                    elif signal == 'SELL':
+                        signal_color = Fore.RED
+                    else:  # HOLD or others
+                        signal_color = Fore.YELLOW
+                    
+                    print(f"{temp:<12} {signal_color}{signal:<10}{Style.RESET_ALL} {confidence:<12} {short_reason}")
+                
+                print("\n" + "="*80 + "\n")
+                
+                # Save all results if requested
+                if args.save_trace and hasattr(harness, 'test_results') and harness.test_results:
+                    save_trace_to_file(harness.test_results, args.output_dir)
             
-            result = harness.run_test()
-            harness.display_results(result)
+            except ValueError as e:
+                logger.error(f"{Fore.RED}Error parsing temperature range: {str(e)}{Style.RESET_ALL}")
+                logger.info(f"{Fore.YELLOW}Use comma-separated values like '0.0,0.5,0.7,1.0'{Style.RESET_ALL}")
+        else:
+            # Run regular tests without temperature comparison
+            for i in range(args.repeat):
+                if args.repeat > 1:
+                    logger.info(f"{Fore.CYAN}Running test iteration {i+1}/{args.repeat}{Style.RESET_ALL}")
+                
+                result = harness.run_test()
+                harness.display_results(result)
+                
+                # Add a delay between iterations if repeating with temperature > 0
+                if args.repeat > 1 and i < args.repeat - 1 and args.temperature > 0:
+                    time.sleep(1)
             
-            # Add a delay between iterations if repeating with temperature > 0
-            if args.repeat > 1 and i < args.repeat - 1 and args.temperature > 0:
-                time.sleep(1)
-        
+            # Save trace if requested
+            if args.save_trace and hasattr(harness, 'test_results') and harness.test_results:
+                save_trace_to_file(harness.test_results, args.output_dir)
+            
         # Clean up
         harness.cleanup()
         

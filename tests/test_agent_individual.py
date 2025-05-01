@@ -55,7 +55,9 @@ try:
     # If any are missing, they will be set to None in AVAILABLE_AGENTS
     try:
         from agents.technical_analyst_agent import TechnicalAnalystAgent
-    except ImportError:
+        logger.info(f"{Fore.GREEN}Successfully imported TechnicalAnalystAgent{Style.RESET_ALL}")
+    except ImportError as e:
+        logger.error(f"{Fore.RED}ImportError for TechnicalAnalystAgent: {str(e)}{Style.RESET_ALL}")
         TechnicalAnalystAgent = None
         
     try:

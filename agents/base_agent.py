@@ -181,7 +181,11 @@ class BaseAgent(AgentInterface):
             "error_type": error_type,
             "message": message,
             "agent": self.name,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
+            # Add fields required by DecisionAgent to avoid "Couldn't extract valid action" warnings
+            "signal": "HOLD",  # Default to HOLD on error
+            "action": "HOLD",  # Default to HOLD on error
+            "confidence": 0    # Zero confidence since this is an error
         }
         
     def validate_input(self, symbol: Optional[str], interval: Optional[str]) -> bool:

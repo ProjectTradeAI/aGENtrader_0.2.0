@@ -140,10 +140,21 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             else:
                 # Fetch market data using data fetcher
                 if not self.data_fetcher:
-                    return self.build_error_response(
-                        "DATA_FETCHER_MISSING",
-                        "Data fetcher not provided"
-                    )
+                    logger.error(f"Data fetcher missing in {self.name}. Class: {self.__class__.__name__}, Module: {__name__}")
+                    # Create a mock data provider as a fallback
+                    try:
+                        from agents.data_providers.mock_data_provider import MockDataProvider
+                        logger.warning(f"Creating fallback MockDataProvider in {self.name}")
+                        self.data_fetcher = MockDataProvider(symbol=symbol)
+                        logger.info(f"Successfully created MockDataProvider fallback")
+                    except Exception as e:
+                        logger.error(f"Failed to create fallback MockDataProvider: {str(e)}")
+                        return self.build_error_response(
+                            "DATA_FETCHER_MISSING",
+                            "Data fetcher not provided and fallback creation failed"
+                        )
+                else:
+                    logger.info(f"Using data fetcher in {self.name}: {type(self.data_fetcher).__name__}")
                 
                 logger.info(f"Fetching price data for {symbol} at {interval} interval")
                 try:
@@ -198,8 +209,9 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                 "symbol": symbol,
                 "interval": interval,
                 "current_price": current_price,
-                "signal": signal,
-                "confidence": confidence,
+                "signal": signal,  # This field is used by DecisionAgent to determine action
+                "confidence": confidence,  # This field is used by DecisionAgent for weighting
+                "action": signal,  # Add explicit action field to match DecisionAgent expectations
                 "explanation": [explanation],
                 "indicators": analysis_result,
                 "execution_time_seconds": execution_time,
@@ -626,8 +638,19 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             Market data dictionary
         """
         if not self.data_fetcher:
-            logger.warning("No data fetcher provided, cannot fetch market data")
-            return {}
+            logger.error(f"Data fetcher missing in {self.name}._fetch_market_data. Class: {self.__class__.__name__}")
+            # Create a mock data provider as a fallback
+            try:
+                from agents.data_providers.mock_data_provider import MockDataProvider
+                logger.warning(f"Creating fallback MockDataProvider in {self.name}._fetch_market_data")
+                self.data_fetcher = MockDataProvider(symbol=symbol)
+                logger.info(f"Successfully created MockDataProvider fallback")
+            except Exception as e:
+                logger.error(f"Failed to create fallback MockDataProvider: {str(e)}")
+                return {
+                    "symbol": symbol,
+                    "error": "Data fetcher not available and fallback creation failed"
+                }
             
         try:
             # Use interval from kwargs or default

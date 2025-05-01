@@ -32,12 +32,12 @@ class LLMClient:
     """
     
     # Default providers and endpoints from environment or config
-    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'local')  # Default to local (Ollama) with fallback
-    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mistral')  # Using mistral for lower resource requirements
+    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'grok')  # Default to Grok for testing reliability
+    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'grok-2-1212')  # Using Grok for testing
     
     # Agent-specific model configuration
     AGENT_SPECIFIC_MODELS = {
-        # Sentiment agents use Grok by default for better sentiment analysis
+        # All agents now use Grok as the primary provider for testing reliability
         'sentiment_analyst': {
             'provider': 'grok',
             'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
@@ -47,28 +47,28 @@ class LLMClient:
             'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         
-        # Technical and market structure agents use Mistral by default
+        # Technical and market structure agents now use Grok directly for testing
         'technical_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         'liquidity_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         'funding_rate_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         'open_interest_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         
-        # Decision agent uses Mistral by default for consistent and logical decisions
+        # Decision agent also uses Grok directly for testing
         'decision_agent': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         }
     }
     

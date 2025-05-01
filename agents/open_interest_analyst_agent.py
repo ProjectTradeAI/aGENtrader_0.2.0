@@ -176,15 +176,17 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
             
             # Check if we have valid data
             if not oi_data or len(oi_data) == 0:
+                self.logger.warning(f"Insufficient open interest data for {symbol}")
                 return self.build_error_response(
                     "INSUFFICIENT_DATA",
-                    "No open interest data available"
+                    f"No open interest data available for {symbol}. This might be due to geographic restrictions or the pair not being available on futures markets."
                 )
                 
             if not price_data or len(price_data) == 0:
+                self.logger.warning(f"Insufficient price data for {symbol}")
                 return self.build_error_response(
                     "INSUFFICIENT_DATA",
-                    "No price data available"
+                    f"No price data available for {symbol}. This might be due to API rate limits or connectivity issues."
                 )
             
             # Analyze the data

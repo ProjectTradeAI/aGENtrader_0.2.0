@@ -178,12 +178,14 @@ class BaseAgent(AgentInterface):
         """
         return {
             "status": "error",
+            "error": True,  # Explicit error flag for the DecisionAgent
             "error_type": error_type,
             "message": message,
+            "error_message": message,  # Add duplicate field for compatibility
             "agent": self.name,
             "timestamp": datetime.now().isoformat(),
             # Add fields required by DecisionAgent to avoid "Couldn't extract valid action" warnings
-            "signal": "HOLD",  # Default to HOLD on error
+            "signal": "UNKNOWN" if error_type == "INSUFFICIENT_DATA" else "HOLD",  # Use UNKNOWN for insufficient data
             "action": "HOLD",  # Default to HOLD on error
             "confidence": 0    # Zero confidence since this is an error
         }

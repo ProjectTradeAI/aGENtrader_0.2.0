@@ -288,6 +288,130 @@ class DecisionAgent:
         
         return agent_name_map.get(analysis_key, analysis_key)
         
+    def _get_most_common_signal(self, 
+                             agent_contributions: Dict[str, Dict[str, Any]], 
+                             weighted: bool = True) -> tuple[str, float, Dict[str, int]]:
+        """
+        Determine the most common signal/action by voting, with optional weighting.
+        
+        Args:
+            agent_contributions: Dictionary of agent contributions with actions and weights
+            weighted: Whether to use weighted voting
+            
+        Returns:
+            Tuple of (most_common_action, agreement_percentage, signal_counts)
+        """
+        # Count signals
+        signal_counts = {"BUY": 0, "SELL": 0, "HOLD": 0}
+        weighted_counts = {"BUY": 0.0, "SELL": 0.0, "HOLD": 0.0}
+        total_weight = 0.0
+        total_agents = 0
+        
+        # Count each agent's signal
+        for agent_name, contribution in agent_contributions.items():
+            action = contribution.get("action")
+            if action in signal_counts:
+                # For simple counting
+                signal_counts[action] += 1
+                total_agents += 1
+                
+                # For weighted counting
+                weight = contribution.get("weight", 1.0)
+                confidence = contribution.get("confidence", 50.0)
+                
+                # Skip signals with very low confidence
+                if confidence < 10:
+                    continue
+                    
+                # Weight can be combined with confidence for a more nuanced approach
+                if weighted:
+                    # Use a combination of weight and confidence
+                    # Normalize confidence to 0-1 range
+                    norm_confidence = confidence / 100.0
+                    # Adjusted weight is the product of agent weight and confidence
+                    adjusted_weight = weight * norm_confidence
+                    weighted_counts[action] += adjusted_weight
+                    total_weight += adjusted_weight
+                else:
+                    # Just count the agents
+                    weighted_counts[action] += weight
+                    total_weight += weight
+        
+        # Determine most common signal
+        if weighted:
+            # Find the action with highest weighted count
+            most_common_action = max(weighted_counts.items(), key=lambda x: x[1])
+            action = most_common_action[0]
+            
+            # Calculate agreement percentage
+            agreement_percentage = 0.0
+            if total_weight > 0:
+                agreement_percentage = (weighted_counts[action] / total_weight) * 100
+        else:
+            # Find the action with highest count
+            most_common_action = max(signal_counts.items(), key=lambda x: x[1])
+            action = most_common_action[0]
+            
+            # Calculate agreement percentage
+            if total_agents > 0:
+                agreement_percentage = (signal_counts[action] / total_agents) * 100
+            else:
+                agreement_percentage = 0.0
+                
+        # Default to HOLD if no action has votes
+        if total_weight == 0 and weighted:
+            action = "HOLD"
+            agreement_percentage = 0.0
+        elif total_agents == 0 and not weighted:
+            action = "HOLD"
+            agreement_percentage = 0.0
+            
+        return action, agreement_percentage, signal_counts
+    
+    def _calculate_confidence(self, action: str, confidence: float, status: str, error_type: Optional[str] = None) -> float:
+        """
+        Calculate adjusted confidence based on signal quality and error state.
+        
+        Args:
+            action: The action or signal (BUY, SELL, HOLD, UNKNOWN)
+            confidence: The raw confidence value 
+            status: The status of the analysis ("success", "error", etc.)
+            error_type: Type of error if status is "error"
+            
+        Returns:
+            Adjusted confidence value (0-100)
+        """
+        # Start with the provided confidence
+        adjusted_confidence = confidence
+        
+        # If action is UNKNOWN, confidence should be very low
+        if action == "UNKNOWN":
+            adjusted_confidence = min(adjusted_confidence, 10)  # Cap at 10% for UNKNOWN signals
+            
+        # If this is an error response, reduce confidence based on error type
+        if status == "error":
+            if error_type == "INSUFFICIENT_DATA":
+                # Insufficient data is common, keep some confidence but reduce it
+                adjusted_confidence = min(adjusted_confidence, 30)
+            elif error_type == "DATA_FETCHER_MISSING":
+                # Configuration issue, very low confidence
+                adjusted_confidence = 0
+            elif error_type == "API_ERROR" or error_type == "API_KEY_ERROR":
+                # API errors might be temporary, keep minimal confidence
+                adjusted_confidence = min(adjusted_confidence, 10)
+            else:
+                # General errors get very low confidence
+                adjusted_confidence = min(adjusted_confidence, 5)
+                
+        # For HOLD action with low confidence, potentially indicate uncertainty
+        if action == "HOLD" and adjusted_confidence < 30 and status == "success":
+            # This might be a default HOLD due to uncertainty, slightly boost confidence
+            # to prevent being completely ignored in the weighted average
+            adjusted_confidence = max(adjusted_confidence, 30)
+            
+        # Ensure the final confidence is in the valid range
+        return max(0, min(100, adjusted_confidence))
+    
     def _make_weighted_decision(self, 
                               agent_analyses: Dict[str, Any], 
                               symbol: str,
@@ -320,6 +444,9 @@ class DecisionAgent:
             total_weight = 0.0
             weights_used = {}
             
+            # Track agents with insufficient data
+            insufficient_data_agents = []
+            
             # Process each agent's analysis
             for analysis_key, analysis_data in agent_analyses.items():
                 agent_name = self._get_agent_name_from_analysis_key(analysis_key)
@@ -332,6 +459,17 @@ class DecisionAgent:
                 # Extract the agent's action and confidence
                 action = None
                 confidence = 0
+                status = "success"
+                error_type = None
+                
+                # Check for error status
+                if isinstance(analysis_data, dict):
+                    status = analysis_data.get("status", "success")
+                    if status == "error":
+                        error_type = analysis_data.get("error_type")
+                        # If it's an insufficient data error, track it specially
+                        if error_type == "INSUFFICIENT_DATA":
+                            insufficient_data_agents.append(agent_name)
                 
                 # Different agents may have different output formats
                 if "recommendation" in analysis_data:
@@ -355,22 +493,28 @@ class DecisionAgent:
                         action = "BUY"
                     elif signal == "SELL":
                         action = "SELL"
-                    elif signal in ["NEUTRAL", "HOLD"]:
+                    elif signal in ["NEUTRAL", "HOLD", "UNKNOWN"]:
+                        # Map both NEUTRAL, HOLD and UNKNOWN to HOLD action but with different confidence
                         action = "HOLD"
+                        if signal == "UNKNOWN" and confidence > 30:
+                            # UNKNOWN signals should have lower confidence
+                            confidence = 30
                     confidence = analysis_data.get("confidence", 50)
+                
+                # If the action is missing but we have error status, use HOLD
+                if not action and status == "error":
+                    action = "HOLD"  # Default to HOLD for error cases
                     
                 # Skip if we couldn't extract a valid action
                 if not action or action not in action_scores:
                     self.logger.warning(f"Couldn't extract valid action from {agent_name} analysis, skipping")
                     continue
                 
-                # Normalize confidence to 0-100 range
-                if not isinstance(confidence, (int, float)):
-                    confidence = 50
-                confidence = max(0, min(100, confidence))
+                # Calculate adjusted confidence based on action and status
+                adjusted_confidence = self._calculate_confidence(action, confidence, status, error_type)
                 
                 # Calculate weighted confidence
-                weighted_confidence = confidence * agent_weight
+                weighted_confidence = adjusted_confidence * agent_weight
                 
                 # Add to action scores
                 action_scores[action] += weighted_confidence
@@ -378,7 +522,9 @@ class DecisionAgent:
                 # Track agent contribution
                 agent_contributions[agent_name] = {
                     "action": action,
-                    "confidence": confidence,
+                    "confidence": adjusted_confidence,
+                    "raw_confidence": confidence,  # Store original confidence for reference
+                    "status": status,
                     "weight": agent_weight,
                     "weighted_confidence": weighted_confidence
                 }
@@ -387,7 +533,7 @@ class DecisionAgent:
                 total_weight += agent_weight
                 weights_used[agent_name] = agent_weight
                 
-                self.logger.info(f"{agent_name}: {action} with confidence {confidence}, weight {agent_weight}, weighted score {weighted_confidence}")
+                self.logger.info(f"{agent_name}: {action} with confidence {adjusted_confidence}, weight {agent_weight}, weighted score {weighted_confidence}")
             
             # If we don't have enough data, return None to fall back to other methods
             if not agent_contributions or total_weight == 0:
@@ -426,6 +572,11 @@ class DecisionAgent:
                     reason = ", ".join(reason_parts)
                 else:
                     reason = f"Weighted analysis suggests {action} is the best course of action"
+                
+                # Add information about insufficient data if relevant
+                if insufficient_data_agents:
+                    data_warning = f"Note: Insufficient data from {', '.join(insufficient_data_agents)}"
+                    reason = f"{reason}. {data_warning}"
             
             # Create decision object
             decision = {
@@ -436,7 +587,8 @@ class DecisionAgent:
                 "agent_contributions": agent_contributions,
                 "action_scores": action_scores,
                 "weights_used": weights_used,
-                "decision_method": "weighted"
+                "decision_method": "weighted",
+                "insufficient_data_agents": insufficient_data_agents if insufficient_data_agents else []
             }
             
             return decision

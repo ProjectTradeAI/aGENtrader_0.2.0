@@ -110,7 +110,8 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
             funding_data = None
             if market_data and isinstance(market_data, dict) and market_data.get("funding_rates"):
                 funding_data = market_data.get("funding_rates")
-                logger.info(f"Using pre-fetched funding rate data with {len(funding_data)} records")
+                # Use debug level for verbose logging to reduce console clutter
+                logger.debug(f"Using pre-fetched funding rate data with {len(funding_data) if funding_data else 0} records")
             else:
                 # Fetch market data using data fetcher
                 if not self.data_fetcher:
@@ -123,7 +124,8 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
                 futures_symbol = f"{symbol}:USDT" if "/" in symbol else symbol
                 
                 try:
-                    logger.info(f"Fetching funding rate data for {futures_symbol}")
+                    # Use debug level for verbose logging to reduce console clutter
+                    logger.debug(f"Fetching funding rate data for {futures_symbol}")
                     # Try to fetch historical funding rates
                     funding_data = self.data_fetcher.fetch_funding_rates(
                         symbol=futures_symbol, 
@@ -131,7 +133,8 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
                     )
                 except Exception as e:
                     logger.warning(f"Error fetching funding rates: {str(e)}")
-                    logger.info("Attempting mock funding rate data for isolated testing")
+                    # Use debug level for verbose logging to reduce console clutter
+                    logger.debug("Attempting mock funding rate data for isolated testing")
                     # For isolated testing when actual data isn't available
                     funding_data = self._generate_mock_funding_data(symbol)
             
@@ -474,5 +477,6 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
                 'rate': rate
             })
             
-        logger.warning("Using mock funding rate data for testing")
+        # Use debug level for verbose logging to reduce console clutter
+        logger.debug("Using mock funding rate data for testing")
         return funding_data

@@ -420,6 +420,61 @@ class BinanceDataProvider:
                 "ask_total": 0.0
             }
             
+    def fetch_funding_rates(
+        self,
+        symbol: Union[str, Dict[str, Any], None] = None,
+        limit: int = 30
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch funding rates for a futures symbol.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT") or market data dictionary
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of funding rate records
+        """
+        # Extract symbol string if market_data dictionary was passed
+        if isinstance(symbol, dict):
+            symbol_str = symbol.get('symbol', 'BTCUSDT')
+        else:
+            symbol_str = symbol or 'BTCUSDT'
+        
+        # Format symbol correctly (remove "/" if present)
+        formatted_symbol = symbol_str.replace("/", "")
+        
+        try:
+            # Prepare parameters
+            params = {
+                "symbol": formatted_symbol,
+                "limit": limit
+            }
+            
+            # Make request to the funding rate endpoint (futures API)
+            funding_data = self._make_request(
+                "/fapi/v1/fundingRate", 
+                params=params,
+                use_futures_api=True
+            )
+            
+            # Format the response
+            formatted_funding_data = []
+            for item in funding_data:
+                formatted_funding_data.append({
+                    "symbol": formatted_symbol,
+                    "rate": float(item["fundingRate"]),
+                    "timestamp": int(item["fundingTime"]),
+                    "time": int(item["fundingTime"])
+                })
+                
+            return formatted_funding_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching funding rates: {str(e)}")
+            # Return empty list on error
+            return []
+    
     def fetch_futures_open_interest(
         self,
         symbol: str,

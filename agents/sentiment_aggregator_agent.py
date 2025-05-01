@@ -131,12 +131,21 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             else:  # Neutral
                 signal = "NEUTRAL"
                 
+            # Get current price if available from data_fetcher
+            current_price = 0.0
+            if self.data_fetcher:
+                try:
+                    current_price = self.data_fetcher.get_current_price(symbol)
+                except Exception as price_err:
+                    logger.warning(f"Unable to fetch current price: {str(price_err)}")
+                    
             # Prepare response
             results = {
                 "agent": self.name,
                 "timestamp": datetime.now().isoformat(),
                 "symbol": symbol,
                 "interval": interval,  # Add interval for consistency with other agents
+                "current_price": current_price,  # Add current price for consistency
                 "sentiment_score": sentiment_result["rating"],
                 "confidence": confidence_pct,  # Use the percentage form for consistency
                 "signal": signal,  # Add signal field for DecisionAgent
@@ -148,12 +157,21 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 
             # Log decision summary
             try:
+                # Get current price if available from data_fetcher
+                current_price = 0.0
+                if self.data_fetcher:
+                    try:
+                        current_price = self.data_fetcher.get_current_price(symbol)
+                    except Exception as price_err:
+                        logger.warning(f"Unable to fetch current price: {str(price_err)}")
+                
                 decision_logger.log_decision(
                     agent_name=self.name,
                     signal=signal,
                     confidence=confidence_pct,
                     reason=sentiment_result["summary"],
                     symbol=symbol,
+                    price=current_price,
                     timestamp=results["timestamp"],
                     additional_data={
                         "sentiment_score": sentiment_score,

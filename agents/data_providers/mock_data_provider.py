@@ -320,6 +320,48 @@ class MockDataProvider:
         
         return data
     
+    def fetch_funding_rates(self, symbol: Optional[str] = None, limit: int = 30) -> List[Dict[str, Any]]:
+        """
+        Fetch simulated funding rates data.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT")
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of simulated funding rate records
+        """
+        now = datetime.now()
+        data = []
+        
+        # Base values for simulation
+        symbol_str = symbol or self.symbol
+        symbol_str = symbol_str.replace("/", "")
+        
+        # Generate data
+        for i in range(limit):
+            timestamp = int((now - timedelta(hours=8 * (limit - i))).timestamp() * 1000)
+            
+            # Create realistic-looking funding rate data with some patterns
+            if i < limit / 3:
+                # Positive funding rates (longs pay shorts)
+                rate = 0.0001 + 0.0002 * random.random()
+            elif i < 2 * limit / 3:
+                # Near-zero funding rates
+                rate = 0.00005 * (random.random() - 0.5)
+            else:
+                # Negative funding rates (shorts pay longs)
+                rate = -0.0001 - 0.0002 * random.random()
+            
+            data.append({
+                "symbol": symbol_str,
+                "fundingRate": rate,
+                "fundingTime": timestamp,
+                "time": timestamp
+            })
+        
+        return data
+    
     # Below are methods to maintain compatibility with the BinanceDataProvider interface
     def _make_request(self, endpoint: str, method: str = "GET", 
                       params: Optional[Dict[str, Any]] = None,

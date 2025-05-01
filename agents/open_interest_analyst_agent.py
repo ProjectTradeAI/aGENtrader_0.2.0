@@ -43,6 +43,7 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
         self.name = "OpenInterestAnalystAgent"
         self.description = "Analyzes open interest in futures markets"
         self.data_fetcher = data_fetcher
+        self.config = config or {}
         
         # Initialize LLM client with agent-specific configuration
         from models.llm_client import LLMClient
@@ -57,7 +58,7 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
         self.default_interval = oi_config.get("timeframe", self.trading_config.get("default_interval", "4h"))
         
         # Number of periods to analyze
-        self.lookback_periods = self.config.get('lookback_periods', 30) if config else 30
+        self.lookback_periods = self.config.get('lookback_periods', 30)
         
         # Set confidence thresholds
         self.high_confidence = 80   # For strong divergence/confirmation signals
@@ -67,8 +68,8 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
     def analyze(
         self, 
         symbol: Optional[str] = None, 
-        interval: Optional[str] = None,
         market_data: Optional[Dict[str, Any]] = None,
+        interval: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
@@ -76,8 +77,8 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
         
         Args:
             symbol: Trading symbol (e.g., "BTC/USDT")
-            interval: Time interval
             market_data: Pre-fetched market data (optional)
+            interval: Time interval
             **kwargs: Additional parameters
             
         Returns:
@@ -141,9 +142,17 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                         )
                 except Exception as e:
                     logger.warning(f"Error fetching data: {str(e)}")
-                    logger.info("Using mock data for isolated testing")
-                    # For isolated testing when actual data isn't available
-                    oi_data, price_data = self._generate_mock_data(symbol, interval)
+                    logger.info("Using MockDataProvider for fallback data")
+                    # For fallback when actual data isn't available
+                    try:
+                        from agents.data_providers.mock_data_provider import MockDataProvider
+                        mock_provider = MockDataProvider(symbol=symbol)
+                        price_data = mock_provider.fetch_ohlcv(symbol=symbol, interval=interval, limit=self.lookback_periods)
+                        oi_data = mock_provider.fetch_futures_open_interest(symbol=symbol, interval=interval, limit=self.lookback_periods)
+                    except Exception as mock_error:
+                        logger.error(f"Error using MockDataProvider: {str(mock_error)}")
+                        # Fall back to internal mock data generator as a last resort
+                        oi_data, price_data = self._generate_mock_data(symbol, interval)
             
             # Check if we have valid data
             if not oi_data or len(oi_data) == 0:
@@ -191,13 +200,21 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
             
             # Log decision summary
             try:
-                decision_logger.log_decision(
+                # Initialize decision logger
+                from core.logging.decision_logger import DecisionLogger
+                decision_logger_instance = DecisionLogger()
+                
+                # Ensure symbol is a string, not None or dict
+                symbol_str = symbol if isinstance(symbol, str) else str(symbol)
+                
+                # Log the decision
+                decision_logger_instance.log_decision(
                     agent_name=self.name,
                     signal=signal,
                     confidence=confidence,
                     reason=explanation,
-                    symbol=symbol,
-                    price=current_price,
+                    symbol=symbol_str,
+                    price=float(current_price),
                     timestamp=results["timestamp"],
                     additional_data={
                         "interval": interval,

@@ -567,7 +567,22 @@ class AgentTestHarness:
         analysis = result['result']
         signal = analysis.get('signal', 'UNKNOWN')
         confidence = analysis.get('confidence', 0)
-        reasoning = analysis.get('reasoning', 'No reasoning provided')
+        
+        # Get reasoning from various possible fields
+        reasoning = analysis.get('reasoning', None)
+        if reasoning is None:
+            # Try to get explanation field
+            explanation = analysis.get('explanation', None)
+            if explanation is not None:
+                # Handle both string and list explanations
+                if isinstance(explanation, list) and len(explanation) > 0:
+                    reasoning = explanation[0]
+                elif isinstance(explanation, str):
+                    reasoning = explanation
+                else:
+                    reasoning = 'No reasoning provided'
+            else:
+                reasoning = 'No reasoning provided'
         
         # Color-code based on signal and confidence
         if signal == 'BUY':

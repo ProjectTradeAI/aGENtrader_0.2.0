@@ -92,7 +92,19 @@ class DecisionLogger:
             additional_data = {}
             
         # Generate a unique ID for the decision
-        decision_id = f"{symbol.replace('/', '')}-{timestamp}"
+        # Handle different symbol formats (string or dict)
+        if isinstance(symbol, str):
+            symbol_str = symbol
+            symbol_id = symbol.replace('/', '')
+        elif isinstance(symbol, dict) and 'symbol' in symbol:
+            symbol_str = symbol['symbol']
+            symbol_id = symbol_str.replace('/', '')
+        else:
+            # Fallback for unexpected formats
+            symbol_str = str(symbol)
+            symbol_id = "UNKNOWN"
+            
+        decision_id = f"{symbol_id}-{timestamp}"
         
         # Create the decision record
         decision = {
@@ -112,7 +124,7 @@ class DecisionLogger:
         
         # Log to console
         logger.info(f"Decision recorded in performance tracker with ID: {decision_id}")
-        logger.info(f"{signal} decision for {symbol} @ {price}")
+        logger.info(f"{signal} decision for {symbol_str} @ {price}")
         logger.info(f"Reasoning: {reason}")
         
         # Update agent metrics

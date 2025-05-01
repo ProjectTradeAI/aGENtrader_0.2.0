@@ -14,7 +14,7 @@ from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
 
 from agents.base_agent import BaseAnalystAgent
-from core.logging import decision_logger
+from core.logging.decision_logger import DecisionLogger
 
 # Configure logging
 logging.basicConfig(
@@ -78,18 +78,18 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
     def analyze(
         self, 
-        symbol: Optional[str] = None, 
-        interval: Optional[str] = None,
+        symbol: Optional[str] = None,
         market_data: Optional[Dict[str, Any]] = None,
+        interval: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Analyze market liquidity conditions.
         
         Args:
-            symbol: Trading symbol
-            interval: Time interval (used for consistency, but less relevant for liquidity)
+            symbol: Trading symbol (optional if included in market_data)
             market_data: Pre-fetched market data (optional)
+            interval: Time interval (used for consistency, but less relevant for liquidity)
             **kwargs: Additional parameters
             
         Returns:
@@ -97,15 +97,22 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         """
         start_time = time.time()
         
+        # Extract symbol from market_data if provided
+        if market_data and isinstance(market_data, dict) and 'symbol' in market_data:
+            symbol = symbol or market_data['symbol']
+            
         # Use agent-specific timeframe if none provided
         interval = interval or self.default_interval
         
         # Validate input
-        if not self.validate_input(symbol, interval):
+        if not symbol:
             return self.build_error_response(
                 "INVALID_INPUT", 
-                f"Invalid input parameters: symbol={symbol}, interval={interval}"
+                "Missing symbol parameter. Please provide either as a direct parameter or in market_data"
             )
+            
+        # Normalize symbol format if needed
+        symbol = symbol.replace('_', '/')
             
         try:
             # Check if we have pre-fetched market data or need to fetch it
@@ -172,13 +179,20 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             
             # Log decision summary
             try:
+                # Initialize decision logger
+                decision_logger = DecisionLogger()
+                
+                # Ensure symbol is a string, not None or dict
+                symbol_str = symbol if isinstance(symbol, str) else str(symbol)
+                
+                # Log the decision
                 decision_logger.log_decision(
                     agent_name=self.name,
                     signal=signal,
                     confidence=confidence,
                     reason=explanation,
-                    symbol=symbol,
-                    price=current_price,
+                    symbol=symbol_str,
+                    price=float(current_price),
                     timestamp=results["timestamp"],
                     additional_data={
                         "interval": interval,

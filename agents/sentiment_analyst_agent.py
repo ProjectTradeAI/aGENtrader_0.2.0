@@ -14,11 +14,19 @@ integrated into the trading decision process.
 import os
 import sys
 import json
+import logging
 import random
 import time
 import datetime
 from typing import Dict, List, Any, Optional, Union
 from enum import Enum, auto
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('sentiment_analyst')
 
 # Add parent directory to path to allow importing from other modules
 script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -90,6 +98,9 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         # Initialize database connector
         self.db = DatabaseConnector()
         
+        # Helper method for timestamps
+        self.format_timestamp = lambda: datetime.datetime.now().isoformat()
+        
         # Set up sentiment source and mode
         self.data_mode = self.agent_config.get("data_mode", "mock")
         self.api_source = self.agent_config.get("api_source", "lunarcrush")
@@ -116,12 +127,13 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         self.default_symbol = self.trading_config.get("default_pair", "BTC/USDT").replace("/", "")
         self.default_interval = self.trading_config.get("default_interval", "1h")
         
-        self.logger.info(f"Sentiment Analyst Agent initialized with data mode: {self.data_mode}")
+        # Use the global logger defined at the top of the file
+        logger.info(f"Sentiment Analyst Agent initialized with data mode: {self.data_mode}")
     
     def _load_sentiment_history(self) -> None:
         """Load sentiment history from the log file."""
         if not os.path.exists(self.sentiment_log_file):
-            self.logger.info(f"No sentiment history found at {self.sentiment_log_file}")
+            logger.info(f"No sentiment history found at {self.sentiment_log_file}")
             return
         
         try:
@@ -132,9 +144,9 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             if len(self.sentiment_history) > self.max_history_size:
                 self.sentiment_history = self.sentiment_history[-self.max_history_size:]
                 
-            self.logger.info(f"Loaded {len(self.sentiment_history)} sentiment history records")
+            logger.info(f"Loaded {len(self.sentiment_history)} sentiment history records")
         except Exception as e:
-            self.logger.error(f"Error loading sentiment history: {e}")
+            logger.error(f"Error loading sentiment history: {e}")
     
     def _save_sentiment_data(self, data: Dict[str, Any]) -> None:
         """
@@ -156,10 +168,11 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                 f.write(json.dumps(data) + '\n')
                 
         except Exception as e:
-            self.logger.error(f"Error saving sentiment data: {e}")
+            logger.error(f"Error saving sentiment data: {e}")
     
     def analyze(self, 
                symbol: Optional[str] = None, 
+               market_data: Optional[Dict[str, Any]] = None,
                interval: Optional[str] = None,
                **kwargs) -> Dict[str, Any]:
         """
@@ -167,6 +180,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         
         Args:
             symbol: Trading symbol (e.g., 'BTCUSDT')
+            market_data: Pre-fetched market data (optional)
             interval: Time interval (e.g., '1h', '15m')
             **kwargs: Additional parameters specific to the agent
             
@@ -178,7 +192,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         interval_str = interval or self.default_interval
         
         # Log analysis start
-        self.logger.info(f"Starting sentiment analysis for {symbol_str} at {interval_str} interval")
+        logger.info(f"Starting sentiment analysis for {symbol_str} at {interval_str} interval")
         
         # Initialize result structure
         result = {
@@ -206,12 +220,12 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             self._save_sentiment_data(result)
             
             # Log successful analysis
-            self.logger.info(f"Sentiment analysis completed for {symbol_str}: {analysis.get('sentiment', 'UNKNOWN')} (Confidence: {analysis.get('confidence', 0):.2f})")
+            logger.info(f"Sentiment analysis completed for {symbol_str}: {analysis.get('sentiment', 'UNKNOWN')} (Confidence: {analysis.get('confidence', 0):.2f})")
             
             return result
             
         except Exception as e:
-            self.logger.error(f"Error performing sentiment analysis: {e}")
+            logger.error(f"Error performing sentiment analysis: {e}")
             
             # Return a neutral result in case of error
             result["analysis"] = {
@@ -249,7 +263,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         elif self.data_mode == "scrape":
             return self._get_scraped_sentiment_data(symbol, interval, **kwargs)
         else:
-            self.logger.warning(f"Unknown sentiment data mode: {self.data_mode}, falling back to mock data")
+            logger.warning(f"Unknown sentiment data mode: {self.data_mode}, falling back to mock data")
             return self._get_mock_sentiment_data(symbol, interval, **kwargs)
     
     def _get_mock_sentiment_data(self, 
@@ -359,7 +373,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             Dictionary with sentiment data from LunarCrush
         """
         # This is a placeholder for future implementation
-        self.logger.warning("LunarCrush API integration not implemented yet, falling back to mock data")
+        logger.warning("LunarCrush API integration not implemented yet, falling back to mock data")
         
         # Fall back to mock data with a warning
         mock_data = self._get_mock_sentiment_data(symbol, interval, **kwargs)
@@ -387,7 +401,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             Dictionary with sentiment data from web scraping
         """
         # This is a placeholder for future implementation
-        self.logger.warning("Web scraping integration not implemented yet, falling back to mock data")
+        logger.warning("Web scraping integration not implemented yet, falling back to mock data")
         
         # Fall back to mock data with a warning
         mock_data = self._get_mock_sentiment_data(symbol, interval, **kwargs)
@@ -396,6 +410,46 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         
         return mock_data
     
+    def validate_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate and sanitize the analysis result.
+        
+        Args:
+            result: The analysis result to validate
+            
+        Returns:
+            Validated result dictionary
+        """
+        # Ensure required fields exist
+        if "analysis" not in result:
+            result["analysis"] = {}
+            
+        if "sentiment" not in result["analysis"]:
+            result["analysis"]["sentiment"] = "NEUTRAL"
+            
+        if "confidence" not in result["analysis"]:
+            result["analysis"]["confidence"] = 50
+            
+        if "action" not in result["analysis"]:
+            result["analysis"]["action"] = "HOLD"
+            
+        if "reason" not in result["analysis"]:
+            result["analysis"]["reason"] = "No reason provided"
+            
+        # Ensure confidence is within bounds
+        confidence = result["analysis"]["confidence"]
+        if isinstance(confidence, float) and confidence <= 1.0:
+            # Convert from 0-1 scale to 0-100
+            result["analysis"]["confidence"] = int(confidence * 100)
+        elif isinstance(confidence, (int, float)):
+            # Ensure it's within 0-100 range
+            result["analysis"]["confidence"] = max(0, min(100, int(confidence)))
+        else:
+            # Default if not a number
+            result["analysis"]["confidence"] = 50
+            
+        return result
+        
     def process_sentiment_data(self, 
                              sentiment_data: Dict[str, Any],
                              symbol: str) -> Dict[str, Any]:
@@ -561,7 +615,7 @@ if __name__ == "__main__":
     agent = SentimentAnalystAgent()
     
     # Get sentiment analysis for Bitcoin
-    result = agent.analyze("BTCUSDT", "1h")
+    result = agent.analyze("BTCUSDT", None, "1h")
     
     # Print result
     print(json.dumps(result, indent=2))

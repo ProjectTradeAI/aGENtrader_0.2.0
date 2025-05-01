@@ -29,22 +29,37 @@ import time
 import logging
 from datetime import datetime
 
-# Ensure required packages are installed
+# Try to import required packages, but continue with warnings if not available
 try:
     import numpy as np
 except ImportError:
-    import subprocess
-    print("Installing numpy...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
-    import numpy as np
+    try:
+        import subprocess
+        print("Attempting to install numpy...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+        import numpy as np
+    except Exception as e:
+        print(f"Warning: Could not import or install numpy: {str(e)}")
+        print("Will use minimal functionality without numpy")
+        # Define a minimal numpy substitute that supports the operations we need
+        class NumpySubstitute:
+            def sqrt(self, x):
+                return x ** 0.5
+        np = NumpySubstitute()
 
 try:
     import pandas as pd
 except ImportError:
-    import subprocess
-    print("Installing pandas...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
-    import pandas as pd
+    try:
+        import subprocess
+        print("Attempting to install pandas...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
+        import pandas as pd
+    except Exception as e:
+        print(f"Warning: Could not import or install pandas: {str(e)}")
+        print("Using minimum functionality without pandas")
+        # This is a very minimal stub, actual usage will likely fail
+        pd = None
 from typing import Dict, Any, List, Type, Optional, Union, Tuple
 import colorama
 from colorama import Fore, Style

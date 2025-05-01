@@ -147,7 +147,14 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             
         # Handle the case where symbol is passed directly
         if symbol is not None:
-            logger.info(f"Using provided symbol parameter: {symbol}")
+            # Don't log potentially large data structures
+            if isinstance(symbol, dict):
+                if "symbol" in symbol:
+                    logger.info(f"Using symbol from symbol parameter: {symbol['symbol']}")
+                else:
+                    logger.info("Using provided symbol parameter (dictionary without symbol key)")
+            else:
+                logger.info(f"Using provided symbol parameter: {symbol}")
         # Get trading symbol from market_data
         elif isinstance(market_data, str):
             symbol = market_data
@@ -157,6 +164,10 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         elif isinstance(market_data, dict) and "symbol" in market_data:
             symbol = market_data["symbol"]
             logger.info(f"Extracting symbol from market_data: {symbol}")
+            
+            # Log OHLCV data sizes without printing the actual data
+            if "ohlcv" in market_data:
+                logger.info(f"Market data contains OHLCV with {len(market_data['ohlcv'])} data points")
         else:
             symbol = "BTC/USDT"  # Default
             logger.warning(f"No symbol found in any parameter, using default: {symbol}")
@@ -174,33 +185,47 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         try:
             # Check if we received OHLCV data instead of sentiment data
             if "ohlcv" in market_data:
-                logger.warning("Received OHLCV data in market_data parameter instead of sentiment data")
-                logger.info("This agent should receive sentiment data from SentimentAggregatorAgent")
+                # Only log that we received OHLCV data without dumping the data
+                logger.warning("Received OHLCV data instead of sentiment data - this should be fixed in the data flow")
+                logger.info("SentimentAnalystAgent should receive sentiment data directly, not OHLCV data")
                 
                 # If we have enough OHLCV data points, we can try to extract simple price trend
-                if market_data["ohlcv"] and len(market_data["ohlcv"]) > 1:
-                    logger.info(f"Using price trend from {len(market_data['ohlcv'])} OHLCV data points as a proxy for sentiment")
-                    
-                    # Extract closing prices
-                    closes = [float(candle['close']) for candle in market_data["ohlcv"] if 'close' in candle]
-                    
-                    if len(closes) > 1:
-                        # Simple trend analysis: compare latest close with first close
-                        price_change_pct = (closes[-1] - closes[0]) / closes[0] * 100
-                        
-                        if price_change_pct > 5:
-                            sentiment = {"signal": "BUY", "confidence": 70, 
-                                        "reasoning": f"Price increased by {price_change_pct:.2f}% over the analyzed period"}
-                        elif price_change_pct < -5:
-                            sentiment = {"signal": "SELL", "confidence": 70,
-                                        "reasoning": f"Price decreased by {abs(price_change_pct):.2f}% over the analyzed period"}
-                        else:
-                            sentiment = {"signal": "HOLD", "confidence": 60,
-                                        "reasoning": f"Price relatively stable (changed by {price_change_pct:.2f}%) over the analyzed period"}
-                                        
-                        logger.info(f"Generated simple sentiment from price trend: {sentiment['signal']} ({sentiment['confidence']}%)")
-                        return sentiment
+                ohlcv_data = market_data["ohlcv"]
+                data_points = len(ohlcv_data) if ohlcv_data else 0
                 
+                if ohlcv_data and data_points > 1:
+                    logger.info(f"Using {data_points} OHLCV data points as a proxy for sentiment")
+                    
+                    try:
+                        # Extract closing prices as numbers only
+                        closes = []
+                        for candle in ohlcv_data:
+                            if 'close' in candle:
+                                closes.append(float(candle['close']))
+                                
+                        if len(closes) > 1:
+                            # Simple trend analysis: compare latest close with first close
+                            price_change_pct = (closes[-1] - closes[0]) / closes[0] * 100
+                            first_price = closes[0]
+                            last_price = closes[-1]
+                            
+                            logger.info(f"Price movement: {price_change_pct:.2f}% (from {first_price:.2f} to {last_price:.2f})")
+                            
+                            if price_change_pct > 5:
+                                sentiment = {"signal": "BUY", "confidence": 70, 
+                                          "reasoning": f"Price increased by {price_change_pct:.2f}% over the analyzed period"}
+                            elif price_change_pct < -5:
+                                sentiment = {"signal": "SELL", "confidence": 70,
+                                          "reasoning": f"Price decreased by {abs(price_change_pct):.2f}% over the analyzed period"}
+                            else:
+                                sentiment = {"signal": "HOLD", "confidence": 60,
+                                          "reasoning": f"Price relatively stable (changed by {price_change_pct:.2f}%) over the analyzed period"}
+                                
+                            logger.info(f"Generated simple sentiment from price trend: {sentiment['signal']} ({sentiment['confidence']}%)")
+                            return sentiment
+                    except Exception as e:
+                        logger.error(f"Error processing OHLCV data: {str(e)}")
+                        
                 # If OHLCV data analysis didn't work, fall back to default neutral sentiment
                 logger.info("Cannot extract meaningful sentiment from OHLCV data, using fallback")
                 return self._fallback_analysis(symbol)

@@ -492,8 +492,21 @@ class BinanceDataProvider:
         Returns:
             List of open interest records
         """
-        # Format symbol correctly
+        # Format symbol correctly - ensure it's in the right format for futures API
         formatted_symbol = symbol.replace("/", "")
+        
+        # Some pairs may need to be formatted differently, ensure proper format for futures
+        if ":" not in formatted_symbol and "/" not in formatted_symbol:
+            # If not already in proper format, try to parse and convert
+            base_asset = formatted_symbol
+            if "USDT" in formatted_symbol:
+                base_asset = formatted_symbol.split("USDT")[0]
+            
+            # Ensure proper futures symbol format (usually just the base asset + USDT)
+            formatted_symbol = f"{base_asset}USDT"
+        
+        # Log the symbol we're requesting
+        logger.info(f"Requesting futures open interest for symbol: {formatted_symbol}")
         
         # Map interval to valid periods for openInterestHist endpoint
         period_map = {
@@ -508,6 +521,8 @@ class BinanceDataProvider:
             "period": period,
             "limit": limit
         }
+        
+        logger.info(f"Open interest params: {params}")
         
         # Try the appropriate endpoint with fallbacks to handle geographic restrictions
         futures_endpoints = []

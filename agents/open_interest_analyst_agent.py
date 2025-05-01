@@ -133,7 +133,14 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                     )
                 
                 # Format symbol for futures market if needed
-                futures_symbol = f"{symbol}:USDT" if "/" in symbol else symbol
+                # Ensure proper format for Binance futures API by converting any format to BASE+USDT
+                if isinstance(symbol, str) and "/" in symbol:
+                    base_asset = symbol.split("/")[0]
+                    futures_symbol = f"{base_asset}USDT"
+                else:
+                    futures_symbol = symbol
+                
+                logger.info(f"Using futures symbol: {futures_symbol} (converted from {symbol})")
                 
                 try:
                     # Fetch open interest data

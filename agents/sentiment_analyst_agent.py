@@ -126,10 +126,13 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         Analyze market sentiment from various sources.
         
         Args:
+            symbol: Trading symbol (e.g., "BTC/USDT")
+            interval: Time interval for analysis
             market_data: Dictionary containing market data including:
                 - symbol: Trading symbol (e.g., "BTC/USDT")
                 - news: List of news headlines (optional)
                 - social_posts: List of social media posts (optional)
+            **kwargs: Additional parameters
                 
         Returns:
             Dictionary with sentiment analysis results:
@@ -138,19 +141,30 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                 - reasoning: Reasoning behind the sentiment
                 - details: Additional sentiment details
         """
-        # Get trading symbol
-        if isinstance(market_data, str):
-            symbol = market_data
-            logger.info(f"Received string symbol: {symbol}")
+        # Initialize market_data if it's None to avoid NoneType errors
+        if market_data is None:
+            market_data = {}
             
+        # Handle the case where symbol is passed directly
+        if symbol is not None:
+            logger.info(f"Using provided symbol parameter: {symbol}")
+        # Get trading symbol from market_data
+        elif isinstance(market_data, str):
+            symbol = market_data
+            logger.info(f"Received string as market_data, using as symbol: {symbol}")
             # Construct empty market data with just the symbol
             market_data = {"symbol": symbol}
         elif isinstance(market_data, dict) and "symbol" in market_data:
             symbol = market_data["symbol"]
-            logger.info(f"Analyzing sentiment for {symbol}")
+            logger.info(f"Extracting symbol from market_data: {symbol}")
         else:
             symbol = "BTC/USDT"  # Default
-            logger.warning(f"No symbol provided, using default: {symbol}")
+            logger.warning(f"No symbol found in any parameter, using default: {symbol}")
+            
+        # Ensure market_data is a dictionary
+        if not isinstance(market_data, dict):
+            logger.warning(f"market_data is not a dictionary, creating empty dict")
+            market_data = {"symbol": symbol}
             
         # Check if GrokSentimentClient is available
         if not self.grok_client or not self.grok_client.enabled:

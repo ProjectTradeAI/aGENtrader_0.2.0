@@ -135,15 +135,32 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             current_price = 0.0
             if self.data_fetcher:
                 try:
-                    current_price = self.data_fetcher.get_current_price(symbol)
+                    # Handle case where symbol is a dictionary
+                    symbol_value = symbol
+                    if isinstance(symbol, dict):
+                        # Try to safely extract symbol from dict
+                        if 'symbol' in symbol:
+                            symbol_value = symbol.get('symbol', 'BTC/USDT')
+                        else:
+                            logger.warning("Symbol dict doesn't contain a 'symbol' key, using default BTC/USDT")
+                            symbol_value = 'BTC/USDT'
+                        
+                    # Now we have a string symbol to query
+                    current_price = self.data_fetcher.get_current_price(symbol_value)
+                    logger.info(f"Retrieved current price for {symbol_value}: {current_price}")
                 except Exception as price_err:
                     logger.warning(f"Unable to fetch current price: {str(price_err)}")
+                    
+            # Use default mock price if we couldn't get a real one
+            if current_price == 0.0:
+                current_price = 50000.0  # Default BTC price for testing
+                logger.info(f"Using default price for {symbol}: {current_price}")
                     
             # Prepare response
             results = {
                 "agent": self.name,
                 "timestamp": datetime.now().isoformat(),
-                "symbol": symbol,
+                "symbol": symbol if not isinstance(symbol, dict) else symbol.get('symbol', 'BTC/USDT'),
                 "interval": interval,  # Add interval for consistency with other agents
                 "current_price": current_price,  # Add current price for consistency
                 "sentiment_score": sentiment_result["rating"],
@@ -157,21 +174,21 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 
             # Log decision summary
             try:
-                # Get current price if available from data_fetcher
-                current_price = 0.0
-                if self.data_fetcher:
-                    try:
-                        current_price = self.data_fetcher.get_current_price(symbol)
-                    except Exception as price_err:
-                        logger.warning(f"Unable to fetch current price: {str(price_err)}")
+                # Use the current_price we already fetched above
+                # Already have proper handling for symbol as dict or string
+                
+                # Get proper symbol string for logging
+                symbol_str = symbol
+                if isinstance(symbol, dict):
+                    symbol_str = symbol.get('symbol', 'BTC/USDT')
                 
                 decision_logger.log_decision(
                     agent_name=self.name,
                     signal=signal,
                     confidence=confidence_pct,
                     reason=sentiment_result["summary"],
-                    symbol=symbol,
-                    price=current_price,
+                    symbol=symbol_str,
+                    price=current_price,  # Use the current_price we calculated above
                     timestamp=results["timestamp"],
                     additional_data={
                         "sentiment_score": sentiment_score,
@@ -292,8 +309,9 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                     result["rating"] = max(1, min(5, int(result.get("rating", 3))))
                     result["confidence"] = max(0, min(1, float(result.get("confidence", 0.5))))
                     
-                    # Ensure signals is a list
-                    if not isinstance(result.get("signals", []), list):
+                    # Ensure signals is a list and handle None case
+                    signals = result.get("signals")
+                    if signals is None or not isinstance(signals, list):
                         result["signals"] = ["No specific signals were identified"]
                     
                     # Ensure summary is a string

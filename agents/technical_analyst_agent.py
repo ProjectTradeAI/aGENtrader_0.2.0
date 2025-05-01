@@ -10,8 +10,23 @@ import time
 import json
 import logging
 import math
-import numpy as np
-import pandas as pd
+try:
+    import numpy as np
+except ImportError:
+    import sys
+    import subprocess
+    print("Installing numpy...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+    import numpy as np
+
+try:
+    import pandas as pd
+except ImportError:
+    import sys
+    import subprocess
+    print("Installing pandas...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
+    import pandas as pd
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
 

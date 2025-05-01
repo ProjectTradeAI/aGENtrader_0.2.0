@@ -28,6 +28,23 @@ import json
 import time
 import logging
 from datetime import datetime
+
+# Ensure required packages are installed
+try:
+    import numpy as np
+except ImportError:
+    import subprocess
+    print("Installing numpy...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+    import numpy as np
+
+try:
+    import pandas as pd
+except ImportError:
+    import subprocess
+    print("Installing pandas...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
+    import pandas as pd
 from typing import Dict, Any, List, Type, Optional, Union, Tuple
 import colorama
 from colorama import Fore, Style
@@ -92,10 +109,13 @@ try:
     
     # Import data providers
     try:
-        from utils.mock_data_provider import MockDataProvider
+        from agents.data_providers.mock_data_provider import MockDataProvider
     except ImportError:
-        # Create a simple mock provider if the imported one is not available
-        logger.warning(f"{Fore.YELLOW}Mock data provider not found. Using simplified version.{Style.RESET_ALL}")
+        try:
+            from utils.mock_data_provider import MockDataProvider
+        except ImportError:
+            # Create a simple mock provider if the imported one is not available
+            logger.warning(f"{Fore.YELLOW}Mock data provider not found. Using simplified version.{Style.RESET_ALL}")
         
         class MockDataProvider:
             def __init__(self, symbol="BTC/USDT", **kwargs):

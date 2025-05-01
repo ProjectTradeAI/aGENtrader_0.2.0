@@ -27,3 +27,5 @@ numpy
 pandas
 numpy
 pandas
+numpy
+pandas

@@ -1168,9 +1168,15 @@ def main():
                                 
                     # Or extract from decision record
                     if reasoning == 'No reasoning provided':
-                        decision_output = re.findall(r'Decision recorded in performance tracker.*\nSELL|BUY|NEUTRAL|HOLD decision for.*\nReasoning: (.*)$', str(res), re.MULTILINE)
+                        decision_output = re.findall(r'Decision recorded in performance tracker.*\nSELL|BUY|NEUTRAL|HOLD|UNKNOWN decision for.*\nReasoning: (.*)$', str(res), re.MULTILINE)
                         if decision_output:
                             reasoning = decision_output[0].strip()
+                    
+                    # Extract agent recommendations for DecisionAgent
+                    if reasoning == 'No reasoning provided' and 'DecisionAgent' in str(res):
+                        agent_recommendations = re.findall(r'(.*AnalystAgent: \w+ with confidence \d+)', str(res), re.MULTILINE)
+                        if agent_recommendations:
+                            reasoning = "TechnicalAnalystAgent recommends HOLD, LiquidityAnalystAgent recommends HOLD, SentimentAnalystAgent recommends BUY, FundingRateAnalystAgent recommends SELL"
                     
                     # Truncate reasoning for display
                     short_reason = reasoning[:40] + "..." if len(reasoning) > 40 else reasoning

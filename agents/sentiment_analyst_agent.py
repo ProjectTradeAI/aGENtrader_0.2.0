@@ -172,7 +172,40 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             return self._fallback_analysis(symbol)
             
         try:
-            # Collect sentiment data from different sources
+            # Check if we received OHLCV data instead of sentiment data
+            if "ohlcv" in market_data:
+                logger.warning("Received OHLCV data in market_data parameter instead of sentiment data")
+                logger.info("This agent should receive sentiment data from SentimentAggregatorAgent")
+                
+                # If we have enough OHLCV data points, we can try to extract simple price trend
+                if market_data["ohlcv"] and len(market_data["ohlcv"]) > 1:
+                    logger.info(f"Using price trend from {len(market_data['ohlcv'])} OHLCV data points as a proxy for sentiment")
+                    
+                    # Extract closing prices
+                    closes = [float(candle['close']) for candle in market_data["ohlcv"] if 'close' in candle]
+                    
+                    if len(closes) > 1:
+                        # Simple trend analysis: compare latest close with first close
+                        price_change_pct = (closes[-1] - closes[0]) / closes[0] * 100
+                        
+                        if price_change_pct > 5:
+                            sentiment = {"signal": "BUY", "confidence": 70, 
+                                        "reasoning": f"Price increased by {price_change_pct:.2f}% over the analyzed period"}
+                        elif price_change_pct < -5:
+                            sentiment = {"signal": "SELL", "confidence": 70,
+                                        "reasoning": f"Price decreased by {abs(price_change_pct):.2f}% over the analyzed period"}
+                        else:
+                            sentiment = {"signal": "HOLD", "confidence": 60,
+                                        "reasoning": f"Price relatively stable (changed by {price_change_pct:.2f}%) over the analyzed period"}
+                                        
+                        logger.info(f"Generated simple sentiment from price trend: {sentiment['signal']} ({sentiment['confidence']}%)")
+                        return sentiment
+                
+                # If OHLCV data analysis didn't work, fall back to default neutral sentiment
+                logger.info("Cannot extract meaningful sentiment from OHLCV data, using fallback")
+                return self._fallback_analysis(symbol)
+            
+            # Normal processing for genuine sentiment data
             sentiments = []
             
             # Process news headlines if available
@@ -191,7 +224,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                 
             # If no data was provided, analyze the general market context
             if not sentiments:
-                logger.info("No specific data provided, analyzing general market sentiment")
+                logger.info("No specific sentiment data provided, analyzing general market sentiment")
                 context = f"Current market conditions for {symbol} as of {datetime.now().strftime('%Y-%m-%d')}"
                 general_sentiment = self.grok_client.analyze_sentiment(context)
                 
@@ -221,22 +254,32 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             logger.error(f"Error in sentiment analysis: {str(e)}")
             return self._fallback_analysis(symbol)
             
-    def _fallback_analysis(self, symbol: str) -> Dict[str, Any]:
+    def _fallback_analysis(self, symbol=None) -> Dict[str, Any]:
         """
         Provide fallback sentiment analysis when Grok is unavailable.
         
         Args:
-            symbol: Trading symbol
+            symbol: Trading symbol (string, dict, or None)
             
         Returns:
             Dictionary with basic sentiment analysis
         """
-        logger.info("Using fallback sentiment analysis (neutral bias)")
+        # Extract symbol string if it's a dictionary
+        symbol_str = "BTC/USDT"  # Default
+        try:
+            if isinstance(symbol, dict) and "symbol" in symbol:
+                symbol_str = symbol["symbol"]
+            elif isinstance(symbol, str):
+                symbol_str = symbol
+        except:
+            pass
+            
+        logger.info(f"Using fallback sentiment analysis (neutral bias) for {symbol_str}")
         
         return {
             "signal": "HOLD",
             "confidence": 70,
-            "reasoning": "Neutral market sentiment detected with moderate confidence. " +
+            "reasoning": f"Neutral market sentiment detected for {symbol_str} with moderate confidence. " +
                         "Insufficient data for thorough sentiment analysis."
         }
         

@@ -130,9 +130,9 @@ def run_sentiment_analysis(market_data_or_symbol, data_provider=None, interval=N
         # Initialize the sentiment analyst agent
         sentiment_agent = SentimentAnalystAgent()
         
-        # Run analysis with market data format
+        # Run analysis with standardized parameter signature
         logger.info(f"Running sentiment analysis for {symbol}")
-        result = sentiment_agent.analyze(symbol_or_data=market_data)
+        result = sentiment_agent.analyze(symbol=symbol, market_data=market_data, interval=interval)
         
         # Log the result
         if 'error' in result:

@@ -93,6 +93,10 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         self.description = "Analyzes market data using technical analysis"
         self.data_fetcher = data_fetcher
         
+        # Set up logger
+        import logging
+        self.logger = logging.getLogger(__name__)
+        
         # Initialize LLM client with agent-specific configuration
         from models.llm_client import LLMClient
         self.llm_client = LLMClient(agent_name="technical_analyst")

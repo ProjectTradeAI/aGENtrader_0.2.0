@@ -50,17 +50,20 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         super().__init__("SentimentAnalystAgent")
         self.description = "Analyzes market sentiment from various text sources"
         
+        # Set up logger
+        self.logger = logging.getLogger(__name__)
+        
         # Initialize Grok client if available
         self.grok_client = GrokSentimentClient() if GrokSentimentClient else None
         
         if self.grok_client and not self.grok_client.enabled:
-            logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
+            self.logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
         
         # Agent-specific configuration
         self.config = config or {}
         self.data_sources = self.config.get("data_sources", ["news", "social"])
         
-        logger.info(f"Sentiment Analyst Agent initialized with {len(self.data_sources)} data sources")
+        self.logger.info(f"Sentiment Analyst Agent initialized with {len(self.data_sources)} data sources")
         
     def get_agent_config(self) -> Dict[str, Any]:
         """
@@ -118,20 +121,20 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         market_data = args[0] if args else kwargs.get("market_data", {})
         
         # Call analyze with the market data
-        return self.analyze(symbol=None, interval=None, market_data=market_data)
+        return self.analyze(symbol=None, market_data=market_data, interval=None)
         
-    def analyze(self, symbol: Optional[str] = None, interval: Optional[str] = None, 
-               market_data: Optional[Dict[str, Any]] = None, **kwargs) -> Dict[str, Any]:
+    def analyze(self, symbol: Optional[str] = None, market_data: Optional[Dict[str, Any]] = None, 
+               interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
         Analyze market sentiment from various sources.
         
         Args:
             symbol: Trading symbol (e.g., "BTC/USDT")
-            interval: Time interval for analysis
             market_data: Dictionary containing market data including:
                 - symbol: Trading symbol (e.g., "BTC/USDT")
                 - news: List of news headlines (optional)
                 - social_posts: List of social media posts (optional)
+            interval: Time interval for analysis
             **kwargs: Additional parameters
                 
         Returns:
@@ -148,60 +151,60 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         # Extract temperature parameter, default to -1 (dynamic temperature)
         temperature = kwargs.get('temperature', -1)
         if temperature == -1:
-            logger.info("Using dynamic temperature (random between 0.6-0.9)")
+            self.logger.info("Using dynamic temperature (random between 0.6-0.9)")
         else:
-            logger.info(f"Using fixed temperature: {temperature}")
+            self.logger.info(f"Using fixed temperature: {temperature}")
             
         # Handle the case where symbol is passed directly
         if symbol is not None:
             # Don't log potentially large data structures
             if isinstance(symbol, dict):
                 if "symbol" in symbol:
-                    logger.info(f"Using symbol from symbol parameter: {symbol['symbol']}")
+                    self.logger.info(f"Using symbol from symbol parameter: {symbol['symbol']}")
                 else:
-                    logger.info("Using provided symbol parameter (dictionary without symbol key)")
+                    self.logger.info("Using provided symbol parameter (dictionary without symbol key)")
             else:
-                logger.info(f"Using provided symbol parameter: {symbol}")
+                self.logger.info(f"Using provided symbol parameter: {symbol}")
         # Get trading symbol from market_data
         elif isinstance(market_data, str):
             symbol = market_data
-            logger.info(f"Received string as market_data, using as symbol: {symbol}")
+            self.logger.info(f"Received string as market_data, using as symbol: {symbol}")
             # Construct empty market data with just the symbol
             market_data = {"symbol": symbol}
         elif isinstance(market_data, dict) and "symbol" in market_data:
             symbol = market_data["symbol"]
-            logger.info(f"Extracting symbol from market_data: {symbol}")
+            self.logger.info(f"Extracting symbol from market_data: {symbol}")
             
             # Log OHLCV data sizes without printing the actual data
             if "ohlcv" in market_data:
-                logger.info(f"Market data contains OHLCV with {len(market_data['ohlcv'])} data points")
+                self.logger.info(f"Market data contains OHLCV with {len(market_data['ohlcv'])} data points")
         else:
             symbol = "BTC/USDT"  # Default
-            logger.warning(f"No symbol found in any parameter, using default: {symbol}")
+            self.logger.warning(f"No symbol found in any parameter, using default: {symbol}")
             
         # Ensure market_data is a dictionary
         if not isinstance(market_data, dict):
-            logger.warning(f"market_data is not a dictionary, creating empty dict")
+            self.logger.warning(f"market_data is not a dictionary, creating empty dict")
             market_data = {"symbol": symbol}
             
         # Check if GrokSentimentClient is available
         if not self.grok_client or not self.grok_client.enabled:
-            logger.warning("Grok sentiment client not available. Using fallback.")
+            self.logger.warning("Grok sentiment client not available. Using fallback.")
             return self._fallback_analysis(symbol)
             
         try:
             # Check if we received OHLCV data instead of sentiment data
             if "ohlcv" in market_data:
                 # Only log that we received OHLCV data without dumping the data
-                logger.warning("Received OHLCV data instead of sentiment data - this should be fixed in the data flow")
-                logger.info("SentimentAnalystAgent should receive sentiment data directly, not OHLCV data")
+                self.logger.warning("Received OHLCV data instead of sentiment data - this should be fixed in the data flow")
+                self.logger.info("SentimentAnalystAgent should receive sentiment data directly, not OHLCV data")
                 
                 # If we have enough OHLCV data points, we can try to extract simple price trend
                 ohlcv_data = market_data["ohlcv"]
                 data_points = len(ohlcv_data) if ohlcv_data else 0
                 
                 if ohlcv_data and data_points > 1:
-                    logger.info(f"Using {data_points} OHLCV data points as a proxy for sentiment")
+                    self.logger.info(f"Using {data_points} OHLCV data points as a proxy for sentiment")
                     
                     try:
                         # Extract closing prices as numbers only
@@ -229,7 +232,10 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                             # Add some randomness based on timestamp
                             confidence_modifier = (timestamp.second % 15) - 5  # -5 to +9
                             
-                            logger.info(f"Analysis #{request_id}: Price movement: {price_change_pct:.2f}% (from {first_price:.2f} to {last_price:.2f}), volatility: {volatility:.1f}%")
+                            self.logger.info(f"Analysis #{request_id}: Price movement: {price_change_pct:.2f}% (from {first_price:.2f} to {last_price:.2f}), volatility: {volatility:.1f}%")
+                            
+                            # Use the symbol properly
+                            symbol_str = symbol if isinstance(symbol, str) else "BTC/USDT"
                             
                             # Different reasoning templates based on trends
                             uptrend_reasons = [
@@ -289,13 +295,13 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                                     "request_id": request_id
                                 }
                                 
-                            logger.info(f"Generated simple sentiment from price trend: {sentiment['signal']} ({sentiment['confidence']}%)")
+                            self.logger.info(f"Generated simple sentiment from price trend: {sentiment['signal']} ({sentiment['confidence']}%)")
                             return sentiment
                     except Exception as e:
-                        logger.error(f"Error processing OHLCV data: {str(e)}")
+                        self.logger.error(f"Error processing OHLCV data: {str(e)}")
                         
                 # If OHLCV data analysis didn't work, fall back to default neutral sentiment
-                logger.info("Cannot extract meaningful sentiment from OHLCV data, using fallback")
+                self.logger.info("Cannot extract meaningful sentiment from OHLCV data, using fallback")
                 return self._fallback_analysis(symbol)
             
             # Normal processing for genuine sentiment data
@@ -304,20 +310,20 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             # Process news headlines if available
             if "news" in self.data_sources and "news" in market_data and market_data["news"]:
                 news_items = market_data["news"]
-                logger.info(f"Analyzing {len(news_items)} news items")
+                self.logger.info(f"Analyzing {len(news_items)} news items")
                 news_sentiment = self.grok_client.analyze_market_news(news_items, temperature=temperature)
                 sentiments.append(news_sentiment)
                 
             # Process social media posts if available
             if "social" in self.data_sources and "social_posts" in market_data and market_data["social_posts"]:
                 social_posts = market_data["social_posts"]
-                logger.info(f"Analyzing {len(social_posts)} social media posts")
+                self.logger.info(f"Analyzing {len(social_posts)} social media posts")
                 social_sentiment = self.grok_client.analyze_market_news(social_posts, temperature=temperature)
                 sentiments.append(social_sentiment)
                 
             # If no data was provided, analyze the general market context
             if not sentiments:
-                logger.info("No specific sentiment data provided, analyzing general market sentiment")
+                self.logger.info("No specific sentiment data provided, analyzing general market sentiment")
                 context = f"Current market conditions for {symbol} as of {datetime.now().strftime('%Y-%m-%d')}"
                 general_sentiment = self.grok_client.analyze_sentiment(context, temperature=temperature)
                 
@@ -328,7 +334,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                 signal_result["full_sentiment_data"] = general_sentiment
                 
                 # Log full reasoning for debugging truncation issues
-                logger.info(f"Generated sentiment reasoning (full): {signal_result['reasoning']}")
+                self.logger.info(f"Generated sentiment reasoning (full): {signal_result['reasoning']}")
                 
                 return signal_result
                 
@@ -352,7 +358,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                 return self._fallback_analysis(symbol)
                 
         except Exception as e:
-            logger.error(f"Error in sentiment analysis: {str(e)}")
+            self.logger.error(f"Error in sentiment analysis: {str(e)}")
             return self._fallback_analysis(symbol)
             
     def _fallback_analysis(self, symbol=None) -> Dict[str, Any]:
@@ -459,7 +465,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         
         # Log with a unique message to track in logs
         request_id = f"{hash(timestamp.isoformat() + symbol_str) % 10000:04d}"
-        logger.info(f"Analysis #{request_id}: Generated dynamic fallback sentiment for {symbol_str}: {signal} ({confidence}%)")
+        self.logger.info(f"Analysis #{request_id}: Generated dynamic fallback sentiment for {symbol_str}: {signal} ({confidence}%)")
         
         return {
             "signal": signal,

@@ -231,7 +231,8 @@ class AgentTestHarness:
         use_mock_data: bool = False,
         temperature: float = 0.0,
         explain: bool = False,
-        data_override: Optional[Dict[str, Any]] = None
+        data_override: Optional[Dict[str, Any]] = None,
+        log_conflict_traces: bool = True
     ):
         """
         Initialize the test harness.
@@ -244,6 +245,7 @@ class AgentTestHarness:
             temperature: Temperature setting for LLM to control randomness
             explain: Whether to print detailed explanations
             data_override: Override input data for the agent
+            log_conflict_traces: Whether to enable structured logging of CONFLICTED decisions
         """
         # Initialize test results storage
         self.test_results = []
@@ -255,6 +257,7 @@ class AgentTestHarness:
         self.explain = explain
         self.data_override = data_override or {}
         self.full_cycle = False  # Whether to run full decision cycle with all agents
+        self.log_conflict_traces = log_conflict_traces  # Enable conflict logging by default in test mode
         
         # Check if agent is valid
         if agent_name not in AVAILABLE_AGENTS:
@@ -1556,6 +1559,7 @@ Examples:
     output_group.add_argument('--explain', action='store_true', help='Show detailed explanation of prompts and responses')
     output_group.add_argument('--save-trace', action='store_true', help='Save test results to JSONL file')
     output_group.add_argument('--output-dir', type=str, default='logs', help='Directory for saving traces')
+    output_group.add_argument('--log-conflict-traces', action='store_true', help='Enable structured logging of all CONFLICTED decisions (default: ON in test mode)')
     
     # Meta options
     meta_group = parser.add_argument_group('Meta Options')
@@ -1673,7 +1677,8 @@ def main():
             interval=args.interval,
             use_mock_data=use_mock_data,
             temperature=args.temperature,
-            explain=args.explain
+            explain=args.explain,
+            log_conflict_traces=args.log_conflict_traces
         )
         
         # Set full_cycle attribute if specified

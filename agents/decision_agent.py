@@ -36,6 +36,9 @@ from utils.error_handler import (
     request_api_key
 )
 
+# Import conflict logging utilities
+from utils.conflict_logger import log_conflict
+
 # Define decorator for handling LLM errors
 def handle_llm_errors(func: Callable) -> Callable:
     """
@@ -689,6 +692,44 @@ class DecisionAgent:
                 final_confidence = max(80, normalized_confidence)  # Set higher confidence for conflict state
                 self.logger.warning(f"⚠️ CONFLICTED decision due to high-confidence opposing signals")
                 self.logger.info(f"CONFLICT DETECTED: Decision set to CONFLICTED, confidence {final_confidence}")
+                
+                # Create agent scores for conflict logging
+                agent_scores = {}
+                for agent_name, contribution in agent_contributions.items():
+                    agent_scores[agent_name] = {
+                        "signal": contribution["action"],
+                        "confidence": contribution["confidence"],
+                        "weight": contribution["weight"]
+                    }
+                
+                # Log the conflict for analysis using the conflict logger
+                try:
+                    # Use proper symbol formatting for display
+                    display_symbol = symbol.replace('/', '') if '/' in symbol else symbol
+                    local_interval = interval or self.default_interval
+                    
+                    # Non-blocking conflict logging
+                    log_conflict(
+                        symbol=display_symbol,
+                        interval=local_interval,
+                        final_signal=final_signal,
+                        confidence=final_confidence,
+                        reasoning=reason,
+                        agent_scores=agent_scores,
+                        metadata={
+                            "conflict_score": conflict_score,
+                            "high_confidence_signals": high_confidence_signals,
+                            "normalized_confidence": normalized_confidence,
+                            "directional_confidence": directional_confidence,
+                            "signal_counts": signal_counts,
+                            "total_confidence": {k: float(v) for k, v in total_confidence.items()}
+                        }
+                    )
+                    self.logger.info(f"Logged CONFLICTED decision for analysis")
+                except Exception as e:
+                    # Non-blocking, so just log the error and continue
+                    self.logger.error(f"Error logging conflict: {str(e)}")
+                
                 # No need to apply confidence threshold, as conflict is a high-confidence state
             # Apply confidence threshold for directional signals
             elif final_signal in ["BUY", "SELL"] and final_confidence < self.confidence_threshold:
@@ -703,10 +744,11 @@ class DecisionAgent:
                 # Set action same as final signal
                 action = final_signal
                 
-                # Convert NEUTRAL to HOLD for final action
+                # Convert NEUTRAL to HOLD for final action and final signal
                 if action == "NEUTRAL":
                     action = "HOLD"
-                    self.logger.info(f"Converting NEUTRAL to HOLD for final action")
+                    final_signal = "HOLD"  # Also update final_signal for consistency
+                    self.logger.info(f"Converting NEUTRAL to HOLD for final action and final signal")
                 
                 # Create reason based on agent contributions
                 reason_parts = []

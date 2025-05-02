@@ -153,7 +153,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         start_time = time.time()
         
         # Handle parameter flexibility with the new signature
-        self.logger.info(f"TechnicalAnalystAgent analyze called with symbol type: {type(symbol)}, market_data type: {type(market_data)}")
+        self.logger.debug(f"TechnicalAnalystAgent analyze called with symbol type: {type(symbol)}, market_data type: {type(market_data)}")
         
         # Extract data provider from market_data if available
         data_provider = None
@@ -162,7 +162,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             data_provider = market_data.get('data_provider')
             if data_provider:
                 self.data_fetcher = data_provider
-                self.logger.info(f"Using data_provider from market_data: {type(data_provider).__name__}")
+                self.logger.debug(f"Using data_provider from market_data: {type(data_provider).__name__}")
                 
             # Extract other parameters from market_data if not provided directly
             if not symbol and 'symbol' in market_data:
@@ -170,7 +170,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             if not interval and 'interval' in market_data:
                 interval = market_data.get('interval')
             
-            self.logger.info(f"Parameters from market_data: symbol={symbol}, interval={interval}, data_provider={'Available' if data_provider else 'None'}")
+            self.logger.debug(f"Parameters from market_data: symbol={symbol}, interval={interval}")
             
         # Use agent-specific timeframe if none provided
         interval = interval or self.default_interval
@@ -197,27 +197,27 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             price_data = None
             if market_data and isinstance(market_data, dict) and market_data.get("ohlcv"):
                 price_data = market_data.get("ohlcv")
-                logger.info(f"Using pre-fetched price data")
+                self.logger.debug(f"Using pre-fetched price data (length: {len(price_data)} points)")
             else:
                 # Fetch market data using data fetcher
                 if not self.data_fetcher:
-                    logger.error(f"Data fetcher missing in {self.name}. Class: {self.__class__.__name__}, Module: {__name__}")
+                    self.logger.error(f"Data fetcher missing in {self.name}. Class: {self.__class__.__name__}, Module: {__name__}")
                     # Create a mock data provider as a fallback
                     try:
                         from agents.data_providers.mock_data_provider import MockDataProvider
-                        logger.warning(f"Creating fallback MockDataProvider in {self.name}")
+                        self.logger.warning(f"Creating fallback MockDataProvider in {self.name}")
                         self.data_fetcher = MockDataProvider(symbol=symbol)
-                        logger.info(f"Successfully created MockDataProvider fallback")
+                        self.logger.info(f"Successfully created MockDataProvider fallback")
                     except Exception as e:
-                        logger.error(f"Failed to create fallback MockDataProvider: {str(e)}")
+                        self.logger.error(f"Failed to create fallback MockDataProvider: {str(e)}")
                         return self.build_error_response(
                             "DATA_FETCHER_MISSING",
                             "Data fetcher not provided and fallback creation failed"
                         )
                 else:
-                    logger.info(f"Using data fetcher in {self.name}: {type(self.data_fetcher).__name__}")
+                    self.logger.debug(f"Using data fetcher in {self.name}: {type(self.data_fetcher).__name__}")
                 
-                logger.info(f"Fetching price data for {symbol} at {interval} interval")
+                self.logger.info(f"Fetching price data for {symbol} at {interval} interval")
                 try:
                     limit = kwargs.get('limit', 100)  # Default to 100 candles
                     # Handle different symbol formats
@@ -228,13 +228,18 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                         try:
                             price_data = self.data_fetcher.fetch_ohlcv(fetch_symbol, interval, limit=limit)
                         except Exception as first_error:
-                            logger.warning(f"Failed to fetch with '{fetch_symbol}', trying without '/'")
-                            fetch_symbol = fetch_symbol.replace('/', '')
-                            price_data = self.data_fetcher.fetch_ohlcv(fetch_symbol, interval, limit=limit)
+                            self.logger.warning(f"Failed to fetch with '{fetch_symbol}', trying without '/'")
+                            # Check if fetch_symbol is a string before applying replace
+                            if isinstance(fetch_symbol, str):
+                                fetch_symbol = fetch_symbol.replace('/', '')
+                                price_data = self.data_fetcher.fetch_ohlcv(fetch_symbol, interval, limit=limit)
+                            else:
+                                # Handle the case where fetch_symbol is not a string (like a dict)
+                                raise ValueError(f"Symbol must be a string, got {type(fetch_symbol)}")
                     else:
                         price_data = self.data_fetcher.fetch_ohlcv(fetch_symbol, interval, limit=limit)
                 except Exception as e:
-                    logger.error(f"Error fetching price data: {str(e)}")
+                    self.logger.error(f"Error fetching price data: {str(e)}")
                     return self.build_error_response(
                         "PRICE_DATA_FETCH_ERROR",
                         f"Error fetching price data: {str(e)}"
@@ -288,13 +293,13 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                     price=current_price
                 )
             except Exception as e:
-                logger.warning(f"Failed to log decision: {str(e)}")
+                self.logger.warning(f"Failed to log decision: {str(e)}")
             
             # Return results
             return results
             
         except Exception as e:
-            logger.error(f"Error analyzing technical indicators: {str(e)}", exc_info=True)
+            self.logger.error(f"Error analyzing technical indicators: {str(e)}", exc_info=True)
             return self.build_error_response(
                 "TECHNICAL_ANALYSIS_ERROR",
                 f"Error analyzing technical indicators: {str(e)}"
@@ -328,7 +333,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                 missing_cols.remove('timestamp')
                 
             if missing_cols:
-                logger.warning(f"Missing columns in price data: {missing_cols}")
+                self.logger.warning(f"Missing columns in price data: {missing_cols}")
                 for col in missing_cols:
                     df[col] = None
                     
@@ -337,7 +342,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
             df = pd.DataFrame(price_data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
             
         else:
-            logger.error(f"Unsupported price data format: {type(price_data[0])}")
+            self.logger.error(f"Unsupported price data format: {type(price_data[0])}")
             return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         
         # Ensure numeric types for price and volume columns

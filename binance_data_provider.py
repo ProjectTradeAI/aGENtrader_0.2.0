@@ -305,6 +305,34 @@ class BinanceDataProvider:
         
         params = {"symbol": formatted_symbol}
         return self._make_request("/api/v3/ticker/24hr", params=params)
+        
+    def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
+        """
+        Fetch ticker data for a symbol (alias for compatibility with other data providers).
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTC/USDT")
+            
+        Returns:
+            Dictionary with ticker data including 'last' price
+        """
+        ticker_data = self.get_ticker(symbol)
+        
+        # Format to ensure compatibility with the expected interface
+        formatted_ticker = {
+            "symbol": symbol,
+            "last": float(ticker_data.get("lastPrice", 0)),
+            "bid": float(ticker_data.get("bidPrice", 0)),
+            "ask": float(ticker_data.get("askPrice", 0)),
+            "high": float(ticker_data.get("highPrice", 0)),
+            "low": float(ticker_data.get("lowPrice", 0)),
+            "volume": float(ticker_data.get("volume", 0)),
+            "change": float(ticker_data.get("priceChange", 0)),
+            "percentage": float(ticker_data.get("priceChangePercent", 0)),
+            "timestamp": ticker_data.get("closeTime", int(time.time() * 1000))
+        }
+        
+        return formatted_ticker
     
     def get_current_price(self, symbol: str) -> float:
         """

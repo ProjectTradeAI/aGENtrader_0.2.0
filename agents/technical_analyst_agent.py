@@ -56,6 +56,9 @@ except ImportError:
             'DataFrame': DataFrame,
             'to_numeric': lambda x, errors='raise': x,
         })
+
+# Import the centralized indicator module
+from utils.indicators import calculate_all_indicators
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
 
@@ -334,7 +337,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
     
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Calculate technical indicators on price data.
+        Calculate technical indicators on price data using the centralized indicators module.
         
         Args:
             df: DataFrame with OHLCV data
@@ -345,6 +348,12 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         if df.empty:
             return df
             
+        # Use the centralized calculate_all_indicators function to compute all indicators
+        indicators_result = calculate_all_indicators(df, self.indicator_config)
+        
+        # Store indicators directly in the dataframe for backward compatibility
+        # with existing code that might expect these columns
+        
         # Simple Moving Averages
         sma_short = self.indicator_config['sma_short']
         sma_long = self.indicator_config['sma_long']
@@ -357,49 +366,32 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         df[f'ema_{ema_short}'] = df['close'].ewm(span=ema_short, adjust=False).mean()
         df[f'ema_{ema_long}'] = df['close'].ewm(span=ema_long, adjust=False).mean()
         
-        # MACD
-        macd_fast = self.indicator_config['macd_fast']
-        macd_slow = self.indicator_config['macd_slow']
-        macd_signal = self.indicator_config['macd_signal']
+        # MACD (already calculated in indicators_result, just store values)
+        if 'macd' in indicators_result:
+            df['macd'] = indicators_result['macd']
+            df['macd_signal'] = indicators_result['macd_signal']
+            df['macd_histogram'] = indicators_result['macd_histogram']
         
-        df['macd_fast'] = df['close'].ewm(span=macd_fast, adjust=False).mean()
-        df['macd_slow'] = df['close'].ewm(span=macd_slow, adjust=False).mean()
-        df['macd'] = df['macd_fast'] - df['macd_slow']
-        df['macd_signal'] = df['macd'].ewm(span=macd_signal, adjust=False).mean()
-        df['macd_histogram'] = df['macd'] - df['macd_signal']
-        
-        # Relative Strength Index (RSI)
-        rsi_period = self.indicator_config['rsi_period']
-        delta = df['close'].diff()
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(window=rsi_period).mean()
-        avg_loss = loss.rolling(window=rsi_period).mean()
-        
-        # Avoid division by zero
-        rs = avg_gain / avg_loss.replace(0, 1e-9)
-        df['rsi'] = 100 - (100 / (1 + rs))
+        # RSI
+        if 'rsi' in indicators_result:
+            df['rsi'] = indicators_result['rsi']
         
         # Bollinger Bands
-        bb_period = self.indicator_config['bollinger_period']
-        bb_std = self.indicator_config['bollinger_std']
+        if all(k in indicators_result for k in ['bb_upper', 'bb_middle', 'bb_lower']):
+            df['bb_middle'] = indicators_result['bb_middle']
+            df['bb_upper'] = indicators_result['bb_upper']
+            df['bb_lower'] = indicators_result['bb_lower']
+            df['bb_percent_b'] = indicators_result['bb_percent_b']
+            df['bb_bandwidth'] = indicators_result['bb_bandwidth']
         
-        df['bb_middle'] = df['close'].rolling(window=bb_period).mean()
-        df['bb_std'] = df['close'].rolling(window=bb_period).std()
-        df['bb_upper'] = df['bb_middle'] + (df['bb_std'] * bb_std)
-        df['bb_lower'] = df['bb_middle'] - (df['bb_std'] * bb_std)
-        
-        # Average True Range (ATR)
-        atr_period = self.indicator_config['atr_period']
-        df['tr1'] = abs(df['high'] - df['low'])
-        df['tr2'] = abs(df['high'] - df['close'].shift())
-        df['tr3'] = abs(df['low'] - df['close'].shift())
-        df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
-        df['atr'] = df['tr'].rolling(window=atr_period).mean()
-        
-        # Calculate percent change for volatility
-        df['pct_change'] = df['close'].pct_change()
-        df['volatility'] = df['pct_change'].rolling(window=20).std() * np.sqrt(365)
+        # ATR
+        if 'atr' in indicators_result:
+            df['atr'] = indicators_result['atr']
+            
+        # Store all indicator results in a dictionary that we'll attach to the DataFrame
+        # Since we can't modify the DataFrame directly with new attributes, we'll use a separate variable
+        # that will be accessed in the _analyze_indicators method
+        self._cached_indicator_results = indicators_result
         
         return df
     
@@ -422,133 +414,269 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                 "volatility": None
             }
             
-        # Get most recent values
-        current = df.iloc[-1]
-        previous = df.iloc[-2]
-        
-        # Extract key indicator values
-        sma_short = self.indicator_config['sma_short']
-        sma_long = self.indicator_config['sma_long']
-        
-        current_price = current['close']
-        sma_short_value = current[f'sma_{sma_short}']
-        sma_long_value = current[f'sma_{sma_long}']
-        
-        rsi = current['rsi']
-        macd = current['macd']
-        macd_signal = current['macd_signal']
-        macd_histogram = current['macd_histogram']
-        
-        # Determine trend based on moving averages
-        if sma_short_value > sma_long_value:
-            trend = "BULLISH"
-        elif sma_short_value < sma_long_value:
-            trend = "BEARISH"
-        else:
+        # Check if we have indicator results from the centralized calculation
+        if hasattr(self, '_cached_indicator_results') and self._cached_indicator_results:
+            # We already have calculated indicators from the indicators module
+            indicators = self._cached_indicator_results
+            
+            # Get most recent values from the dataframe
+            current = df.iloc[-1]
+            current_price = current['close']
+            
+            # Extract trend information
             trend = "NEUTRAL"
-            
-        # Determine trend strength (0-100)
-        if trend == "BULLISH":
-            # Higher values mean stronger bullish trend
-            strength = min(100, max(0, int(50 + 50 * ((sma_short_value / sma_long_value) - 1) * 10)))
-        elif trend == "BEARISH":
-            # Higher values mean stronger bearish trend
-            strength = min(100, max(0, int(50 + 50 * (1 - (sma_short_value / sma_long_value)) * 10)))
-        else:
-            strength = 50
-            
-        # Adjust strength based on RSI
-        if rsi > 70:
-            # Overbought
-            if trend == "BULLISH":
-                strength = max(strength - 20, 0)  # Reduce bullish strength
-            elif trend == "BEARISH":
-                strength = min(strength + 10, 100)  # Increase bearish strength
-        elif rsi < 30:
-            # Oversold
-            if trend == "BEARISH":
-                strength = max(strength - 20, 0)  # Reduce bearish strength
-            elif trend == "BULLISH":
-                strength = min(strength + 10, 100)  # Increase bullish strength
+            if indicators.get('sma_trend') == 'bullish' and indicators.get('ema_trend') == 'bullish':
+                trend = "BULLISH"
+            elif indicators.get('sma_trend') == 'bearish' and indicators.get('ema_trend') == 'bearish':
+                trend = "BEARISH"
+            elif indicators.get('sma_trend') == 'bullish' or indicators.get('ema_trend') == 'bullish':
+                # When moving averages disagree, use MACD as tiebreaker
+                if indicators.get('macd_trend') == 'bullish':
+                    trend = "BULLISH"
+            elif indicators.get('sma_trend') == 'bearish' or indicators.get('ema_trend') == 'bearish':
+                # When moving averages disagree, use MACD as tiebreaker
+                if indicators.get('macd_trend') == 'bearish':
+                    trend = "BEARISH"
                 
-        # Adjust strength based on MACD
-        if macd > 0 and macd_histogram > 0:
-            # Bullish MACD
-            if trend == "BULLISH":
-                strength = min(strength + 15, 100)
-            elif trend == "BEARISH":
-                strength = max(strength - 10, 0)
-        elif macd < 0 and macd_histogram < 0:
-            # Bearish MACD
-            if trend == "BEARISH":
-                strength = min(strength + 15, 100)
-            elif trend == "BULLISH":
-                strength = max(strength - 10, 0)
+            # Calculate trend strength based on various factors
+            strength = 50  # Neutral starting point
+            
+            # Factor 1: Relative position of fast MA to slow MA
+            sma_short = indicators.get('sma_short', 0)
+            sma_long = indicators.get('sma_long', 0)
+            
+            if sma_long > 0:
+                # Measure the percentage difference between short and long MAs
+                ma_diff_pct = ((sma_short / sma_long) - 1) * 100
                 
-        # Find support and resistance levels
-        lookback = self.indicator_config['support_resistance_lookback']
-        recent_df = df.tail(lookback)
-        
-        # Simple method: use recent lows as support and highs as resistance
-        support = recent_df['low'].min()
-        resistance = recent_df['high'].max()
-        
-        # Adjust to find more relevant levels
-        # Find the highest low in the recent lookback period
-        recent_lows = recent_df[recent_df['low'] < current_price]['low']
-        if not recent_lows.empty:
-            support = recent_lows.max()
+                if trend == "BULLISH":
+                    # In bullish trend, higher difference means stronger trend
+                    strength += min(25, max(0, int(ma_diff_pct * 5)))
+                elif trend == "BEARISH":
+                    # In bearish trend, lower (more negative) difference means stronger trend
+                    strength += min(25, max(0, int(abs(ma_diff_pct) * 5)))
             
-        # Find the lowest high in the recent lookback period
-        recent_highs = recent_df[recent_df['high'] > current_price]['high']
-        if not recent_highs.empty:
-            resistance = recent_highs.min()
+            # Factor 2: RSI confirmation/contradiction
+            rsi = indicators.get('rsi', 50)
+            if trend == "BULLISH":
+                if rsi > 60:  # Strong RSI in bullish trend
+                    strength += 10
+                elif rsi < 30:  # Oversold in bullish trend (contradiction)
+                    strength -= 10
+            elif trend == "BEARISH":
+                if rsi < 40:  # Weak RSI in bearish trend
+                    strength += 10
+                elif rsi > 70:  # Overbought in bearish trend (contradiction)
+                    strength -= 10
             
-        # Calculate volatility score (0-100)
-        volatility = min(100, int(current['volatility'] * 100))
-        
-        # Bollinger Band width as percentage of price
-        bb_width = (current['bb_upper'] - current['bb_lower']) / current['close'] * 100
-        
-        # ATR as percentage of price
-        atr_pct = current['atr'] / current['close'] * 100
-        
-        # Determine if price is at significant BB level
-        bb_position = None
-        if current['close'] >= current['bb_upper']:
-            bb_position = "UPPER"
-        elif current['close'] <= current['bb_lower']:
-            bb_position = "LOWER"
+            # Factor 3: MACD confirmation
+            macd = indicators.get('macd', 0)
+            macd_signal = indicators.get('macd_signal', 0)
+            macd_hist = indicators.get('macd_histogram', 0)
+            
+            # MACD above zero line in bullish trend or below in bearish trend
+            if (trend == "BULLISH" and macd > 0) or (trend == "BEARISH" and macd < 0):
+                strength += 10
+            
+            # MACD crossover recently occurred (indicated by 'macd_crossover' in indicators)
+            if indicators.get('macd_crossover') == 'bullish' and trend == "BULLISH":
+                strength += 15
+            elif indicators.get('macd_crossover') == 'bearish' and trend == "BEARISH":
+                strength += 15
+            
+            # Ensure strength is within valid range
+            strength = min(100, max(0, strength))
+            
+            # Calculate support and resistance levels
+            lookback = self.indicator_config.get('support_resistance_lookback', 30)
+            recent_df = df.tail(lookback)
+            
+            # Simple method: use recent lows as support and highs as resistance
+            support = recent_df['low'].min()
+            resistance = recent_df['high'].max()
+            
+            # Adjust to find more relevant levels
+            # Find the highest low in the recent lookback period
+            recent_lows = recent_df[recent_df['low'] < current_price]['low']
+            if not recent_lows.empty:
+                support = recent_lows.max()
+                
+            # Find the lowest high in the recent lookback period
+            recent_highs = recent_df[recent_df['high'] > current_price]['high']
+            if not recent_highs.empty:
+                resistance = recent_highs.min()
+            
+            # Determine Bollinger Band position
+            bb_position = indicators.get('bb_signal', 'MIDDLE')
+            if bb_position == 'overbought':
+                bb_position = "UPPER"
+            elif bb_position == 'oversold':
+                bb_position = "LOWER"
+            elif bb_position == 'high':
+                bb_position = "UPPER_80%"
+            elif bb_position == 'low':
+                bb_position = "LOWER_20%"
+            
+            # Prepare the result
+            result = {
+                "trend": trend,
+                "strength": strength,
+                "current_price": current_price,
+                "support": support,
+                "resistance": resistance,
+                "bb_position": bb_position,
+            }
+            
+            # Add all calculated indicators to the result
+            # Include only scalars, not Series objects
+            for key, value in indicators.items():
+                if not isinstance(value, pd.Series) and key not in result and key != 'signal_summary':
+                    result[key] = value
+            
+            # Add signal summary statistics
+            if 'signal_summary' in indicators:
+                result['bullish_signals'] = indicators['signal_summary'].get('bullish', 0)
+                result['bearish_signals'] = indicators['signal_summary'].get('bearish', 0)
+                result['neutral_signals'] = indicators['signal_summary'].get('neutral', 0)
+            
+            return result
+            
         else:
-            # Calculate relative position between middle and upper/lower bands
-            middle_to_price = current['close'] - current['bb_middle']
-            if middle_to_price > 0:
-                upper_range = current['bb_upper'] - current['bb_middle']
-                rel_position = middle_to_price / upper_range if upper_range > 0 else 0
-                bb_position = f"UPPER_{int(rel_position * 100)}%"
+            # Fallback to traditional calculation if the centralized indicators are not available
+            # Get most recent values
+            current = df.iloc[-1]
+            previous = df.iloc[-2]
+            
+            # Extract key indicator values
+            sma_short = self.indicator_config['sma_short']
+            sma_long = self.indicator_config['sma_long']
+            
+            current_price = current['close']
+            sma_short_value = current[f'sma_{sma_short}']
+            sma_long_value = current[f'sma_{sma_long}']
+            
+            rsi = current['rsi']
+            macd = current['macd']
+            macd_signal = current['macd_signal']
+            macd_histogram = current['macd_histogram']
+            
+            # Determine trend based on moving averages
+            if sma_short_value > sma_long_value:
+                trend = "BULLISH"
+            elif sma_short_value < sma_long_value:
+                trend = "BEARISH"
             else:
-                lower_range = current['bb_middle'] - current['bb_lower']
-                rel_position = abs(middle_to_price) / lower_range if lower_range > 0 else 0
-                bb_position = f"LOWER_{int(rel_position * 100)}%"
-        
-        return {
-            "trend": trend,
-            "strength": strength,
-            "current_price": current_price,
-            "sma_short": sma_short_value,
-            "sma_long": sma_long_value,
-            "rsi": rsi,
-            "macd": macd,
-            "macd_signal": macd_signal,
-            "macd_histogram": macd_histogram,
-            "support": support,
-            "resistance": resistance,
-            "volatility": volatility,
-            "atr": current['atr'],
-            "atr_pct": atr_pct,
-            "bb_position": bb_position,
-            "bb_width": bb_width
-        }
+                trend = "NEUTRAL"
+                
+            # Determine trend strength (0-100)
+            if trend == "BULLISH":
+                # Higher values mean stronger bullish trend
+                strength = min(100, max(0, int(50 + 50 * ((sma_short_value / sma_long_value) - 1) * 10)))
+            elif trend == "BEARISH":
+                # Higher values mean stronger bearish trend
+                strength = min(100, max(0, int(50 + 50 * (1 - (sma_short_value / sma_long_value)) * 10)))
+            else:
+                strength = 50
+                
+            # Adjust strength based on RSI
+            if rsi > 70:
+                # Overbought
+                if trend == "BULLISH":
+                    strength = max(strength - 20, 0)  # Reduce bullish strength
+                elif trend == "BEARISH":
+                    strength = min(strength + 10, 100)  # Increase bearish strength
+            elif rsi < 30:
+                # Oversold
+                if trend == "BEARISH":
+                    strength = max(strength - 20, 0)  # Reduce bearish strength
+                elif trend == "BULLISH":
+                    strength = min(strength + 10, 100)  # Increase bullish strength
+                    
+            # Adjust strength based on MACD
+            if macd > 0 and macd_histogram > 0:
+                # Bullish MACD
+                if trend == "BULLISH":
+                    strength = min(strength + 15, 100)
+                elif trend == "BEARISH":
+                    strength = max(strength - 10, 0)
+            elif macd < 0 and macd_histogram < 0:
+                # Bearish MACD
+                if trend == "BEARISH":
+                    strength = min(strength + 15, 100)
+                elif trend == "BULLISH":
+                    strength = max(strength - 10, 0)
+                    
+            # Find support and resistance levels
+            lookback = self.indicator_config['support_resistance_lookback']
+            recent_df = df.tail(lookback)
+            
+            # Simple method: use recent lows as support and highs as resistance
+            support = recent_df['low'].min()
+            resistance = recent_df['high'].max()
+            
+            # Adjust to find more relevant levels
+            # Find the highest low in the recent lookback period
+            recent_lows = recent_df[recent_df['low'] < current_price]['low']
+            if not recent_lows.empty:
+                support = recent_lows.max()
+                
+            # Find the lowest high in the recent lookback period
+            recent_highs = recent_df[recent_df['high'] > current_price]['high']
+            if not recent_highs.empty:
+                resistance = recent_highs.min()
+                
+            # Calculate volatility score (0-100)
+            volatility = min(100, int(current.get('volatility', 0) * 100))
+            
+            # Bollinger Band width as percentage of price
+            if all(key in current for key in ['bb_upper', 'bb_lower', 'close']):
+                bb_width = (current['bb_upper'] - current['bb_lower']) / current['close'] * 100
+            else:
+                bb_width = None
+            
+            # ATR as percentage of price
+            if all(key in current for key in ['atr', 'close']) and current['close'] > 0:
+                atr_pct = current['atr'] / current['close'] * 100
+            else:
+                atr_pct = None
+            
+            # Determine if price is at significant BB level
+            bb_position = None
+            if all(key in current for key in ['close', 'bb_upper', 'bb_lower', 'bb_middle']):
+                if current['close'] >= current['bb_upper']:
+                    bb_position = "UPPER"
+                elif current['close'] <= current['bb_lower']:
+                    bb_position = "LOWER"
+                else:
+                    # Calculate relative position between middle and upper/lower bands
+                    middle_to_price = current['close'] - current['bb_middle']
+                    if middle_to_price > 0:
+                        upper_range = current['bb_upper'] - current['bb_middle']
+                        rel_position = middle_to_price / upper_range if upper_range > 0 else 0
+                        bb_position = f"UPPER_{int(rel_position * 100)}%"
+                    else:
+                        lower_range = current['bb_middle'] - current['bb_lower']
+                        rel_position = abs(middle_to_price) / lower_range if lower_range > 0 else 0
+                        bb_position = f"LOWER_{int(rel_position * 100)}%"
+            
+            return {
+                "trend": trend,
+                "strength": strength,
+                "current_price": current_price,
+                "sma_short": sma_short_value,
+                "sma_long": sma_long_value,
+                "rsi": rsi,
+                "macd": macd,
+                "macd_signal": macd_signal,
+                "macd_histogram": macd_histogram,
+                "support": support,
+                "resistance": resistance,
+                "volatility": volatility,
+                "atr": current.get('atr'),
+                "atr_pct": atr_pct,
+                "bb_position": bb_position,
+                "bb_width": bb_width
+            }
     
     def _generate_signal(self, metrics: Dict[str, Any], df: pd.DataFrame) -> Tuple[str, int, str]:
         """
@@ -569,32 +697,64 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         macd_histogram = metrics.get('macd_histogram', 0)
         bb_position = metrics.get('bb_position', None)
         
+        # Check if we have signal summary data from the indicators module
+        bullish_signals = metrics.get('bullish_signals', 0)
+        bearish_signals = metrics.get('bearish_signals', 0)
+        
         # Default to neutral
         signal = "NEUTRAL"
         confidence = 50
         explanation = "Technical indicators show balanced conditions"
         
-        # Generate signal based on trend strength
-        if trend == "BULLISH" and strength > 70:
-            signal = "BUY"
-            confidence = self.high_confidence
-            explanation = f"Strong bullish trend with strength {strength}/100"
-        elif trend == "BEARISH" and strength > 70:
-            signal = "SELL"
-            confidence = self.high_confidence
-            explanation = f"Strong bearish trend with strength {strength}/100"
-        elif trend == "BULLISH" and strength > 50:
-            signal = "BUY"
-            confidence = self.medium_confidence
-            explanation = f"Moderate bullish trend with strength {strength}/100"
-        elif trend == "BEARISH" and strength > 50:
-            signal = "SELL"
-            confidence = self.medium_confidence
-            explanation = f"Moderate bearish trend with strength {strength}/100"
+        # Generate signal based on signal summary if available
+        if bullish_signals > 0 or bearish_signals > 0:
+            # Calculate the total number of signals
+            total_signals = bullish_signals + bearish_signals + metrics.get('neutral_signals', 0)
+            total_signals = max(1, total_signals)  # Avoid division by zero
+            
+            # Calculate the percentage of bullish vs bearish signals
+            bullish_pct = (bullish_signals / total_signals) * 100
+            bearish_pct = (bearish_signals / total_signals) * 100
+            
+            # Determine signal based on the dominant sentiment
+            if bullish_pct > bearish_pct and bullish_pct > 50:
+                signal = "BUY"
+                # Scale confidence based on signal percentage and trend strength
+                confidence = min(self.high_confidence, int(bullish_pct * 0.8 + strength * 0.2))
+                explanation = f"Bullish signals ({bullish_pct:.1f}%) with trend strength {strength}/100"
+            elif bearish_pct > bullish_pct and bearish_pct > 50:
+                signal = "SELL"
+                # Scale confidence based on signal percentage and trend strength
+                confidence = min(self.high_confidence, int(bearish_pct * 0.8 + strength * 0.2))
+                explanation = f"Bearish signals ({bearish_pct:.1f}%) with trend strength {strength}/100"
+            else:
+                # If signals are mixed or neutral
+                signal = "NEUTRAL"
+                confidence = self.low_confidence + int((max(bullish_pct, bearish_pct) - 50) * 0.6)
+                explanation = f"Mixed signals with {bullish_pct:.1f}% bullish and {bearish_pct:.1f}% bearish"
         else:
-            signal = "NEUTRAL"
-            confidence = self.low_confidence
-            explanation = f"Neutral or weak trend with strength {strength}/100"
+            # Fall back to the traditional trend-based signal approach
+            # Generate signal based on trend strength
+            if trend == "BULLISH" and strength > 70:
+                signal = "BUY"
+                confidence = self.high_confidence
+                explanation = f"Strong bullish trend with strength {strength}/100"
+            elif trend == "BEARISH" and strength > 70:
+                signal = "SELL"
+                confidence = self.high_confidence
+                explanation = f"Strong bearish trend with strength {strength}/100"
+            elif trend == "BULLISH" and strength > 50:
+                signal = "BUY"
+                confidence = self.medium_confidence
+                explanation = f"Moderate bullish trend with strength {strength}/100"
+            elif trend == "BEARISH" and strength > 50:
+                signal = "SELL"
+                confidence = self.medium_confidence
+                explanation = f"Moderate bearish trend with strength {strength}/100"
+            else:
+                signal = "NEUTRAL"
+                confidence = self.low_confidence
+                explanation = f"Neutral or weak trend with strength {strength}/100"
             
         # Adjust based on RSI
         if rsi > 70:
@@ -620,16 +780,13 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                 confidence = self.medium_confidence
                 explanation = f"Oversold conditions with RSI at {rsi:.1f}"
                 
-        # Adjust based on MACD crossover
-        if df is not None and len(df) > 2:
-            prev = df.iloc[-2]
-            curr = df.iloc[-1]
-            
-            # Check for MACD crossover
-            macd_cross_up = prev['macd'] < prev['macd_signal'] and curr['macd'] > curr['macd_signal']
-            macd_cross_down = prev['macd'] > prev['macd_signal'] and curr['macd'] < curr['macd_signal']
-            
-            if macd_cross_up:
+        # Check for MACD crossover
+        # First see if we have it in the metrics (from indicators module)
+        macd_crossover = metrics.get('macd_crossover')
+        
+        if macd_crossover:
+            # Use the pre-calculated crossover from the indicators module
+            if macd_crossover == 'bullish':
                 if signal == "BUY":
                     confidence = min(95, confidence + 15)
                     explanation += ", with recent bullish MACD crossover"
@@ -640,7 +797,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                 elif signal == "SELL":
                     confidence = max(self.low_confidence, confidence - 10)
                     explanation += ", but there's a conflicting bullish MACD crossover"
-            elif macd_cross_down:
+            elif macd_crossover == 'bearish':
                 if signal == "SELL":
                     confidence = min(95, confidence + 15)
                     explanation += ", with recent bearish MACD crossover"
@@ -652,22 +809,96 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
                     confidence = max(self.low_confidence, confidence - 10)
                     explanation += ", but there's a conflicting bearish MACD crossover"
                     
-        # Adjust based on Bollinger Bands
-        if bb_position == "UPPER":
-            if signal == "BUY":
-                confidence = max(self.low_confidence, confidence - 15)
-                explanation += ", but price is at upper Bollinger Band, suggesting caution"
-            elif signal == "SELL":
-                confidence = min(95, confidence + 10)
-                explanation += ", confirmed by price at upper Bollinger Band"
-        elif bb_position == "LOWER":
-            if signal == "SELL":
-                confidence = max(self.low_confidence, confidence - 15)
-                explanation += ", but price is at lower Bollinger Band, suggesting caution"
-            elif signal == "BUY":
-                confidence = min(95, confidence + 10)
-                explanation += ", confirmed by price at lower Bollinger Band"
+        # Alternatively, calculate the crossover manually if not available from indicators
+        elif df is not None and len(df) > 2:
+            prev = df.iloc[-2]
+            curr = df.iloc[-1]
+            
+            # Check for MACD crossover
+            if 'macd' in prev and 'macd_signal' in prev and 'macd' in curr and 'macd_signal' in curr:
+                macd_cross_up = prev['macd'] < prev['macd_signal'] and curr['macd'] > curr['macd_signal']
+                macd_cross_down = prev['macd'] > prev['macd_signal'] and curr['macd'] < curr['macd_signal']
                 
+                if macd_cross_up:
+                    if signal == "BUY":
+                        confidence = min(95, confidence + 15)
+                        explanation += ", with recent bullish MACD crossover"
+                    elif signal == "NEUTRAL":
+                        signal = "BUY"
+                        confidence = self.medium_confidence
+                        explanation = "Bullish MACD crossover detected"
+                    elif signal == "SELL":
+                        confidence = max(self.low_confidence, confidence - 10)
+                        explanation += ", but there's a conflicting bullish MACD crossover"
+                elif macd_cross_down:
+                    if signal == "SELL":
+                        confidence = min(95, confidence + 15)
+                        explanation += ", with recent bearish MACD crossover"
+                    elif signal == "NEUTRAL":
+                        signal = "SELL"
+                        confidence = self.medium_confidence
+                        explanation = "Bearish MACD crossover detected"
+                    elif signal == "BUY":
+                        confidence = max(self.low_confidence, confidence - 10)
+                        explanation += ", but there's a conflicting bearish MACD crossover"
+        
+        # Adjust based on Bollinger Bands
+        if bb_position:
+            if isinstance(bb_position, str):  # Ensure bb_position is a string
+                if bb_position == "UPPER" or bb_position.startswith("UPPER_"):
+                    if signal == "BUY":
+                        confidence = max(self.low_confidence, confidence - 15)
+                        explanation += ", but price is at upper Bollinger Band, suggesting caution"
+                    elif signal == "SELL":
+                        confidence = min(95, confidence + 10)
+                        explanation += ", confirmed by price at upper Bollinger Band"
+                elif bb_position == "LOWER" or bb_position.startswith("LOWER_"):
+                    if signal == "SELL":
+                        confidence = max(self.low_confidence, confidence - 15)
+                        explanation += ", but price is at lower Bollinger Band, suggesting caution"
+                    elif signal == "BUY":
+                        confidence = min(95, confidence + 10)
+                        explanation += ", confirmed by price at lower Bollinger Band"
+        
+        # Check for special indicator patterns
+        # 1. Donchian Channel breakout
+        donchian_breakout = metrics.get('donchian_breakout')
+        if donchian_breakout:
+            if donchian_breakout == 1:  # Bullish breakout
+                if signal == "BUY":
+                    confidence = min(95, confidence + 15)
+                    explanation += ", with upper Donchian Channel breakout"
+                elif signal == "NEUTRAL":
+                    signal = "BUY"
+                    confidence = self.medium_confidence
+                    explanation = "Upper Donchian Channel breakout detected"
+            elif donchian_breakout == -1:  # Bearish breakout
+                if signal == "SELL":
+                    confidence = min(95, confidence + 15)
+                    explanation += ", with lower Donchian Channel breakout"
+                elif signal == "NEUTRAL":
+                    signal = "SELL"
+                    confidence = self.medium_confidence
+                    explanation = "Lower Donchian Channel breakout detected"
+        
+        # 2. ADX trend strength if available
+        adx = metrics.get('adx')
+        adx_trend = metrics.get('adx_trend')
+        adx_strength = metrics.get('adx_strength')
+        
+        if adx and adx_trend and adx_strength:
+            # Strong trend confirmation
+            if adx > 30:  # ADX above 30 indicates a strong trend
+                if (adx_trend == 'bullish' and signal == "BUY") or (adx_trend == 'bearish' and signal == "SELL"):
+                    confidence = min(95, confidence + 10)
+                    explanation += f", confirmed by strong {adx_trend} ADX at {adx:.1f}"
+        
+        # Cap confidence at a reasonable range
+        confidence = min(95, max(self.low_confidence, confidence))
+        
+        # Log the signal generation
+        logger.info(f"Generated {signal} signal for {metrics.get('current_price')} with {confidence}% confidence: {explanation}")
+        
         return signal, confidence, explanation
         
     def _fetch_market_data(self, symbol: str, **kwargs) -> Dict[str, Any]:

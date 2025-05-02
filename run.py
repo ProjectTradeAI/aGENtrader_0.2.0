@@ -518,7 +518,21 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
         
         # Initialize the DecisionAgent and make a decision
         decision_agent = DecisionAgent()
-        decision = decision_agent.make_decision(agent_analyses, symbol=symbol, interval=interval)
+        
+        # Pass data provider to the decision agent for any follow-up analysis
+        # by wrapping symbol and interval in market_data format for compatibility
+        market_data = {
+            "symbol": symbol,
+            "interval": interval,
+            "data_provider": data_provider
+        }
+        
+        decision = decision_agent.make_decision(
+            agent_analyses=agent_analyses, 
+            symbol=symbol, 
+            interval=interval, 
+            market_data=market_data
+        )
         
         # Create trade proposal based on the integrated decision
         confidence = decision.get("confidence", 0)

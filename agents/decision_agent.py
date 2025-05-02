@@ -190,7 +190,8 @@ class DecisionAgent:
                      agent_analyses: Dict[str, Any], 
                      symbol: Optional[str] = None,
                      interval: Optional[str] = None,
-                     agent_weights_override: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+                     agent_weights_override: Optional[Dict[str, float]] = None,
+                     market_data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Make a trading decision based on agent analyses.
         
@@ -199,6 +200,7 @@ class DecisionAgent:
             symbol: Trading symbol (default from config)
             interval: Time interval (default from config)
             agent_weights_override: Optional dictionary to override default agent weights
+            market_data: Optional dictionary containing additional market data including data_provider
             
         Returns:
             Dictionary with trading decision

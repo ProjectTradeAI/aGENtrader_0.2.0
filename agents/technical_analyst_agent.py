@@ -155,6 +155,22 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         # Handle parameter flexibility with the new signature
         self.logger.debug(f"TechnicalAnalystAgent analyze called with symbol type: {type(symbol)}, market_data type: {type(market_data)}")
         
+        # Special case: If symbol is a dictionary, it might actually contain market data
+        # This happens when the agent is called with a dict as the first parameter
+        if isinstance(symbol, dict) and 'symbol' in symbol:
+            self.logger.info(f"Symbol parameter is a dictionary containing market data")
+            # Move the contents from symbol to market_data
+            if market_data is None:
+                market_data = symbol
+            else:
+                # Merge the data, prioritizing the original market_data
+                market_data = {**symbol, **market_data}
+            # Extract the actual symbol string
+            symbol = symbol.get('symbol')
+            # Also extract interval if available
+            if not interval and 'interval' in market_data:
+                interval = market_data.get('interval')
+            
         # Extract data provider from market_data if available
         data_provider = None
         if market_data and isinstance(market_data, dict):

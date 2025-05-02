@@ -450,8 +450,14 @@ class AgentTestHarness:
         
         # If agent uses an LLM client, modify temperature
         if hasattr(agent, 'llm_client') and agent.llm_client:
-            logger.info(f"{Fore.CYAN}Setting LLM temperature to {self.temperature}{Style.RESET_ALL}")
-            agent.llm_client.temperature = self.temperature
+            # For SentimentAnalystAgent and SentimentAggregatorAgent with randomized temperature
+            if ('SentimentAnalystAgent' in self.agent_name or 'SentimentAggregatorAgent' in self.agent_name) and self.temperature == -1:
+                # Let the agent use its own dynamic temperature (0.6-0.9 range)
+                logger.info(f"{Fore.CYAN}Using agent's dynamic temperature for {self.agent_name}{Style.RESET_ALL}")
+            else:
+                # Set fixed temperature from test parameters
+                logger.info(f"{Fore.CYAN}Setting LLM temperature to {self.temperature}{Style.RESET_ALL}")
+                agent.llm_client.temperature = self.temperature
         
         return agent
     
@@ -928,6 +934,29 @@ class AgentTestHarness:
             reasoning = analysis['analysis'].get('reasoning', None)
             if reasoning is None:
                 reasoning = analysis['analysis'].get('reason', 'No reasoning provided')
+                
+            # Display metadata for SentimentAnalystAgent or SentimentAggregatorAgent
+            if result['agent'] == 'SentimentAnalystAgent' or result['agent'] == 'SentimentAggregatorAgent':
+                # Check for and display request_id and timestamp if available
+                request_id = analysis['analysis'].get('request_id', None)
+                timestamp = analysis['analysis'].get('timestamp', None)
+                actual_temp = analysis['analysis'].get('actual_temperature', None)
+                
+                print("\n" + "-"*40)
+                print(f"{Fore.YELLOW}Sentiment Agent Metadata:{Style.RESET_ALL}")
+                if request_id:
+                    print(f"{Fore.YELLOW}Request ID:     {request_id}{Style.RESET_ALL}")
+                if timestamp:
+                    print(f"{Fore.YELLOW}Timestamp:      {timestamp}{Style.RESET_ALL}")
+                if actual_temp is not None:
+                    print(f"{Fore.YELLOW}Actual Temp:    {actual_temp}{Style.RESET_ALL}")
+                
+                # Check for additional metadata
+                sentiment_score = analysis['analysis'].get('sentiment_score', None)
+                if sentiment_score is not None:
+                    print(f"{Fore.YELLOW}Sentiment Score: {sentiment_score}{Style.RESET_ALL}")
+                
+                print("-"*40)
         else:
             # For agents that return results at the top level
             # Special handling for DecisionAgent
@@ -1448,15 +1477,38 @@ def run_interactive_mode():
     args.data_source = "mock" if data_source.startswith("y") else "live"
     
     # Test settings
-    temp = input(f"\n{Fore.YELLOW}LLM temperature (0.0-1.0, default: 0.0): {Style.RESET_ALL}")
-    try:
-        args.temperature = float(temp) if temp else 0.0
-        if args.temperature < 0.0 or args.temperature > 1.0:
-            print(f"{Fore.RED}Invalid temperature. Using 0.0.{Style.RESET_ALL}")
+    # Check if we're using a sentiment agent
+    is_sentiment_agent = args.agent == 'SentimentAnalystAgent' or args.agent == 'SentimentAggregatorAgent'
+    
+    # Ask about dynamic temperature for sentiment agents
+    if is_sentiment_agent:
+        dynamic_temp = input(f"\n{Fore.YELLOW}Use dynamic temperature randomization for sentiment agent? (y/n, default: n): {Style.RESET_ALL}").lower()
+        args.dynamic_temp = dynamic_temp.startswith('y')
+        
+        if args.dynamic_temp:
+            print(f"{Fore.CYAN}Using dynamic temperature (0.6-0.9 range) for {args.agent}{Style.RESET_ALL}")
+            args.temperature = -1
+        else:
+            temp = input(f"\n{Fore.YELLOW}LLM temperature (0.0-1.0, default: 0.0): {Style.RESET_ALL}")
+            try:
+                args.temperature = float(temp) if temp else 0.0
+                if args.temperature < 0.0 or args.temperature > 1.0:
+                    print(f"{Fore.RED}Invalid temperature. Using 0.0.{Style.RESET_ALL}")
+                    args.temperature = 0.0
+            except ValueError:
+                print(f"{Fore.RED}Invalid input. Using temperature 0.0.{Style.RESET_ALL}")
+                args.temperature = 0.0
+    else:
+        # For non-sentiment agents, just ask for temperature
+        temp = input(f"\n{Fore.YELLOW}LLM temperature (0.0-1.0, default: 0.0): {Style.RESET_ALL}")
+        try:
+            args.temperature = float(temp) if temp else 0.0
+            if args.temperature < 0.0 or args.temperature > 1.0:
+                print(f"{Fore.RED}Invalid temperature. Using 0.0.{Style.RESET_ALL}")
+                args.temperature = 0.0
+        except ValueError:
+            print(f"{Fore.RED}Invalid input. Using temperature 0.0.{Style.RESET_ALL}")
             args.temperature = 0.0
-    except ValueError:
-        print(f"{Fore.RED}Invalid input. Using temperature 0.0.{Style.RESET_ALL}")
-        args.temperature = 0.0
         
     # Ask about temperature comparison
     compare_temps = input(f"\n{Fore.YELLOW}Compare results with different temperatures? (y/n, default: n): {Style.RESET_ALL}").lower()
@@ -1490,7 +1542,13 @@ def run_interactive_mode():
     print(f"Symbol:      {args.symbol}")
     print(f"Interval:    {args.interval}")
     print(f"Data Source: {'Mock' if args.data_source == 'mock' else 'Live'}")
-    print(f"Temperature: {args.temperature}")
+    
+    # Show temperature or dynamic temperature
+    if hasattr(args, 'dynamic_temp') and args.dynamic_temp:
+        print(f"Temperature: {Fore.CYAN}Dynamic (0.6-0.9 range){Style.RESET_ALL}")
+    else:
+        print(f"Temperature: {args.temperature}")
+        
     if args.compare_temps:
         print(f"Temp Range:  {args.temp_range}")
     print(f"Iterations:  {args.repeat}")
@@ -1530,7 +1588,7 @@ Examples:
   python tests/test_agent_individual.py --list
   python tests/test_agent_individual.py --quick
   python tests/test_agent_individual.py --agent TechnicalAnalystAgent --symbol BTC/USDT --interval 4h --data-source mock --explain
-  python tests/test_agent_individual.py --agent SentimentAnalystAgent --symbol ETH/USDT --repeat 3 --save-trace
+  python tests/test_agent_individual.py --agent SentimentAnalystAgent --symbol ETH/USDT --dynamic-temp --repeat 3 --save-trace
   python tests/test_agent_individual.py --interactive
   python tests/test_agent_individual.py --agent DecisionAgent --full-cycle --symbol BTC/USDT --interval 1h
 """
@@ -1549,7 +1607,10 @@ Examples:
     
     # Test execution options
     test_group = parser.add_argument_group('Test Execution Options')
-    test_group.add_argument('--temperature', type=float, default=0.0, help='LLM temperature (0.0-1.0)')
+    test_group.add_argument('--temperature', type=float, default=0.0, 
+                          help='LLM temperature (0.0-1.0, or -1 for dynamic temperature with sentiment agents)')
+    test_group.add_argument('--dynamic-temp', action='store_true', 
+                          help='Use dynamic temperature for sentiment agents (sets temperature to -1)')
     test_group.add_argument('--repeat', type=int, default=1, help='Run N iterations to observe variability')
     test_group.add_argument('--compare-temps', action='store_true', help='Compare results across different temperature settings')
     test_group.add_argument('--temp-range', type=str, default='0.0,0.5,1.0', help='Temperature range for comparison (comma-separated values)')
@@ -1661,9 +1722,14 @@ def main():
                 logger.info(f"{Fore.YELLOW}Available agents: {', '.join(available)}{Style.RESET_ALL}")
             return
     
-    # Validate temperature
-    if args.temperature < 0.0 or args.temperature > 1.0:
-        logger.error(f"{Fore.RED}Temperature must be between 0.0 and 1.0{Style.RESET_ALL}")
+    # Handle dynamic temperature flag for sentiment agents
+    if args.dynamic_temp:
+        args.temperature = -1
+        logger.info(f"{Fore.CYAN}Using dynamic temperature for sentiment agents{Style.RESET_ALL}")
+        
+    # Validate temperature (allow -1 for dynamic temperature with sentiment agents)
+    if args.temperature < -1.0 or (args.temperature < 0.0 and args.temperature != -1) or args.temperature > 1.0:
+        logger.error(f"{Fore.RED}Temperature must be between 0.0 and 1.0 (or -1 for dynamic temperature){Style.RESET_ALL}")
         return
     
     try:

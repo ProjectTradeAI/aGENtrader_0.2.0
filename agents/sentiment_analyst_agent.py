@@ -321,8 +321,16 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                 context = f"Current market conditions for {symbol} as of {datetime.now().strftime('%Y-%m-%d')}"
                 general_sentiment = self.grok_client.analyze_sentiment(context, temperature=temperature)
                 
-                # Convert to signal format
-                return self.grok_client.convert_sentiment_to_signal(general_sentiment)
+                # Convert to signal format with full reasoning preserved
+                signal_result = self.grok_client.convert_sentiment_to_signal(general_sentiment)
+                
+                # Store the complete sentiment data for access by the decision agent
+                signal_result["full_sentiment_data"] = general_sentiment
+                
+                # Log full reasoning for debugging truncation issues
+                logger.info(f"Generated sentiment reasoning (full): {signal_result['reasoning']}")
+                
+                return signal_result
                 
             # Aggregate sentiments from different sources
             # For simplicity, we'll use the first source if multiple are available

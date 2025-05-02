@@ -927,8 +927,14 @@ class AgentTestHarness:
                 reasoning = analysis['analysis'].get('reason', 'No reasoning provided')
         else:
             # For agents that return results at the top level
-            signal = analysis.get('signal', 'UNKNOWN')
-            confidence = analysis.get('confidence', 0)
+            # Special handling for DecisionAgent
+            if result['agent'] == 'DecisionAgent':
+                # DecisionAgent uses 'final_signal' or 'action' fields, not 'signal'
+                signal = analysis.get('final_signal', analysis.get('action', 'UNKNOWN'))
+                confidence = analysis.get('confidence', 0)
+            else:
+                signal = analysis.get('signal', 'UNKNOWN')
+                confidence = analysis.get('confidence', 0)
             
             # Get reasoning from various possible fields with improved extraction
             reasoning = analysis.get('reasoning', None)
@@ -994,7 +1000,9 @@ class AgentTestHarness:
             signal_color = Fore.GREEN
         elif signal == 'SELL':
             signal_color = Fore.RED
-        else:  # HOLD or others
+        elif signal == 'CONFLICTED':
+            signal_color = Fore.MAGENTA  # Use magenta for CONFLICTED signals
+        else:  # HOLD, NEUTRAL, or others
             signal_color = Fore.YELLOW
             
         # Confidence color
@@ -1132,7 +1140,9 @@ class AgentTestHarness:
             signal_color = Fore.GREEN
         elif signal == 'SELL':
             signal_color = Fore.RED
-        else:  # HOLD or others
+        elif signal == 'CONFLICTED':
+            signal_color = Fore.MAGENTA  # Use magenta for CONFLICTED signals
+        else:  # HOLD, NEUTRAL, or others
             signal_color = Fore.YELLOW
             
         # Confidence color
@@ -1182,7 +1192,9 @@ class AgentTestHarness:
                 agent_signal_color = Fore.GREEN
             elif agent_signal == 'SELL':
                 agent_signal_color = Fore.RED
-            else:  # HOLD or others
+            elif agent_signal == 'CONFLICTED':
+                agent_signal_color = Fore.MAGENTA  # Use magenta for CONFLICTED signals
+            else:  # HOLD, NEUTRAL, or others
                 agent_signal_color = Fore.YELLOW
                 
             # Confidence color

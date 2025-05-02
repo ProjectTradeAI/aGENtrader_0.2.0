@@ -406,7 +406,7 @@ class DecisionAgent:
         Calculate adjusted confidence based on signal quality and error state.
         
         Args:
-            action: The action or signal (BUY, SELL, HOLD, UNKNOWN)
+            action: The action or signal (BUY, SELL, HOLD, NEUTRAL, UNKNOWN)
             confidence: The raw confidence value 
             status: The status of the analysis ("success", "error", etc.)
             error_type: Type of error if status is "error"
@@ -436,11 +436,19 @@ class DecisionAgent:
                 # General errors get very low confidence
                 adjusted_confidence = min(adjusted_confidence, 5)
                 
-        # For HOLD action with low confidence, potentially indicate uncertainty
-        if action == "HOLD" and adjusted_confidence < 30 and status == "success":
-            # This might be a default HOLD due to uncertainty, slightly boost confidence
-            # to prevent being completely ignored in the weighted average
+        # For HOLD/NEUTRAL actions with low confidence, ensure a baseline level
+        if (action in ["HOLD", "NEUTRAL"]) and adjusted_confidence < 30 and status == "success":
+            # Provide a baseline confidence for non-directional signals
+            # to prevent being completely ignored in the weighted average,
+            # but not so high as to dilute directional signals
             adjusted_confidence = max(adjusted_confidence, 30)
+            
+        # For BUY/SELL actions, ensure they have a reasonable confidence level
+        # to be considered in the directional decision
+        if action in ["BUY", "SELL"] and adjusted_confidence < 15 and status == "success":
+            # Very low confidence directional signals should be slightly boosted
+            # to ensure they're not completely ignored in directional calculations
+            adjusted_confidence = max(adjusted_confidence, 15)
             
         # Ensure the final confidence is in the valid range
         return max(0, min(100, adjusted_confidence))
@@ -463,18 +471,18 @@ class DecisionAgent:
         self.logger.info("Attempting weighted decision from multiple analyses")
         
         try:
-            # Initialize action confidence scores
-            action_scores = {
-                "BUY": 0.0,
-                "SELL": 0.0,
-                "HOLD": 0.0
+            # Group agent outputs by signal type
+            votes_by_signal = {
+                "BUY": [],  # Will contain tuples of (agent_name, confidence, weight)
+                "SELL": [],
+                "HOLD": [],
+                "NEUTRAL": []
             }
             
             # Track agent contributions
             agent_contributions = {}
             
             # Track weights used
-            total_weight = 0.0
             weights_used = {}
             
             # Track agents with insufficient data
@@ -526,8 +534,10 @@ class DecisionAgent:
                         action = "BUY"
                     elif signal == "SELL":
                         action = "SELL"
-                    elif signal in ["NEUTRAL", "HOLD", "UNKNOWN"]:
-                        # Map both NEUTRAL, HOLD and UNKNOWN to HOLD action but with different confidence
+                    elif signal == "NEUTRAL":
+                        action = "NEUTRAL"
+                    elif signal in ["HOLD", "UNKNOWN"]:
+                        # Map HOLD and UNKNOWN to HOLD action but with different confidence
                         action = "HOLD"
                         if signal == "UNKNOWN" and confidence > 30:
                             # UNKNOWN signals should have lower confidence
@@ -537,9 +547,9 @@ class DecisionAgent:
                 # If the action is missing but we have error status, use HOLD
                 if not action and status == "error":
                     action = "HOLD"  # Default to HOLD for error cases
-                    
+                
                 # Skip if we couldn't extract a valid action
-                if not action or action not in action_scores:
+                if not action or action not in votes_by_signal:
                     self.logger.warning(f"Couldn't extract valid action from {agent_name} analysis, skipping")
                     continue
                 
@@ -549,8 +559,8 @@ class DecisionAgent:
                 # Calculate weighted confidence
                 weighted_confidence = adjusted_confidence * agent_weight
                 
-                # Add to action scores
-                action_scores[action] += weighted_confidence
+                # Group the vote by signal type
+                votes_by_signal[action].append((agent_name, adjusted_confidence, agent_weight, weighted_confidence))
                 
                 # Track agent contribution
                 agent_contributions[agent_name] = {
@@ -562,28 +572,52 @@ class DecisionAgent:
                     "weighted_confidence": weighted_confidence
                 }
                 
-                # Update total weight
-                total_weight += agent_weight
+                # Track weights used
                 weights_used[agent_name] = agent_weight
                 
                 self.logger.info(f"{agent_name}: {action} with confidence {adjusted_confidence}, weight {agent_weight}, weighted score {weighted_confidence}")
             
             # If we don't have enough data, return None to fall back to other methods
-            if not agent_contributions or total_weight == 0:
+            if not agent_contributions:
                 self.logger.warning("Not enough valid agent inputs for weighted decision")
                 return None
+            
+            # Compute total weighted confidence by signal
+            total_confidence = {"BUY": 0.0, "SELL": 0.0, "HOLD": 0.0, "NEUTRAL": 0.0}
+            signal_counts = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0}
+            total_directional_weight = 0.0
+            
+            for signal, votes in votes_by_signal.items():
+                for _, _, weight, weighted_conf in votes:
+                    total_confidence[signal] += weighted_conf
+                    signal_counts[signal] += 1
+                    
+                    # Track total directional weights (BUY/SELL only)
+                    if signal in ["BUY", "SELL"]:
+                        total_directional_weight += weight
+            
+            # Get signal with highest weighted confidence
+            dominant_signal = max(total_confidence.items(), key=lambda x: x[1])
+            final_signal = dominant_signal[0]
+            weighted_score = dominant_signal[1]
+            
+            # Log the breakdown by signal type
+            self.logger.info(f"Signal breakdown:")
+            for signal, votes in votes_by_signal.items():
+                if votes:
+                    avg_confidence = sum(conf for _, conf, _, _ in votes) / len(votes)
+                    self.logger.info(f"  {signal}: {len(votes)} agents (avg {avg_confidence:.1f}%, weighted score: {total_confidence[signal]:.1f})")
+                else:
+                    self.logger.info(f"  {signal}: 0 agents")
             
             # Check for conflicting signals with high confidence
             high_confidence_signals = {action: [] for action in ["BUY", "SELL"]}
             has_conflict = False
             
-            for agent_name, contribution in agent_contributions.items():
-                agent_action = contribution.get("action")
-                agent_confidence = contribution.get("confidence", 0)
-                
-                # Track high confidence signals for BUY and SELL
-                if agent_action in ["BUY", "SELL"] and agent_confidence >= self.high_confidence_threshold:
-                    high_confidence_signals[agent_action].append((agent_name, agent_confidence))
+            for signal in ["BUY", "SELL"]:
+                for agent_name, confidence, _, _ in votes_by_signal[signal]:
+                    if confidence >= self.high_confidence_threshold:
+                        high_confidence_signals[signal].append((agent_name, confidence))
             
             # Check if we have high confidence signals in opposing directions
             has_buy_signals = len(high_confidence_signals["BUY"]) > 0
@@ -603,34 +637,48 @@ class DecisionAgent:
                 conflict_reason = f"Conflicting high-confidence signals: {'; '.join(conflict_parts)}"
                 self.logger.warning(conflict_reason)
             
-            # Determine the highest scoring action
-            chosen_action = max(action_scores.items(), key=lambda x: x[1])
-            action = chosen_action[0]
-            weighted_score = chosen_action[1]
+            # Calculate different confidence metrics
+            # 1. Directional confidence - only for BUY/SELL signals
+            directional_confidence = 0
+            if final_signal in ["BUY", "SELL"] and total_directional_weight > 0:
+                # Calculate the directional confidence (considers only BUY/SELL signals)
+                total_directional_confidence = total_confidence["BUY"] + total_confidence["SELL"]
+                
+                if total_directional_confidence > 0:
+                    # Use the proportion of this signal's confidence to the total directional confidence
+                    directional_confidence = (total_confidence[final_signal] / total_directional_confidence) * 100
+                else:
+                    # If no directional confidence, use the confidence relative to weight
+                    directional_confidence = (total_confidence[final_signal] / total_directional_weight) * 100
+                    
+                # Cap the directional confidence at 100%
+                directional_confidence = min(directional_confidence, 100)
             
-            # Calculate normalized confidence (as percentage of total weighted confidence)
-            total_weighted_confidence = sum(action_scores.values())
+            # 2. Overall normalized confidence (percentage of total weighted confidence)
+            total_weighted_confidence = sum(total_confidence.values())
             normalized_confidence = 0
             if total_weighted_confidence > 0:
                 normalized_confidence = (weighted_score / total_weighted_confidence) * 100
+                # Cap the normalized confidence at 100%
+                normalized_confidence = min(normalized_confidence, 100)
             
-            # Calculate final confidence as percentage of max possible confidence
-            final_confidence = (weighted_score / total_weight) if total_weight > 0 else 0
+            # Use directional confidence for BUY/SELL signals; otherwise use normalized
+            final_confidence = directional_confidence if final_signal in ["BUY", "SELL"] else normalized_confidence
             
-            # Calculate conflict score if there are at least two different signals
+            # Calculate conflict score between top two signals
             conflict_score = 0
-            if len([score for score in action_scores.values() if score > 0]) >= 2:
-                # Sort actions by score (descending)
-                sorted_actions = sorted(action_scores.items(), key=lambda x: x[1], reverse=True)
-                # Conflict score is the difference between top two signals as percentage of total
-                top_score = sorted_actions[0][1]
-                second_score = sorted_actions[1][1]
-                
-                if total_weighted_confidence > 0:
-                    conflict_score = (top_score - second_score) / total_weighted_confidence * 100
-                
-                # Invert the conflict score so higher means more conflict
-                conflict_score = 100 - conflict_score
+            if sum(signal_counts.values()) >= 2:
+                # Sort signals by weighted confidence (descending)
+                sorted_signals = sorted(total_confidence.items(), key=lambda x: x[1], reverse=True)
+                if len(sorted_signals) >= 2 and sorted_signals[1][1] > 0:
+                    top_score = sorted_signals[0][1]
+                    second_score = sorted_signals[1][1]
+                    
+                    if total_weighted_confidence > 0:
+                        conflict_score = (top_score - second_score) / total_weighted_confidence * 100
+                    
+                    # Invert the conflict score so higher means more conflict
+                    conflict_score = 100 - conflict_score
             
             # Handle action determination with conflict state
             if has_conflict and self.allow_conflict_state:
@@ -642,19 +690,30 @@ class DecisionAgent:
                 self.logger.warning(f"⚠️ CONFLICTED decision due to high-confidence opposing signals")
                 self.logger.info(f"CONFLICT DETECTED: Decision set to CONFLICTED, confidence {final_confidence}")
                 # No need to apply confidence threshold, as conflict is a high-confidence state
-            # Apply confidence threshold for actions 
-            elif action in ["BUY", "SELL"] and final_confidence < self.confidence_threshold:
-                original_action = action
+            # Apply confidence threshold for directional signals
+            elif final_signal in ["BUY", "SELL"] and final_confidence < self.confidence_threshold:
+                original_signal = final_signal
                 original_confidence = final_confidence
-                action = "HOLD"
-                reason = f"Confidence below threshold ({original_confidence:.2f} < {self.confidence_threshold})"
+                action = "HOLD"  # Action is HOLD when below threshold
+                final_signal = "HOLD"  # Final signal is also HOLD
+                reason = f"Confidence below threshold ({original_confidence:.2f}% < {self.confidence_threshold}%)"
                 final_confidence = min(final_confidence, 65)  # Cap confidence for forced HOLD
+                self.logger.info(f"Signal {original_signal} was converted to HOLD due to low confidence ({original_confidence:.2f}%)")
             else:
+                # Set action same as final signal
+                action = final_signal
+                
+                # Convert NEUTRAL to HOLD for final action
+                if action == "NEUTRAL":
+                    action = "HOLD"
+                    self.logger.info(f"Converting NEUTRAL to HOLD for final action")
+                
                 # Create reason based on agent contributions
                 reason_parts = []
                 for agent_name, contribution in agent_contributions.items():
-                    if contribution["action"] == action:
-                        reason_parts.append(f"{agent_name} recommends {action}")
+                    agent_action = contribution["action"]
+                    if agent_action == final_signal or (final_signal == "HOLD" and agent_action == "NEUTRAL"):
+                        reason_parts.append(f"{agent_name} recommends {agent_action}")
                 
                 if reason_parts:
                     reason = ", ".join(reason_parts)
@@ -671,10 +730,24 @@ class DecisionAgent:
                     conflict_warning = f"Note: Conflicting signals detected, but {action} has predominant consensus"
                     reason = f"{reason}. {conflict_warning}"
             
+            # Prepare summary of contributing agents to the chosen signal
+            contributing_agents = []
+            if final_signal != "CONFLICTED":
+                for signal in ["BUY", "SELL", "HOLD", "NEUTRAL"]:
+                    if signal == final_signal or (final_signal == "HOLD" and signal == "NEUTRAL"):
+                        contributing_agents.extend([agent for agent, _, _, _ in votes_by_signal[signal]])
+            
+            # Create action scores map for backward compatibility
+            action_scores = {
+                "BUY": total_confidence["BUY"],
+                "SELL": total_confidence["SELL"],
+                "HOLD": total_confidence["HOLD"] + total_confidence["NEUTRAL"]  # Combine HOLD and NEUTRAL
+            }
+            
             # Create decision object
             decision = {
                 "action": action,
-                "final_signal": "CONFLICTED" if (has_conflict and self.allow_conflict_state) else action,  # CONFLICTED for conflict state, otherwise same as action
+                "final_signal": final_signal,
                 "pair": symbol,
                 "confidence": final_confidence,
                 "reasoning": reason,  # Primary reason field used by external systems
@@ -682,19 +755,28 @@ class DecisionAgent:
                 "agent_contributions": agent_contributions,
                 "action_scores": action_scores,
                 "weights_used": weights_used,
-                "decision_method": "weighted",
+                "decision_method": "weighted_directional",  # Updated method name
                 "insufficient_data_agents": insufficient_data_agents if insufficient_data_agents else [],
                 # Add new confidence metrics
                 "final_signal_confidence": final_confidence,
-                "weighted_average_confidence": normalized_confidence,
+                "directional_confidence": directional_confidence,
+                "normalized_confidence": normalized_confidence,
                 "conflict_score": conflict_score,
-                "has_conflict": has_conflict
+                "has_conflict": has_conflict,
+                "signal_counts": signal_counts,
+                "contributing_agents": contributing_agents
             }
+            
+            # Log the final decision with more details
+            self.logger.info(f"Final signal: {final_signal}, confidence: {final_confidence:.1f}%, directional confidence: {directional_confidence:.1f}%")
+            if contributing_agents:
+                self.logger.info(f"Contributing agents: {', '.join(contributing_agents)}")
             
             return decision
             
         except Exception as e:
             self.logger.error(f"Error making weighted decision: {e}")
+            self.logger.error(traceback.format_exc())
             return None
     
     def _make_liquidity_based_decision(self, 

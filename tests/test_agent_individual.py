@@ -1086,7 +1086,17 @@ class AgentTestHarness:
             
         # Display the final decision
         decision = result['result'].get('decision', {})
-        signal = decision.get('signal', 'UNKNOWN')
+        
+        # Get signal from appropriate field based on priority
+        # 1. final_signal (new field for conflict detection)
+        # 2. action (standard field for backward compatibility)
+        # 3. signal (fallback)
+        signal = decision.get('final_signal', decision.get('action', decision.get('signal', 'UNKNOWN')))
+        
+        # Special handling for CONFLICTED signal
+        if signal == 'CONFLICTED':
+            signal = 'CONFLICTED'  # Use explicit CONFLICTED state
+        
         confidence = decision.get('confidence', 0)
         
         # Extract reasoning with improved logic

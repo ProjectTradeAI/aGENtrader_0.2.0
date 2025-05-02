@@ -126,8 +126,13 @@ class DecisionAgent:
     - Produces a final structured trading decision
     """
     
-    def __init__(self):
-        """Initialize the Decision Agent."""
+    def __init__(self, allow_conflict_state: bool = True):
+        """
+        Initialize the Decision Agent.
+        
+        Args:
+            allow_conflict_state: Whether to allow returning "CONFLICTED" state when there are strong opposing signals
+        """
         self.logger = logging.getLogger("decision_agent")
         
         # Load configuration
@@ -135,9 +140,31 @@ class DecisionAgent:
         self.agent_config = self.config.get("agents", {}).get("decision", {})
         self.trading_config = self.config.get("trading", {})
         
-        # Load agent weights
+        # Load agent weights and check for missing weights
+        all_agents = [
+            "TechnicalAnalystAgent", 
+            "SentimentAnalystAgent", 
+            "SentimentAggregatorAgent",
+            "LiquidityAnalystAgent", 
+            "OpenInterestAnalystAgent", 
+            "FundingRateAnalystAgent"
+        ]
+        
         self.agent_weights = self.config.get("agent_weights", {})
-        self.logger.info(f"Loaded agent weights: {self.agent_weights}")
+        
+        # Check for missing agent weights and log warnings
+        missing_weights = []
+        for agent in all_agents:
+            if agent not in self.agent_weights:
+                missing_weights.append(agent)
+        
+        if missing_weights:
+            self.logger.warning(f"Missing weights for agents: {', '.join(missing_weights)}. Please update settings.yaml.")
+            # Initialize missing weights to default value
+            for agent in missing_weights:
+                self.agent_weights[agent] = 1.0
+        
+        self.logger.info(f"Using agent weights: {self.agent_weights}")
         
         # Initialize LLM client with agent-specific configuration
         # Decision agent uses regular Mistral, not Grok
@@ -148,7 +175,11 @@ class DecisionAgent:
         self.default_interval = self.trading_config.get("default_interval", "1h")
         self.confidence_threshold = self.agent_config.get("confidence_threshold", 70)
         
-        self.logger.info(f"Decision Agent initialized with confidence threshold={self.confidence_threshold}")
+        # Set conflict state handling flag
+        self.allow_conflict_state = allow_conflict_state
+        self.high_confidence_threshold = 80  # Threshold to consider a signal "high confidence"
+        
+        self.logger.info(f"Decision Agent initialized with confidence threshold={self.confidence_threshold}, allow_conflict_state={self.allow_conflict_state}")
     
     def make_decision(self, 
                      agent_analyses: Dict[str, Any], 
@@ -310,7 +341,7 @@ class DecisionAgent:
         # Count each agent's signal
         for agent_name, contribution in agent_contributions.items():
             action = contribution.get("action")
-            if action in signal_counts:
+            if action is not None and action in signal_counts:
                 # For simple counting
                 signal_counts[action] += 1
                 total_agents += 1
@@ -540,6 +571,36 @@ class DecisionAgent:
                 self.logger.warning("Not enough valid agent inputs for weighted decision")
                 return None
             
+            # Check for conflicting signals with high confidence
+            high_confidence_signals = {action: [] for action in ["BUY", "SELL"]}
+            has_conflict = False
+            
+            for agent_name, contribution in agent_contributions.items():
+                agent_action = contribution.get("action")
+                agent_confidence = contribution.get("confidence", 0)
+                
+                # Track high confidence signals for BUY and SELL
+                if agent_action in ["BUY", "SELL"] and agent_confidence >= self.high_confidence_threshold:
+                    high_confidence_signals[agent_action].append((agent_name, agent_confidence))
+            
+            # Check if we have high confidence signals in opposing directions
+            has_buy_signals = len(high_confidence_signals["BUY"]) > 0
+            has_sell_signals = len(high_confidence_signals["SELL"]) > 0
+            conflict_reason = ""
+            
+            if has_buy_signals and has_sell_signals:
+                has_conflict = True
+                # Generate conflict reason with details
+                conflict_parts = []
+                
+                for signal, agents in high_confidence_signals.items():
+                    if agents:
+                        agent_details = ", ".join([f"{name} ({conf:.0f}%)" for name, conf in agents])
+                        conflict_parts.append(f"{signal}: {agent_details}")
+                
+                conflict_reason = f"Conflicting high-confidence signals: {'; '.join(conflict_parts)}"
+                self.logger.warning(conflict_reason)
+            
             # Determine the highest scoring action
             chosen_action = max(action_scores.items(), key=lambda x: x[1])
             action = chosen_action[0]
@@ -554,8 +615,31 @@ class DecisionAgent:
             # Calculate final confidence as percentage of max possible confidence
             final_confidence = (weighted_score / total_weight) if total_weight > 0 else 0
             
-            # Apply confidence threshold for actions
-            if action in ["BUY", "SELL"] and final_confidence < self.confidence_threshold:
+            # Calculate conflict score if there are at least two different signals
+            conflict_score = 0
+            if len([score for score in action_scores.values() if score > 0]) >= 2:
+                # Sort actions by score (descending)
+                sorted_actions = sorted(action_scores.items(), key=lambda x: x[1], reverse=True)
+                # Conflict score is the difference between top two signals as percentage of total
+                top_score = sorted_actions[0][1]
+                second_score = sorted_actions[1][1]
+                
+                if total_weighted_confidence > 0:
+                    conflict_score = (top_score - second_score) / total_weighted_confidence * 100
+                
+                # Invert the conflict score so higher means more conflict
+                conflict_score = 100 - conflict_score
+            
+            # Handle action determination with conflict state
+            if has_conflict and self.allow_conflict_state:
+                # Use CONFLICTED state when there are strong opposing signals
+                action = "CONFLICTED"
+                reason = conflict_reason
+                final_confidence = max(80, normalized_confidence)  # Set higher confidence for conflict state
+                self.logger.info(f"CONFLICT DETECTED: Decision set to CONFLICTED with confidence {final_confidence}")
+                # No need to apply confidence threshold, as conflict is a high-confidence state
+            # Apply confidence threshold for actions 
+            elif action in ["BUY", "SELL"] and final_confidence < self.confidence_threshold:
                 original_action = action
                 original_confidence = final_confidence
                 action = "HOLD"
@@ -577,6 +661,11 @@ class DecisionAgent:
                 if insufficient_data_agents:
                     data_warning = f"Note: Insufficient data from {', '.join(insufficient_data_agents)}"
                     reason = f"{reason}. {data_warning}"
+                
+                # Add conflict information if relevant but not handling as CONFLICTED state
+                if has_conflict and not self.allow_conflict_state:
+                    conflict_warning = f"Note: Conflicting signals detected, but {action} has predominant consensus"
+                    reason = f"{reason}. {conflict_warning}"
             
             # Create decision object
             decision = {
@@ -588,7 +677,12 @@ class DecisionAgent:
                 "action_scores": action_scores,
                 "weights_used": weights_used,
                 "decision_method": "weighted",
-                "insufficient_data_agents": insufficient_data_agents if insufficient_data_agents else []
+                "insufficient_data_agents": insufficient_data_agents if insufficient_data_agents else [],
+                # Add new confidence metrics
+                "final_signal_confidence": final_confidence,
+                "weighted_average_confidence": normalized_confidence,
+                "conflict_score": conflict_score,
+                "has_conflict": has_conflict
             }
             
             return decision
@@ -767,7 +861,7 @@ class DecisionAgent:
             Standardized decision dictionary
         """
         # Ensure action is valid
-        valid_actions = ["BUY", "SELL", "HOLD"]
+        valid_actions = ["BUY", "SELL", "HOLD", "CONFLICTED"]
         if action not in valid_actions:
             self.logger.warning(f"Invalid action '{action}', defaulting to HOLD")
             action = "HOLD"

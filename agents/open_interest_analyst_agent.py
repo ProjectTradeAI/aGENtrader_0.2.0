@@ -162,32 +162,45 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                         )
                 except Exception as e:
                     logger.warning(f"Error fetching data: {str(e)}")
-                    logger.info("Using MockDataProvider for fallback data")
-                    # For fallback when actual data isn't available
-                    try:
-                        from agents.data_providers.mock_data_provider import MockDataProvider
-                        mock_provider = MockDataProvider(symbol=symbol)
-                        price_data = mock_provider.fetch_ohlcv(symbol=symbol, interval=interval, limit=self.lookback_periods)
-                        oi_data = mock_provider.fetch_futures_open_interest(symbol=symbol, interval=interval, limit=self.lookback_periods)
-                    except Exception as mock_error:
-                        logger.error(f"Error using MockDataProvider: {str(mock_error)}")
-                        # Fall back to internal mock data generator as a last resort
-                        oi_data, price_data = self._generate_mock_data(symbol, interval)
+                    # Don't use mock data - maintain data integrity
+                    oi_data = []
+                    price_data = []
+                    logger.error(f"Failed to get real market data: {str(e)}")
             
             # Check if we have valid data
-            if not oi_data or len(oi_data) == 0:
-                self.logger.warning(f"Insufficient open interest data for {symbol}")
+            if not oi_data:
+                logger.warning(f"No open interest data for {symbol}")
                 return self.build_error_response(
                     "INSUFFICIENT_DATA",
                     f"No open interest data available for {symbol}. This might be due to geographic restrictions or the pair not being available on futures markets."
                 )
                 
-            if not price_data or len(price_data) == 0:
-                self.logger.warning(f"Insufficient price data for {symbol}")
+            if not price_data:
+                logger.warning(f"No price data for {symbol}")
                 return self.build_error_response(
                     "INSUFFICIENT_DATA",
                     f"No price data available for {symbol}. This might be due to API rate limits or connectivity issues."
                 )
+                
+            # Check for minimum data points needed (more lenient check)
+            min_data_points = 10
+            if isinstance(oi_data, list) and len(oi_data) < min_data_points:
+                logger.warning(f"Limited open interest data for {symbol}: {len(oi_data)} points available, {min_data_points} recommended")
+                if len(oi_data) < 3:  # Absolute minimum for meaningful analysis
+                    return self.build_error_response(
+                        "INSUFFICIENT_DATA",
+                        f"Only {len(oi_data)} open interest data points available for {symbol}, need at least 3 for minimal analysis."
+                    )
+                # If we have between 3 and min_data_points, we proceed but log a warning
+            
+            if isinstance(price_data, list) and len(price_data) < min_data_points:
+                logger.warning(f"Limited price data for {symbol}: {len(price_data)} points available, {min_data_points} recommended")
+                if len(price_data) < 3:  # Absolute minimum for meaningful analysis
+                    return self.build_error_response(
+                        "INSUFFICIENT_DATA",
+                        f"Only {len(price_data)} price data points available for {symbol}, need at least 3 for minimal analysis."
+                    )
+                # If we have between 3 and min_data_points, we proceed but log a warning
             
             # Analyze the data
             analysis_result = self._analyze_open_interest(oi_data, price_data)

@@ -8,6 +8,9 @@ the OpenAI API for easy integration.
 import os
 import logging
 import json
+import random
+import uuid
+from datetime import datetime
 from typing import Dict, Any, List, Optional, Union
 import time
 
@@ -59,12 +62,13 @@ class GrokSentimentClient:
             logger.error(f"Failed to initialize Grok client: {str(e)}")
             self.enabled = False
     
-    def analyze_sentiment(self, text: str) -> Dict[str, Any]:
+    def analyze_sentiment(self, text: str, temperature: float = 0.7) -> Dict[str, Any]:
         """
         Analyze the sentiment of a text.
         
         Args:
             text: The text to analyze
+            temperature: The temperature to use for generation (0.0 to 1.0)
             
         Returns:
             Dictionary containing sentiment analysis with keys:
@@ -72,6 +76,7 @@ class GrokSentimentClient:
             - confidence: 0-1 confidence score
             - sentiment: 'positive', 'neutral', or 'negative'
             - reasoning: Brief explanation of the sentiment
+            - actual_temperature: The temperature that was actually used
         """
         if not self.enabled:
             logger.warning("Grok sentiment analysis is disabled. Returning neutral sentiment.")
@@ -79,10 +84,17 @@ class GrokSentimentClient:
                 "rating": 3,
                 "confidence": 0.5,
                 "sentiment": "neutral",
-                "reasoning": "Grok sentiment analysis is disabled."
+                "reasoning": "Grok sentiment analysis is disabled.",
+                "actual_temperature": 0.0
             }
             
         try:
+            # Handle dynamic temperature (-1 means use random temperature between 0.6 and 0.9)
+            actual_temperature = temperature
+            if temperature == -1:
+                actual_temperature = round(0.6 + 0.3 * random.random(), 2)  # Random between 0.6 and 0.9
+                logger.info(f"Using dynamic temperature: {actual_temperature}")
+            
             response = self.client.chat.completions.create(
                 model="grok-2-1212",
                 messages=[
@@ -101,7 +113,8 @@ class GrokSentimentClient:
                         "content": text
                     }
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=actual_temperature
             )
             
             result = json.loads(response.choices[0].message.content)
@@ -121,25 +134,28 @@ class GrokSentimentClient:
                 "rating": rating,
                 "confidence": confidence,
                 "sentiment": sentiment,
-                "reasoning": reasoning
+                "reasoning": reasoning,
+                "actual_temperature": actual_temperature
             }
                 
         except Exception as e:
             logger.error(f"Error during sentiment analysis: {str(e)}")
-            # Return neutral sentiment on error
+            # Return neutral sentiment on error with the actual_temperature
             return {
                 "rating": 3,
                 "confidence": 0.5,
                 "sentiment": "neutral",
-                "reasoning": f"Error during analysis: {str(e)}"
+                "reasoning": f"Error during analysis: {str(e)}",
+                "actual_temperature": temperature  # Use the requested temperature even if it failed
             }
     
-    def analyze_market_news(self, news_items: List[str]) -> Dict[str, Any]:
+    def analyze_market_news(self, news_items: List[str], temperature: float = 0.7) -> Dict[str, Any]:
         """
         Analyze sentiment from a list of market news items.
         
         Args:
             news_items: List of news headlines or short articles
+            temperature: The temperature to use for generation (0.0 to 1.0 or -1 for dynamic)
             
         Returns:
             Dictionary with overall sentiment analysis and 
@@ -156,6 +172,12 @@ class GrokSentimentClient:
         try:
             # Combine news items into a single prompt
             combined_text = "\n".join([f"- {item}" for item in news_items])
+            
+            # Handle dynamic temperature (-1 means use random temperature between 0.6 and 0.9)
+            actual_temperature = temperature
+            if temperature == -1:
+                actual_temperature = round(0.6 + 0.3 * random.random(), 2)  # Random between 0.6 and 0.9
+                logger.info(f"Using dynamic temperature for news analysis: {actual_temperature}")
             
             response = self.client.chat.completions.create(
                 model="grok-2-1212",
@@ -180,21 +202,35 @@ class GrokSentimentClient:
                         "content": f"Analyze these market news items:\n{combined_text}"
                     }
                 ],
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
+                temperature=actual_temperature
             )
             
             result = json.loads(response.choices[0].message.content)
+            
+            # Add actual temperature to the result for tracking
+            result["actual_temperature"] = actual_temperature
+            
+            # Add unique request ID and timestamp
+            result["request_id"] = str(uuid.uuid4())
+            result["timestamp"] = datetime.now().isoformat()
+            
             return result
             
         except Exception as e:
             logger.error(f"Error during market news analysis: {str(e)}")
             # Return neutral sentiment on error
-            return {
+            error_result = {
                 "overall_sentiment": "neutral",
                 "confidence": 0.5,
                 "summary": f"Error during analysis: {str(e)}",
-                "items": [{"text": item, "sentiment": "neutral", "rating": 3} for item in news_items]
+                "items": [{"text": item, "sentiment": "neutral", "rating": 3} for item in news_items],
+                "actual_temperature": temperature,  # Use the requested temperature value
+                "request_id": str(uuid.uuid4()),
+                "timestamp": datetime.now().isoformat(),
+                "error": str(e)
             }
+            return error_result
             
     def convert_sentiment_to_signal(self, sentiment_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -230,8 +266,19 @@ class GrokSentimentClient:
         # Scale confidence to percentage (0-100)
         confidence_pct = int(confidence * 100)
         
-        return {
+        # Include actual_temperature if it exists in the sentiment_result
+        result = {
             "signal": signal,
             "confidence": confidence_pct,
             "reasoning": reasoning
         }
+        
+        # Add timestamp and request_id for traceability
+        result["timestamp"] = datetime.now().isoformat()
+        result["request_id"] = str(uuid.uuid4())
+        
+        # Add actual_temperature if available
+        if "actual_temperature" in sentiment_result:
+            result["actual_temperature"] = sentiment_result["actual_temperature"]
+        
+        return result

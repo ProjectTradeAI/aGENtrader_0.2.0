@@ -145,6 +145,13 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         if market_data is None:
             market_data = {}
             
+        # Extract temperature parameter, default to -1 (dynamic temperature)
+        temperature = kwargs.get('temperature', -1)
+        if temperature == -1:
+            logger.info("Using dynamic temperature (random between 0.6-0.9)")
+        else:
+            logger.info(f"Using fixed temperature: {temperature}")
+            
         # Handle the case where symbol is passed directly
         if symbol is not None:
             # Don't log potentially large data structures
@@ -298,21 +305,21 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             if "news" in self.data_sources and "news" in market_data and market_data["news"]:
                 news_items = market_data["news"]
                 logger.info(f"Analyzing {len(news_items)} news items")
-                news_sentiment = self.grok_client.analyze_market_news(news_items)
+                news_sentiment = self.grok_client.analyze_market_news(news_items, temperature=temperature)
                 sentiments.append(news_sentiment)
                 
             # Process social media posts if available
             if "social" in self.data_sources and "social_posts" in market_data and market_data["social_posts"]:
                 social_posts = market_data["social_posts"]
                 logger.info(f"Analyzing {len(social_posts)} social media posts")
-                social_sentiment = self.grok_client.analyze_market_news(social_posts)
+                social_sentiment = self.grok_client.analyze_market_news(social_posts, temperature=temperature)
                 sentiments.append(social_sentiment)
                 
             # If no data was provided, analyze the general market context
             if not sentiments:
                 logger.info("No specific sentiment data provided, analyzing general market sentiment")
                 context = f"Current market conditions for {symbol} as of {datetime.now().strftime('%Y-%m-%d')}"
-                general_sentiment = self.grok_client.analyze_sentiment(context)
+                general_sentiment = self.grok_client.analyze_sentiment(context, temperature=temperature)
                 
                 # Convert to signal format
                 return self.grok_client.convert_sentiment_to_signal(general_sentiment)

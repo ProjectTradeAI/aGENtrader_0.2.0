@@ -153,6 +153,9 @@ def run_sentiment_analysis(market_data_or_symbol, data_provider=None, interval=N
 def run_liquidity_analysis(market_data_or_symbol, interval=None, data_provider=None):
     """Run liquidity analysis and log the results"""
     try:
+        # Import the LiquidityAnalystAgent
+        from agents.liquidity_analyst_agent import LiquidityAnalystAgent
+        
         # Standardize market_data format
         if isinstance(market_data_or_symbol, dict):
             market_data = market_data_or_symbol
@@ -167,21 +170,69 @@ def run_liquidity_analysis(market_data_or_symbol, interval=None, data_provider=N
                 "data_provider": data_provider
             }
             
-        # The actual LiquidityAnalystAgent will be implemented later
-        # For now, return a structured error that the DecisionAgent will understand
+        # Return structured error if data_fetcher is missing
         if not data_provider:
             return {
                 "error": True, 
                 "error_type": "DATA_FETCHER_MISSING", 
                 "message": "Data fetcher not provided"
             }
+        
+        # Create and initialize the LiquidityAnalystAgent with data_fetcher
+        liquidity_agent = LiquidityAnalystAgent(data_fetcher=data_provider)
+        
+        # Run the analysis
+        logger.info(f"Running liquidity analysis for {symbol} at {interval} interval")
+        
+        # Fetch order book data from provider if not in market_data
+        if "order_book" not in market_data:
+            try:
+                order_book = data_provider.fetch_market_depth(symbol)
+                market_data["order_book"] = order_book
+            except Exception as e:
+                logger.warning(f"Error fetching order book data: {str(e)}")
+                # Continue with analysis, agent will handle missing order book
+        
+        # Analyze liquidity with order book data
+        result = liquidity_agent.analyze(symbol, market_data, interval)
+        
+        # Check for errors
+        if result.get("status") != "success":
+            error_msg = result.get("message", "Unknown error in liquidity analysis")
+            return {
+                "error": True,
+                "error_type": result.get("error_type", "ANALYSIS_FAILED"),
+                "message": error_msg
+            }
             
-        logger.info(f"Liquidity analysis not fully implemented yet for {symbol}")
+        # Extract entry and stop-loss zones
+        entry_zone = result.get("entry_zone")
+        stop_loss_zone = result.get("stop_loss_zone")
+        
+        # Log detected liquidity zones
+        liquidity_zones = result.get("liquidity_zones", {})
+        support_clusters = liquidity_zones.get("support_clusters", [])
+        resistance_clusters = liquidity_zones.get("resistance_clusters", [])
+        
+        if support_clusters:
+            logger.info(f"Detected support clusters: {support_clusters}")
+        if resistance_clusters:
+            logger.info(f"Detected resistance clusters: {resistance_clusters}")
+        if entry_zone:
+            logger.info(f"Suggested entry zone: {entry_zone}")
+        if stop_loss_zone:
+            logger.info(f"Suggested stop-loss zone: {stop_loss_zone}")
+        
+        # If successful, return the analysis result
         return {
-            "signal": "HOLD",
-            "confidence": 0,
-            "reasoning": "Liquidity analysis not implemented yet"
+            "signal": result.get("signal", "NEUTRAL"),
+            "confidence": result.get("confidence", 50),
+            "reasoning": result.get("explanation", ["Liquidity analysis complete"])[0],
+            "entry_zone": entry_zone,
+            "stop_loss_zone": stop_loss_zone,
+            "liquidity_zones": liquidity_zones
         }
+        
     except Exception as e:
         logger.error(f"Error in liquidity analysis: {str(e)}", exc_info=True)
         return {"error": True, "error_type": "Exception", "message": str(e)}

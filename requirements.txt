@@ -31,3 +31,7 @@ numpy
 pandas
 openai
 python-dotenv
+matplotlib
+matplotlib
+numpy
+pandas

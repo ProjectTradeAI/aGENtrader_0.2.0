@@ -170,7 +170,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             
             execution_time = time.time() - start_time
             
-            # Prepare results
+            # Prepare results with entry and stop-loss zones
             results = {
                 "agent": self.name,
                 "timestamp": datetime.now().isoformat(),
@@ -182,6 +182,9 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 "explanation": [explanation],
                 "metrics": analysis_result,
                 "execution_time_seconds": execution_time,
+                "entry_zone": analysis_result.get("suggested_entry"),
+                "stop_loss_zone": analysis_result.get("suggested_stop_loss"),
+                "liquidity_zones": analysis_result.get("liquidity_zones", {}),
                 "status": "success"
             }
             
@@ -193,7 +196,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 # Ensure symbol is a string, not None or dict
                 symbol_str = symbol if isinstance(symbol, str) else str(symbol)
                 
-                # Log the decision
+                # Log the decision with entry and stop-loss zones
                 decision_logger.log_decision(
                     agent_name=self.name,
                     signal=signal,
@@ -204,6 +207,9 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                     timestamp=results["timestamp"],
                     additional_data={
                         "interval": interval,
+                        "entry_zone": analysis_result.get("suggested_entry"),
+                        "stop_loss_zone": analysis_result.get("suggested_stop_loss"),
+                        "liquidity_zones": analysis_result.get("liquidity_zones", {}),
                         "metrics": analysis_result
                     }
                 )
@@ -222,13 +228,15 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
     
     def _analyze_order_book(self, order_book: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Analyze the order book to extract liquidity metrics.
+        Analyze the order book to extract liquidity metrics and identify 
+        liquidity-based entry and stop-loss zones.
         
         Args:
             order_book: Dictionary containing 'bids' and 'asks' arrays
             
         Returns:
-            Dictionary of liquidity metrics
+            Dictionary of liquidity metrics including support/resistance clusters
+            and suggested entry/stop-loss levels
         """
         # Extract bids and asks
         bids = order_book.get('bids', [])
@@ -242,7 +250,14 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 "bid_depth_usdt": 0,
                 "ask_depth_usdt": 0,
                 "bid_ask_ratio": 1.0,
-                "liquidity_score": 0
+                "liquidity_score": 0,
+                "liquidity_zones": {
+                    "support_clusters": [],
+                    "resistance_clusters": [],
+                    "gaps": []
+                },
+                "suggested_entry": None,
+                "suggested_stop_loss": None
             }
         
         # Calculate bid-ask spread
@@ -272,6 +287,93 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         # Combined liquidity score
         liquidity_score = (depth_score * 0.5) + (spread_score * 0.3) + (balance_score * 0.2)
         
+        # Extract top bid and ask levels for display
+        top_bids = [[float(price), float(volume)] for price, volume in bids[:10]]
+        top_asks = [[float(price), float(volume)] for price, volume in asks[:10]]
+        
+        # Calculate total volume at each level
+        bid_volumes = [vol for _, vol in top_bids]
+        ask_volumes = [vol for _, vol in top_asks]
+        
+        # Calculate volume-weighted average for normalization
+        avg_bid_volume = sum(bid_volumes) / len(bid_volumes) if bid_volumes else 0
+        avg_ask_volume = sum(ask_volumes) / len(ask_volumes) if ask_volumes else 0
+        
+        # Define liquidity zone thresholds
+        volume_cluster_threshold = 1.5  # Price levels with 1.5x average volume
+        gap_threshold = 0.5  # Price levels with less than 0.5x average volume
+        
+        # Identify support clusters (significant bid walls)
+        support_clusters = []
+        for i, (price, volume) in enumerate(top_bids):
+            if volume > avg_bid_volume * volume_cluster_threshold:
+                support_clusters.append(price)
+                logger.debug(f"Support cluster detected at {price} with volume {volume}")
+        
+        # Identify resistance clusters (significant ask walls)
+        resistance_clusters = []
+        for i, (price, volume) in enumerate(top_asks):
+            if volume > avg_ask_volume * volume_cluster_threshold:
+                resistance_clusters.append(price)
+                logger.debug(f"Resistance cluster detected at {price} with volume {volume}")
+        
+        # Identify liquidity gaps (areas with low volume on both sides)
+        gaps = []
+        
+        # Check for gaps in bid side
+        for i in range(1, len(top_bids)):
+            current_price, current_vol = top_bids[i]
+            if current_vol < avg_bid_volume * gap_threshold:
+                gaps.append(current_price)
+                logger.debug(f"Liquidity gap detected at bid {current_price} with volume {current_vol}")
+                
+        # Check for gaps in ask side
+        for i in range(1, len(top_asks)):
+            current_price, current_vol = top_asks[i]
+            if current_vol < avg_ask_volume * gap_threshold:
+                gaps.append(current_price)
+                logger.debug(f"Liquidity gap detected at ask {current_price} with volume {current_vol}")
+        
+        # Determine suggested entry zones based on liquidity clusters
+        suggested_entry = None
+        suggested_stop_loss = None
+        
+        # For BUY signals, entry is typically just above a strong support
+        # and stop loss is below the support
+        if bid_ask_ratio > 1.0 and support_clusters:
+            # Entry slightly above strongest support
+            suggested_entry = support_clusters[0] * 1.001  # 0.1% above support
+            
+            # Find nearest gap below support for stop loss
+            suitable_gaps = [gap for gap in gaps if gap < support_clusters[0]]
+            if suitable_gaps:
+                # Use the closest gap below support
+                suggested_stop_loss = max(suitable_gaps)
+            else:
+                # Fallback: use a fixed percentage below support
+                suggested_stop_loss = support_clusters[0] * 0.99  # 1% below support
+                
+        # For SELL signals, entry is typically just below a strong resistance
+        # and stop loss is above the resistance
+        elif bid_ask_ratio < 1.0 and resistance_clusters:
+            # Entry slightly below weakest resistance
+            suggested_entry = resistance_clusters[0] * 0.999  # 0.1% below resistance
+            
+            # Find nearest gap above resistance for stop loss
+            suitable_gaps = [gap for gap in gaps if gap > resistance_clusters[0]]
+            if suitable_gaps:
+                # Use the closest gap above resistance
+                suggested_stop_loss = min(suitable_gaps)
+            else:
+                # Fallback: use a fixed percentage above resistance
+                suggested_stop_loss = resistance_clusters[0] * 1.01  # 1% above resistance
+        
+        liquidity_zones = {
+            "support_clusters": support_clusters,
+            "resistance_clusters": resistance_clusters,
+            "gaps": gaps
+        }
+        
         return {
             "best_bid": best_bid,
             "best_ask": best_ask,
@@ -284,7 +386,12 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             "depth_score": depth_score,
             "spread_score": spread_score,
             "balance_score": balance_score,
-            "liquidity_score": liquidity_score
+            "liquidity_score": liquidity_score,
+            "top_bids": top_bids[:5],  # Top 5 bid levels for display
+            "top_asks": top_asks[:5],  # Top 5 ask levels for display
+            "liquidity_zones": liquidity_zones,
+            "suggested_entry": suggested_entry,
+            "suggested_stop_loss": suggested_stop_loss
         }
     
     def _generate_signal(self, metrics: Dict[str, Any]) -> Tuple[str, int, str]:
@@ -303,6 +410,24 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         ask_depth = metrics.get('ask_depth_usdt', 0)
         bid_ask_ratio = metrics.get('bid_ask_ratio', 1.0)
         liquidity_score = metrics.get('liquidity_score', 50)
+        
+        # Get liquidity zones information
+        liquidity_zones = metrics.get('liquidity_zones', {})
+        support_clusters = liquidity_zones.get('support_clusters', [])
+        resistance_clusters = liquidity_zones.get('resistance_clusters', [])
+        gaps = liquidity_zones.get('gaps', [])
+        
+        # Get entry and stop-loss suggestions
+        suggested_entry = metrics.get('suggested_entry')
+        suggested_stop_loss = metrics.get('suggested_stop_loss')
+        
+        # Top order book levels for explanation
+        top_bids = metrics.get('top_bids', [])
+        top_asks = metrics.get('top_asks', [])
+        
+        # Format top bids and asks for logging
+        top_bids_str = ", ".join([f"{price:.2f}: {vol:.2f}" for price, vol in top_bids[:3]]) if top_bids else "None"
+        top_asks_str = ", ".join([f"{price:.2f}: {vol:.2f}" for price, vol in top_asks[:3]]) if top_asks else "None"
         
         # Default to neutral
         signal = "NEUTRAL"
@@ -328,7 +453,15 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             signal = "SELL"
             confidence = self.medium_confidence
             explanation = f"Moderate selling pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
-            
+        
+        # Check for support/resistance clusters
+        if signal == "BUY" and support_clusters:
+            explanation += f", strong support detected at {support_clusters[0]}"
+            confidence = min(95, confidence + 5)
+        elif signal == "SELL" and resistance_clusters:
+            explanation += f", strong resistance detected at {resistance_clusters[0]}"
+            confidence = min(95, confidence + 5)
+        
         # Check spread conditions
         if spread_pct > self.thresholds['wide_spread']:
             # Wide spreads indicate low liquidity, so we'd want to be cautious
@@ -355,6 +488,23 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 confidence = min(95, confidence + 10)
             else:
                 explanation = f"Highly liquid market conditions (score: {liquidity_score:.0f}/100), neutral bias"
+        
+        # Add entry and stop-loss information to explanation
+        if suggested_entry is not None and suggested_stop_loss is not None:
+            entry_str = f"{suggested_entry:.2f}"
+            sl_str = f"{suggested_stop_loss:.2f}"
+            
+            if signal == "BUY":
+                explanation += f". Suggested entry: {entry_str} (above support), stop-loss: {sl_str}"
+            elif signal == "SELL":
+                explanation += f". Suggested entry: {entry_str} (below resistance), stop-loss: {sl_str}"
+            else:
+                # For NEUTRAL signals, suggest based on order book structure
+                if support_clusters and resistance_clusters:
+                    explanation += f". Watch support at {support_clusters[0]:.2f} and resistance at {resistance_clusters[0]:.2f}"
+        
+        # Add relevant liquidity detail to the explanation (top order book levels)
+        explanation += f". Top bids: [{top_bids_str}], top asks: [{top_asks_str}]"
                 
         return signal, confidence, explanation
         

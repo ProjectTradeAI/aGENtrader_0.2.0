@@ -411,13 +411,27 @@ def run_sentiment_analysis(symbol, interval, data_provider=None):
 def run_liquidity_analysis(symbol, interval, data_provider):
     """Run liquidity analysis and log the results."""
     try:
-        # Initialize the liquidity analyst agent - note that it doesn't need a data_provider in constructor
-        liquidity_agent = LiquidityAnalystAgent()
+        # Initialize the liquidity analyst agent with data_provider
+        liquidity_agent = LiquidityAnalystAgent(data_fetcher=data_provider)
         
-        # Get agent's configured timeframe from its initialization
-        # We don't pass the system interval to respect the agent-specific timeframe
-        logging.info(f"Running liquidity analysis for {symbol} using agent's configured timeframe")
-        result = liquidity_agent.analyze(symbol=symbol)
+        # Create market_data dictionary with order book data
+        market_data = {
+            "symbol": symbol,
+            "interval": interval
+        }
+        
+        # Fetch order book data if data_provider is available
+        if data_provider:
+            try:
+                order_book = data_provider.fetch_market_depth(symbol)
+                market_data["order_book"] = order_book
+                logging.info(f"Fetched order book data for {symbol}")
+            except Exception as e:
+                logging.warning(f"Error fetching order book data: {str(e)}")
+        
+        # Run the analysis with market_data
+        logging.info(f"Running liquidity analysis for {symbol} at {interval} interval")
+        result = liquidity_agent.analyze(symbol=symbol, market_data=market_data, interval=interval)
         
         # Extract the actual interval used for logging purposes
         used_interval = result.get("interval", "unknown")

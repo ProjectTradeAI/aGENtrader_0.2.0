@@ -157,12 +157,14 @@ class DecisionAgent:
         for agent in all_agents:
             if agent not in self.agent_weights:
                 missing_weights.append(agent)
-        
-        if missing_weights:
-            self.logger.warning(f"Missing weights for agents: {', '.join(missing_weights)}. Please update settings.yaml.")
-            # Initialize missing weights to default value
-            for agent in missing_weights:
+                # Only initialize with default weight and log a warning
+                self.logger.warning(f"⚠️ Missing weight for {agent}. Using default value 1.0. Please update settings.yaml.")
                 self.agent_weights[agent] = 1.0
+        
+        # Log a summary warning if any weights were missing
+        if missing_weights:
+            self.logger.warning(f"⚠️ Missing weights detected for {len(missing_weights)} agents. Agent weighing may not be optimal.")
+            self.logger.warning(f"Please update settings.yaml to include weights for: {', '.join(missing_weights)}")
         
         self.logger.info(f"Using agent weights: {self.agent_weights}")
         
@@ -633,10 +635,12 @@ class DecisionAgent:
             # Handle action determination with conflict state
             if has_conflict and self.allow_conflict_state:
                 # Use CONFLICTED state when there are strong opposing signals
-                action = "CONFLICTED"
+                action = "CONFLICTED"  # For tests, use CONFLICTED action
+                final_signal = "CONFLICTED"  # Also set final_signal for new consumers
                 reason = conflict_reason
                 final_confidence = max(80, normalized_confidence)  # Set higher confidence for conflict state
-                self.logger.info(f"CONFLICT DETECTED: Decision set to CONFLICTED with confidence {final_confidence}")
+                self.logger.warning(f"⚠️ CONFLICTED decision due to high-confidence opposing signals")
+                self.logger.info(f"CONFLICT DETECTED: Decision set to CONFLICTED, confidence {final_confidence}")
                 # No need to apply confidence threshold, as conflict is a high-confidence state
             # Apply confidence threshold for actions 
             elif action in ["BUY", "SELL"] and final_confidence < self.confidence_threshold:
@@ -670,9 +674,11 @@ class DecisionAgent:
             # Create decision object
             decision = {
                 "action": action,
+                "final_signal": "CONFLICTED" if (has_conflict and self.allow_conflict_state) else action,  # CONFLICTED for conflict state, otherwise same as action
                 "pair": symbol,
                 "confidence": final_confidence,
-                "reason": reason,
+                "reasoning": reason,  # Primary reason field used by external systems
+                "reason": reason,     # Keep for backward compatibility
                 "agent_contributions": agent_contributions,
                 "action_scores": action_scores,
                 "weights_used": weights_used,
@@ -768,9 +774,11 @@ class DecisionAgent:
                 # Create decision
                 decision = {
                     "action": action,
+                    "final_signal": action,  # Explicitly set final_signal to match action
                     "pair": symbol,
                     "confidence": confidence,
-                    "reason": reason,
+                    "reasoning": reason,  # Add reasoning field for consistency 
+                    "reason": reason,     # Keep original reason field for backward compatibility
                     "agent_contributions": agent_contributions,
                     "decision_method": "liquidity_based"
                 }
@@ -808,9 +816,11 @@ class DecisionAgent:
                 # Create decision
                 decision = {
                     "action": action,
+                    "final_signal": action,  # Explicitly set final_signal to match action
                     "pair": symbol,
                     "confidence": confidence,
-                    "reason": reason,
+                    "reasoning": reason,  # Add reasoning field for consistency
+                    "reason": reason,     # Keep original reason field for backward compatibility
                     "agent_contributions": agent_contributions,
                     "decision_method": "rule_based"
                 }
@@ -821,8 +831,10 @@ class DecisionAgent:
             confidence = 30
             decision = {
                 "action": "HOLD",
+                "final_signal": "HOLD",
                 "pair": symbol,
                 "confidence": confidence,
+                "reasoning": f"Error analyzing liquidity data: {str(e)}",
                 "reason": f"Error analyzing liquidity data: {str(e)}",
                 "agent_contributions": {
                     "LiquidityAnalystAgent": {
@@ -874,9 +886,11 @@ class DecisionAgent:
         # Build decision object
         decision = {
             "action": action,
+            "final_signal": action,  # Explicitly set final_signal to match action
             "pair": pair,
             "confidence": confidence,
-            "reason": reason,
+            "reasoning": reason,  # Add reasoning field for consistency
+            "reason": reason,     # Keep original reason field for backward compatibility
             "timestamp": datetime.now().isoformat(),
             "agent_contributions": {},
             "decision_method": "fallback" if error else "simple"
@@ -954,8 +968,10 @@ class DecisionAgent:
         # Default decision (conservative)
         decision = {
             "action": "HOLD",
+            "final_signal": "HOLD",
             "pair": symbol,
             "confidence": 50,
+            "reasoning": "Waiting for clearer signals",
             "reason": "Waiting for clearer signals",
             "agent_contributions": agent_contributions,
             "decision_method": "llm_based"
@@ -1026,10 +1042,21 @@ class DecisionAgent:
                     agent_contributions_backup = decision.get("agent_contributions", {})
                     decision_method = decision.get("decision_method", "llm_based")
                     
-                    decision = llm_decision
-                    decision["pair"] = symbol  # Ensure correct symbol
-                    decision["agent_contributions"] = agent_contributions_backup
-                    decision["decision_method"] = decision_method
+                    # Create new decision with all required fields
+                    action = llm_decision.get("action", "HOLD").upper()
+                    reason = llm_decision.get("reason", "LLM decision")
+                    confidence = llm_decision.get("confidence", 50)
+                    
+                    decision = {
+                        "action": action,
+                        "final_signal": action,  # Explicitly set final_signal to match action
+                        "pair": symbol,
+                        "confidence": confidence,
+                        "reasoning": reason,  # Primary reason field
+                        "reason": reason,     # Original reason field for backward compatibility
+                        "agent_contributions": agent_contributions_backup,
+                        "decision_method": decision_method
+                    }
                 
             except json.JSONDecodeError as e:
                 self.logger.error(f"Failed to parse LLM response as JSON: {e}")
@@ -1038,8 +1065,10 @@ class DecisionAgent:
                 confidence = 30
                 decision = {
                     "action": "HOLD",
+                    "final_signal": "HOLD",
                     "pair": symbol,
                     "confidence": confidence,
+                    "reasoning": "Error parsing decision data",
                     "reason": "Error parsing decision data",
                     "agent_contributions": agent_contributions_backup,
                     "decision_method": "error_fallback"
@@ -1052,8 +1081,10 @@ class DecisionAgent:
             confidence = 30
             decision = {
                 "action": "HOLD",
+                "final_signal": "HOLD",
                 "pair": symbol,
                 "confidence": confidence,
+                "reasoning": f"Error synthesizing analyses: {str(e)}",
                 "reason": f"Error synthesizing analyses: {str(e)}",
                 "agent_contributions": agent_contributions_backup,
                 "decision_method": "error_fallback"
@@ -1068,9 +1099,27 @@ class DecisionAgent:
         Args:
             decision: Trading decision dictionary
         """
-        self.logger.info(f"Decision: {decision['action']} {decision['pair']} (Confidence: {decision['confidence']})")
-        self.logger.info(f"Reason: {decision['reason']}")
+        action = decision.get('action', 'UNKNOWN')
+        final_signal = decision.get('final_signal', action)
+        confidence = decision.get('confidence', 0)
+        reason = decision.get('reasoning') or decision.get('reason', 'No reason provided')
         
+        # Include final_signal in log if it differs from action
+        if final_signal != action:
+            self.logger.info(f"Decision: {action} (Signal: {final_signal}) {decision.get('pair', 'UNKNOWN')} (Confidence: {confidence})")
+        else:
+            self.logger.info(f"Decision: {action} {decision.get('pair', 'UNKNOWN')} (Confidence: {confidence})")
+            
+        # Special handling for CONFLICTED state
+        if final_signal == "CONFLICTED":
+            self.logger.warning(f"⚠️ CONFLICTED decision: {reason}")
+        else:
+            self.logger.info(f"Reason: {reason}")
+        
+        # Log conflict metrics if available
+        if decision.get('has_conflict', False):
+            self.logger.info(f"Conflict Score: {decision.get('conflict_score', 'N/A')}")
+            
         # TODO: Log to database or file for record-keeping
         # This would be implemented in future versions
 

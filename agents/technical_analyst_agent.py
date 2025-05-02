@@ -129,18 +129,18 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         
     def analyze(
         self, 
-        symbol_or_data: Union[str, Dict[str, Any]] = None, 
-        interval: Optional[str] = None,
+        symbol: Optional[str] = None, 
         market_data: Optional[Dict[str, Any]] = None,
+        interval: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Analyze market data using technical analysis.
         
         Args:
-            symbol_or_data: Trading symbol or market data dictionary
-            interval: Time interval
+            symbol: Trading symbol
             market_data: Pre-fetched market data (optional)
+            interval: Time interval
             **kwargs: Additional parameters
             
         Returns:
@@ -148,15 +148,25 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         """
         start_time = time.time()
         
-        # Handle parameter flexibility: accept either symbol string or market_data dict as first param
-        if isinstance(symbol_or_data, dict):
-            # First parameter is actually market_data
-            market_data = symbol_or_data
-            symbol = market_data.get('symbol')
-            interval = market_data.get('interval') or interval
-        else:
-            # First parameter is symbol
-            symbol = symbol_or_data
+        # Handle parameter flexibility with the new signature
+        self.logger.info(f"TechnicalAnalystAgent analyze called with symbol type: {type(symbol)}, market_data type: {type(market_data)}")
+        
+        # Extract data provider from market_data if available
+        data_provider = None
+        if market_data and isinstance(market_data, dict):
+            # Get data provider from market_data
+            data_provider = market_data.get('data_provider')
+            if data_provider:
+                self.data_fetcher = data_provider
+                self.logger.info(f"Using data_provider from market_data: {type(data_provider).__name__}")
+                
+            # Extract other parameters from market_data if not provided directly
+            if not symbol and 'symbol' in market_data:
+                symbol = market_data.get('symbol')
+            if not interval and 'interval' in market_data:
+                interval = market_data.get('interval')
+            
+            self.logger.info(f"Parameters from market_data: symbol={symbol}, interval={interval}, data_provider={'Available' if data_provider else 'None'}")
             
         # Use agent-specific timeframe if none provided
         interval = interval or self.default_interval

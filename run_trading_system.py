@@ -60,23 +60,34 @@ def create_data_provider(provider_type="binance"):
         logger.error(f"Unsupported data provider type: {provider_type}")
         return None
 
-def run_technical_analysis(symbol, interval, data_provider):
+def run_technical_analysis(market_data_or_symbol, interval=None, data_provider=None):
     """Run technical analysis and log the results"""
     try:
         from agents.technical_analyst_agent import TechnicalAnalystAgent
         
+        # Standardize market_data format
+        if isinstance(market_data_or_symbol, dict):
+            market_data = market_data_or_symbol
+            symbol = market_data.get("symbol")
+            interval = market_data.get("interval") or interval
+            data_provider = market_data.get("data_provider") or data_provider
+            logger.info(f"Technical analysis: Received market_data dictionary. symbol={symbol}, interval={interval}, data_provider={'Available' if data_provider else 'None'}")
+        else:
+            symbol = market_data_or_symbol
+            market_data = {
+                "symbol": symbol,
+                "interval": interval,
+                "data_provider": data_provider
+            }
+            logger.info(f"Technical analysis: Created market_data dictionary. symbol={symbol}, interval={interval}, data_provider={'Available' if data_provider else 'None'}")
+        
         # Initialize the technical analyst agent
+        logger.info(f"Initializing TechnicalAnalystAgent with data_provider type: {type(data_provider).__name__ if data_provider else 'None'}")
         tech_agent = TechnicalAnalystAgent(data_fetcher=data_provider)
         
-        # Run analysis with explicit symbol and interval parameters
-        # Package the parameters in market_data format to ensure compatibility
-        logger.info(f"Running technical analysis for {symbol} at {interval} interval")
-        market_data = {
-            "symbol": symbol,
-            "interval": interval,
-            "data_provider": data_provider
-        }
-        result = tech_agent.analyze(symbol_or_data=market_data)
+        # Run analysis with market_data using standardized parameter signature
+        logger.info(f"Running technical analysis for {symbol} at {interval} interval with market_data keys: {list(market_data.keys())}")
+        result = tech_agent.analyze(symbol=symbol, market_data=market_data, interval=interval)
         
         # Log the result
         if 'error' in result:
@@ -97,20 +108,30 @@ def run_technical_analysis(symbol, interval, data_provider):
         logger.error(f"Error in technical analysis: {str(e)}", exc_info=True)
         return {"error": True, "error_type": "Exception", "message": str(e)}
 
-def run_sentiment_analysis(symbol, data_provider=None):
+def run_sentiment_analysis(market_data_or_symbol, data_provider=None, interval=None):
     """Run sentiment analysis and log the results"""
     try:
         from agents.sentiment_analyst_agent import SentimentAnalystAgent
         
+        # Standardize market_data format
+        if isinstance(market_data_or_symbol, dict):
+            market_data = market_data_or_symbol
+            symbol = market_data.get("symbol")
+            interval = market_data.get("interval") or interval
+            data_provider = market_data.get("data_provider") or data_provider
+        else:
+            symbol = market_data_or_symbol
+            market_data = {
+                "symbol": symbol,
+                "interval": interval,
+                "data_provider": data_provider
+            }
+        
         # Initialize the sentiment analyst agent
         sentiment_agent = SentimentAnalystAgent()
         
-        # Run analysis with market data format to ensure compatibility
+        # Run analysis with market data format
         logger.info(f"Running sentiment analysis for {symbol}")
-        market_data = {
-            "symbol": symbol,
-            "data_provider": data_provider
-        }
         result = sentiment_agent.analyze(symbol_or_data=market_data)
         
         # Log the result
@@ -129,24 +150,140 @@ def run_sentiment_analysis(symbol, data_provider=None):
         logger.error(f"Error in sentiment analysis: {str(e)}", exc_info=True)
         return {"error": True, "error_type": "Exception", "message": str(e)}
 
-def make_trading_decision(analyses, symbol, interval, data_provider=None):
+def run_liquidity_analysis(market_data_or_symbol, interval=None, data_provider=None):
+    """Run liquidity analysis and log the results"""
+    try:
+        # Standardize market_data format
+        if isinstance(market_data_or_symbol, dict):
+            market_data = market_data_or_symbol
+            symbol = market_data.get("symbol")
+            interval = market_data.get("interval") or interval
+            data_provider = market_data.get("data_provider") or data_provider
+        else:
+            symbol = market_data_or_symbol
+            market_data = {
+                "symbol": symbol,
+                "interval": interval,
+                "data_provider": data_provider
+            }
+            
+        # The actual LiquidityAnalystAgent will be implemented later
+        # For now, return a structured error that the DecisionAgent will understand
+        if not data_provider:
+            return {
+                "error": True, 
+                "error_type": "DATA_FETCHER_MISSING", 
+                "message": "Data fetcher not provided"
+            }
+            
+        logger.info(f"Liquidity analysis not fully implemented yet for {symbol}")
+        return {
+            "signal": "HOLD",
+            "confidence": 0,
+            "reasoning": "Liquidity analysis not implemented yet"
+        }
+    except Exception as e:
+        logger.error(f"Error in liquidity analysis: {str(e)}", exc_info=True)
+        return {"error": True, "error_type": "Exception", "message": str(e)}
+
+def run_funding_rate_analysis(market_data_or_symbol, interval=None, data_provider=None):
+    """Run funding rate analysis and log the results"""
+    try:
+        # Standardize market_data format
+        if isinstance(market_data_or_symbol, dict):
+            market_data = market_data_or_symbol
+            symbol = market_data.get("symbol")
+            interval = market_data.get("interval") or interval
+            data_provider = market_data.get("data_provider") or data_provider
+        else:
+            symbol = market_data_or_symbol
+            market_data = {
+                "symbol": symbol,
+                "interval": interval,
+                "data_provider": data_provider
+            }
+            
+        # The actual FundingRateAnalystAgent will be implemented later
+        # For now, return a structured error that the DecisionAgent will understand
+        if not data_provider:
+            return {
+                "error": True, 
+                "error_type": "DATA_FETCHER_MISSING", 
+                "message": "Data fetcher not provided"
+            }
+        
+        logger.info(f"Funding rate analysis not fully implemented yet for {symbol}")
+        return {
+            "signal": "HOLD",
+            "confidence": 0,
+            "reasoning": "Funding rate analysis not implemented yet"
+        }
+    except Exception as e:
+        logger.error(f"Error in funding rate analysis: {str(e)}", exc_info=True)
+        return {"error": True, "error_type": "Exception", "message": str(e)}
+
+def run_open_interest_analysis(market_data_or_symbol, interval=None, data_provider=None):
+    """Run open interest analysis and log the results"""
+    try:
+        # Standardize market_data format
+        if isinstance(market_data_or_symbol, dict):
+            market_data = market_data_or_symbol
+            symbol = market_data.get("symbol")
+            interval = market_data.get("interval") or interval
+            data_provider = market_data.get("data_provider") or data_provider
+        else:
+            symbol = market_data_or_symbol
+            market_data = {
+                "symbol": symbol,
+                "interval": interval,
+                "data_provider": data_provider
+            }
+            
+        # The actual OpenInterestAnalystAgent will be implemented later
+        # For now, return a structured error that the DecisionAgent will understand
+        if not data_provider:
+            return {
+                "error": True, 
+                "error_type": "DATA_FETCHER_MISSING", 
+                "message": "Data fetcher not provided"
+            }
+        
+        logger.info(f"Open interest analysis not fully implemented yet for {symbol}")
+        return {
+            "signal": "HOLD",
+            "confidence": 0,
+            "reasoning": "Open interest analysis not implemented yet"
+        }
+    except Exception as e:
+        logger.error(f"Error in open interest analysis: {str(e)}", exc_info=True)
+        return {"error": True, "error_type": "Exception", "message": str(e)}
+
+def make_trading_decision(analyses, market_data_or_symbol, interval=None, data_provider=None):
     """Make a trading decision based on agent analyses"""
     try:
         from agents.decision_agent import DecisionAgent
         
+        # Standardize market_data format
+        if isinstance(market_data_or_symbol, dict):
+            market_data = market_data_or_symbol
+            symbol = market_data.get("symbol")
+            interval = market_data.get("interval") or interval
+            data_provider = market_data.get("data_provider") or data_provider
+        else:
+            symbol = market_data_or_symbol
+            market_data = {
+                "symbol": symbol,
+                "interval": interval,
+                "data_provider": data_provider
+            }
+        
         # Initialize the decision agent
         decision_agent = DecisionAgent()
         
-        # Create market_data with data_provider for better agent integration
-        market_data = {
-            "symbol": symbol,
-            "interval": interval
-        }
+        # Log market_data contents
+        logger.info(f"Decision making: market_data contains symbol={market_data.get('symbol')}, interval={market_data.get('interval')}, data_provider={'Available' if market_data.get('data_provider') else 'None'}")
+        logger.info(f"Decision making: analyses keys: {list(analyses.keys())}")
         
-        # Add data_provider if available
-        if data_provider:
-            market_data["data_provider"] = data_provider
-            
         # Make decision
         logger.info(f"Making trading decision for {symbol} at {interval} interval")
         decision = decision_agent.make_decision(
@@ -191,24 +328,52 @@ def run_demo_cycle(symbol="BTC/USDT", interval="1h"):
     except Exception as e:
         logger.warning(f"Could not fetch current price: {str(e)}")
     
+    # Create market data dictionary to pass to all analyses
+    market_data = {
+        "symbol": symbol,
+        "interval": interval,
+        "data_provider": data_provider
+    }
+    
+    # Log the market_data for debugging
+    logger.info(f"Created market_data dictionary: symbol={market_data.get('symbol')}, interval={market_data.get('interval')}, data_provider={'Available' if market_data.get('data_provider') else 'None'}")
+    
     # Run analyses
     analyses = {}
     
     # Run technical analysis
     logger.info("✅ Running technical analysis")
-    technical_result = run_technical_analysis(symbol, interval, data_provider)
+    technical_result = run_technical_analysis(market_data)
     if not technical_result.get('error', False):
         analyses['technical_analysis'] = technical_result
     
     # Run sentiment analysis
     logger.info("✅ Running sentiment analysis")
-    sentiment_result = run_sentiment_analysis(symbol, data_provider)
+    sentiment_result = run_sentiment_analysis(market_data)
     if not sentiment_result.get('error', False):
         analyses['sentiment_analysis'] = sentiment_result
     
+    # Run liquidity analysis
+    logger.info("✅ Running liquidity analysis")
+    liquidity_result = run_liquidity_analysis(market_data)
+    if not liquidity_result.get('error', False):
+        analyses['liquidity_analysis'] = liquidity_result
+    
+    # Run funding rate analysis
+    logger.info("✅ Running funding rate analysis")
+    funding_rate_result = run_funding_rate_analysis(market_data)
+    if not funding_rate_result.get('error', False):
+        analyses['funding_rate_analysis'] = funding_rate_result
+    
+    # Run open interest analysis
+    logger.info("✅ Running open interest analysis")
+    open_interest_result = run_open_interest_analysis(market_data)
+    if not open_interest_result.get('error', False):
+        analyses['open_interest_analysis'] = open_interest_result
+    
     # Make decision using available analyses
     logger.info("✅ Making decision using: " + ", ".join(analyses.keys()))
-    decision = make_trading_decision(analyses, symbol, interval, data_provider)
+    decision = make_trading_decision(analyses, market_data)
     
     # Return results
     return {

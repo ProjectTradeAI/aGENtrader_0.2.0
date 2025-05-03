@@ -333,69 +333,134 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                 except (ValueError, IndexError):
                     continue
         
-        # Ensure we have equal lengths for valid analysis
-        # Truncate to the shorter list if needed
-        length = min(len(oi_values), len(prices))
-        if length < 3:
-            logger.warning("Insufficient data for analysis")
+        # Ensure we have data for analysis
+        # Works even with just 2 data points for basic delta analysis
+        if len(oi_values) < 2 or len(prices) < 2:
+            logger.warning("Insufficient data points for even basic analysis")
             return {
                 "oi_change": 0,
                 "price_change": 0,
                 "divergence": False,
                 "confirmation": False,
                 "trend_strength": 0,
-                "oi_trend": "neutral"
+                "oi_trend": "neutral",
+                "data_points": len(oi_values)
             }
             
+        # Ensure equal lengths by taking the minimum of both datasets
+        length = min(len(oi_values), len(prices))
         oi_values = oi_values[-length:]
         prices = prices[-length:]
         
-        # Calculate percentage changes
-        oi_pct_changes = [(oi_values[i] - oi_values[i-1]) / oi_values[i-1] * 100 if oi_values[i-1] != 0 else 0 
-                          for i in range(1, len(oi_values))]
-        price_pct_changes = [(prices[i] - prices[i-1]) / prices[i-1] * 100 if prices[i-1] != 0 else 0 
-                            for i in range(1, len(prices))]
+        # Calculate period-by-period percentage changes for each data point
+        oi_pct_changes = []
+        price_pct_changes = []
         
-        # Calculate recent changes
-        recent_oi_change = ((oi_values[-1] - oi_values[0]) / oi_values[0]) * 100 if oi_values[0] != 0 else 0
-        recent_price_change = ((prices[-1] - prices[0]) / prices[0]) * 100 if prices[0] != 0 else 0
+        for i in range(1, len(oi_values)):
+            # Calculate OI percent change, handling zero values
+            if oi_values[i-1] != 0:
+                oi_pct = (oi_values[i] - oi_values[i-1]) / oi_values[i-1] * 100
+            else:
+                oi_pct = 0 if oi_values[i] == 0 else 100  # Assume 100% increase if from zero to non-zero
+                
+            # Calculate price percent change, handling zero values
+            if prices[i-1] != 0:
+                price_pct = (prices[i] - prices[i-1]) / prices[i-1] * 100
+            else:
+                price_pct = 0 if prices[i] == 0 else 100  # Assume 100% increase if from zero to non-zero
+                
+            oi_pct_changes.append(oi_pct)
+            price_pct_changes.append(price_pct)
         
-        # Calculate short term changes (last 3 periods)
-        short_term_oi_change = ((oi_values[-1] - oi_values[-min(3, len(oi_values))]) / oi_values[-min(3, len(oi_values))]) * 100 if len(oi_values) >= 3 and oi_values[-min(3, len(oi_values))] != 0 else 0
-        short_term_price_change = ((prices[-1] - prices[-min(3, len(prices))]) / prices[-min(3, len(prices))]) * 100 if len(prices) >= 3 and prices[-min(3, len(prices))] != 0 else 0
+        # Calculate overall changes from start to end
+        if oi_values[0] != 0:
+            recent_oi_change = ((oi_values[-1] - oi_values[0]) / oi_values[0]) * 100
+        else:
+            recent_oi_change = 0 if oi_values[-1] == 0 else 100
+            
+        if prices[0] != 0:
+            recent_price_change = ((prices[-1] - prices[0]) / prices[0]) * 100
+        else:
+            recent_price_change = 0 if prices[-1] == 0 else 100
         
-        # Check for divergence/confirmation
+        # Calculate very short term changes (last 3 periods or fewer if less data available)
+        lookback = min(3, len(oi_values)-1)
+        if lookback > 0:
+            if oi_values[-lookback-1] != 0:
+                short_term_oi_change = ((oi_values[-1] - oi_values[-lookback-1]) / oi_values[-lookback-1]) * 100
+            else:
+                short_term_oi_change = 0 if oi_values[-1] == 0 else 100
+                
+            if prices[-lookback-1] != 0:
+                short_term_price_change = ((prices[-1] - prices[-lookback-1]) / prices[-lookback-1]) * 100
+            else:
+                short_term_price_change = 0 if prices[-1] == 0 else 100
+        else:
+            # Fall back to overall change if we don't have enough data points
+            short_term_oi_change = recent_oi_change
+            short_term_price_change = recent_price_change
+        
+        # Check for divergence/confirmation (delta-based analysis)
         divergence = (recent_oi_change * recent_price_change < 0)  # OI and price moving in opposite directions
         confirmation = (recent_oi_change * recent_price_change > 0)  # OI and price moving in same direction
         
-        # Determine OI trend and strength
-        if recent_oi_change > 5:
-            oi_trend = "increasing_strong"
-            trend_strength = 0.8
-        elif recent_oi_change > 2:
-            oi_trend = "increasing_moderate"
-            trend_strength = 0.6
-        elif recent_oi_change < -5:
-            oi_trend = "decreasing_strong"
-            trend_strength = 0.8
-        elif recent_oi_change < -2:
-            oi_trend = "decreasing_moderate"
-            trend_strength = 0.6
-        else:
-            oi_trend = "neutral"
-            trend_strength = 0.3
-            
-        # Calculate correlation between OI and price changes
-        if len(oi_pct_changes) > 1 and len(price_pct_changes) > 1:
+        # Calculate correlation between OI and price changes if we have enough data
+        correlation = 0
+        if len(oi_pct_changes) >= 2 and len(price_pct_changes) >= 2:
             try:
                 correlation = np.corrcoef(oi_pct_changes, price_pct_changes)[0, 1]
-            except:
+            except Exception as e:
+                logger.debug(f"Error calculating correlation: {str(e)}")
                 correlation = 0
-        else:
-            correlation = 0
         
+        # Calculate trend strength (normalized to 0-1 range)
+        trend_strength = min(abs(recent_price_change) / 100, 1.0)
+        
+        # Determine OI trend direction and magnitude
+        if recent_oi_change > 5:
+            oi_trend = "increasing"
+            oi_strength = min(abs(recent_oi_change) / 20, 1.0)  # Normalize strength: 20% change = full strength
+        elif recent_oi_change < -5:
+            oi_trend = "decreasing"
+            oi_strength = min(abs(recent_oi_change) / 20, 1.0)
+        else:
+            oi_trend = "neutral"
+            oi_strength = 0
+            
+        # Determine price trend direction and magnitude
+        if recent_price_change > 2:
+            price_trend = "increasing"
+            price_strength = min(abs(recent_price_change) / 10, 1.0)  # Normalize strength: 10% change = full strength
+        elif recent_price_change < -2:
+            price_trend = "decreasing"
+            price_strength = min(abs(recent_price_change) / 10, 1.0)
+        else:
+            price_trend = "neutral"
+            price_strength = 0
+            
+        # Create summary of OI and price changes for recent periods
+        recent_oi_changes = [f"{oi_pct_changes[-i] if i <= len(oi_pct_changes) else 0:.2f}%" for i in range(min(8, len(oi_pct_changes)), 0, -1)]
+        recent_price_changes = [f"{price_pct_changes[-i] if i <= len(price_pct_changes) else 0:.2f}%" for i in range(min(8, len(price_pct_changes)), 0, -1)]
+        
+        # Identify specific patterns
+        # Rising OI + Rising Price = Strong bullish trend (longs building positions)
+        # Rising OI + Falling Price = Strong bearish trend (shorts building positions)
+        # Falling OI + Rising Price = Weak bullish trend (shorts covering)
+        # Falling OI + Falling Price = Weak bearish trend (longs closing positions)
+        pattern = "none"
+        if recent_oi_change > 5 and recent_price_change > 2:
+            pattern = "strong_bullish"  # Longs building up
+        elif recent_oi_change > 5 and recent_price_change < -2:
+            pattern = "strong_bearish"  # Shorts building up
+        elif recent_oi_change < -5 and recent_price_change > 2:
+            pattern = "weak_bullish"  # Shorts covering
+        elif recent_oi_change < -5 and recent_price_change < -2:
+            pattern = "weak_bearish"  # Longs liquidating
+        elif abs(recent_oi_change) < 3:
+            pattern = "position_equilibrium"  # Little change in positions
+            
         return {
-            "current_oi": oi_values[-1],
+            "current_oi": oi_values[-1] if oi_values else 0,
             "oi_change": recent_oi_change,
             "oi_change_short_term": short_term_oi_change,
             "price_change": recent_price_change,
@@ -404,8 +469,15 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
             "confirmation": confirmation,
             "trend_strength": trend_strength,
             "oi_trend": oi_trend,
+            "oi_strength": oi_strength,
+            "price_trend": price_trend,
+            "price_strength": price_strength,
             "correlation": correlation,
-            "oi_price_ratio": oi_values[-1] / prices[-1] if prices[-1] > 0 else 0
+            "pattern": pattern,
+            "recent_oi_changes": recent_oi_changes,
+            "recent_price_changes": recent_price_changes,
+            "oi_price_ratio": oi_values[-1] / prices[-1] if prices[-1] > 0 else 0,
+            "data_points": len(oi_values)
         }
     
     def _generate_signal(self, metrics: Dict[str, Any]) -> Tuple[str, int, str]:
@@ -426,47 +498,100 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
         divergence = metrics.get('divergence', False)
         confirmation = metrics.get('confirmation', False)
         trend_strength = metrics.get('trend_strength', 0)
+        pattern = metrics.get('pattern', 'none')
         oi_trend = metrics.get('oi_trend', 'neutral')
+        price_trend = metrics.get('price_trend', 'neutral')
+        oi_strength = metrics.get('oi_strength', 0)
+        price_strength = metrics.get('price_strength', 0)
         correlation = metrics.get('correlation', 0)
+        recent_oi_changes = metrics.get('recent_oi_changes', [])
+        recent_price_changes = metrics.get('recent_price_changes', [])
+        data_points = metrics.get('data_points', 0)
         
-        # Default to neutral
+        # Format recent changes for explanation
+        oi_changes_str = ', '.join(recent_oi_changes) if recent_oi_changes else "N/A"
+        price_changes_str = ', '.join(recent_price_changes) if recent_price_changes else "N/A"
+        
+        # Default to neutral, but with variable confidence based on data quality
         signal = "NEUTRAL"
-        confidence = 50
-        explanation = "Open interest analysis shows neutral conditions"
+        # Higher base confidence with more data points
+        base_confidence = min(50 + int(data_points/2), 65) if data_points > 0 else 50
+        confidence = base_confidence
+        explanation = f"Open interest analysis based on {data_points} data points shows balanced market conditions"
         
-        # Check for divergence signals (contrarian)
-        if divergence:
-            if price_change > 5 and oi_change < -3:
-                # Price up, OI down = potential reversal of uptrend
-                signal = "SELL"
-                confidence = self.high_confidence if abs(oi_change) > 10 else self.medium_confidence
-                explanation = (f"Bearish divergence: Price increased by {price_change:.2f}% while open interest "
-                               f"decreased by {abs(oi_change):.2f}%, suggesting potential reversal of uptrend")
+        # Primary delta-based signal generation using pattern detection
+        # These patterns take priority over other signals as they provide clearer directional bias
+        if pattern == "strong_bullish":  # Rising OI + Rising Price = Longs building up
+            signal = "BUY"
+            confidence = self.high_confidence if oi_change > 10 and price_change > 5 else self.medium_confidence
+            explanation = (f"Strong bullish pattern: Open interest increasing ({oi_change:.2f}%) with rising price ({price_change:.2f}%) "
+                          f"indicates long positions are accumulating (bullish sentiment)")
             
-            elif price_change < -5 and oi_change > 3:
-                # Price down, OI up = potential reversal of downtrend
-                signal = "BUY"
-                confidence = self.high_confidence if abs(oi_change) > 10 else self.medium_confidence
-                explanation = (f"Bullish divergence: Price decreased by {abs(price_change):.2f}% while open interest "
-                               f"increased by {oi_change:.2f}%, suggesting potential reversal of downtrend")
-        
-        # Check for confirmation signals
-        elif confirmation:
-            if price_change > 2 and oi_change > 5:
-                # Price up, OI up = strong uptrend continuation
-                signal = "BUY"
-                confidence = self.medium_confidence
-                explanation = (f"Uptrend confirmation: Price increased by {price_change:.2f}% with "
-                               f"open interest also rising by {oi_change:.2f}%, indicating trend strength")
+        elif pattern == "strong_bearish":  # Rising OI + Falling Price = Shorts building up
+            signal = "SELL"
+            confidence = self.high_confidence if oi_change > 10 and price_change < -5 else self.medium_confidence
+            explanation = (f"Strong bearish pattern: Open interest increasing ({oi_change:.2f}%) with falling price ({price_change:.2f}%) "
+                          f"indicates short positions are accumulating (bearish sentiment)")
             
-            elif price_change < -2 and oi_change < -5:
-                # Price down, OI down = strong downtrend continuation
+        elif pattern == "weak_bullish":  # Falling OI + Rising Price = Shorts covering
+            signal = "BUY"
+            confidence = self.medium_confidence
+            explanation = (f"Weak bullish pattern: Open interest decreasing ({oi_change:.2f}%) with rising price ({price_change:.2f}%) "
+                          f"indicates short positions are being covered (moderately bullish)")
+            
+        elif pattern == "weak_bearish":  # Falling OI + Falling Price = Longs liquidating
+            signal = "SELL"
+            confidence = self.medium_confidence
+            explanation = (f"Weak bearish pattern: Open interest decreasing ({oi_change:.2f}%) with falling price ({price_change:.2f}%) "
+                          f"indicates long positions are being liquidated (moderately bearish)")
+                          
+        elif pattern == "position_equilibrium" and abs(price_change) > 2:
+            # Price is moving but OI isn't changing much
+            if price_change > 2:
+                signal = "BUY"
+                confidence = self.low_confidence
+                explanation = (f"Price increasing ({price_change:.2f}%) with little change in open interest ({oi_change:.2f}%) "
+                              f"suggests natural demand rather than new position building")
+            elif price_change < -2:
                 signal = "SELL"
-                confidence = self.medium_confidence
-                explanation = (f"Downtrend confirmation: Price decreased by {abs(price_change):.2f}% with "
-                               f"open interest also falling by {abs(oi_change):.2f}%, indicating trend strength")
+                confidence = self.low_confidence
+                explanation = (f"Price decreasing ({price_change:.2f}%) with little change in open interest ({oi_change:.2f}%) "
+                              f"suggests natural selling rather than new position building")
         
-        # Check for short-term changes if no clear signal yet
+        # If we still don't have a signal from pattern analysis, check for traditional divergence or confirmation
+        if signal == "NEUTRAL":
+            if divergence:
+                if price_change > 5 and oi_change < -3:
+                    # Price up, OI down = potential reversal of uptrend
+                    signal = "SELL"
+                    confidence = self.high_confidence if abs(oi_change) > 10 else self.medium_confidence
+                    explanation = (f"Bearish divergence: Price increased by {price_change:.2f}% while open interest "
+                                   f"decreased by {abs(oi_change):.2f}%, suggesting potential reversal of uptrend")
+                
+                elif price_change < -5 and oi_change > 3:
+                    # Price down, OI up = potential reversal of downtrend
+                    signal = "BUY"
+                    confidence = self.high_confidence if abs(oi_change) > 10 else self.medium_confidence
+                    explanation = (f"Bullish divergence: Price decreased by {abs(price_change):.2f}% while open interest "
+                                   f"increased by {oi_change:.2f}%, suggesting potential reversal of downtrend")
+            
+            # Check for confirmation signals
+            elif confirmation:
+                if price_change > 2 and oi_change > 5:
+                    # Price up, OI up = strong uptrend continuation
+                    signal = "BUY"
+                    confidence = self.medium_confidence
+                    explanation = (f"Uptrend confirmation: Price increased by {price_change:.2f}% with "
+                                   f"open interest also rising by {oi_change:.2f}%, indicating trend strength")
+                
+                elif price_change < -2 and oi_change < -5:
+                    # Price down, OI down = strong downtrend continuation
+                    signal = "SELL"
+                    confidence = self.medium_confidence
+                    explanation = (f"Downtrend confirmation: Price decreased by {abs(price_change):.2f}% with "
+                                   f"open interest also falling by {abs(oi_change):.2f}%, indicating trend strength")
+        
+        # If we still don't have a signal, check for short-term momentum
         if signal == "NEUTRAL" and abs(oi_change_short_term) > 3:
             if oi_change_short_term > 0 and price_change_short_term > 0:
                 signal = "BUY"
@@ -480,17 +605,27 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                 explanation = (f"Short-term bearish momentum: Open interest decreased by {abs(oi_change_short_term):.2f}% "
                                f"with price down {abs(price_change_short_term):.2f}% in recent periods")
         
+        # Add information about recent changes to the explanation
+        explanation += f". Recent OI changes: [{oi_changes_str}], price changes: [{price_changes_str}]"
+        
         # Consider correlation
         if abs(correlation) > 0.7:
             if signal != "NEUTRAL":
-                explanation += f", strong correlation ({correlation:.2f}) between price and open interest movements"
+                explanation += f", strong correlation ({correlation:.2f}) between price and open interest"
                 confidence = min(95, confidence + 10)
+            else:
+                explanation += f", strong correlation ({correlation:.2f}) between price and open interest, but no clear directional bias"
         
-        # Consider trend strength
+        # Consider trend strength to adjust confidence
         if trend_strength > 0.7:
             if signal != "NEUTRAL":
                 explanation += f", with strong trend intensity"
                 confidence = min(95, confidence + 5)
+        
+        # Check if we have very limited data and should indicate lower confidence
+        if data_points < 5 and signal != "NEUTRAL":
+            explanation += f" (based on limited data set of {data_points} points)"
+            confidence = max(self.low_confidence, confidence - 10)
         
         return signal, confidence, explanation
         

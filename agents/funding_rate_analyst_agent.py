@@ -76,18 +76,18 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
         
     def analyze(
         self, 
-        symbol: Optional[str] = None, 
-        interval: Optional[str] = None,
+        symbol: Optional[Union[str, Dict[str, Any]]] = None, 
         market_data: Optional[Dict[str, Any]] = None,
+        interval: Optional[str] = None,
         **kwargs
     ) -> Dict[str, Any]:
         """
         Analyze funding rates for a symbol.
         
         Args:
-            symbol: Trading symbol (e.g., "BTC/USDT")
-            interval: Time interval (mainly used for consistency with other agents)
+            symbol: Trading symbol (e.g., "BTC/USDT") or market data dictionary
             market_data: Pre-fetched market data (optional)
+            interval: Time interval (mainly used for consistency with other agents)
             **kwargs: Additional parameters
             
         Returns:
@@ -296,12 +296,29 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
         current_rate = rates[-1]
         average_rate = sum(rates) / len(rates)
         
-        # Calculate the trend (positive means increasing funding rate)
+        # Calculate trend analysis (overall direction and recent trend)
+        rate_trend = 0
         if len(rates) >= 3:
             rate_trend = rates[-1] - rates[0]
-        else:
-            rate_trend = 0
             
+        # Enhanced trend analysis looking at the most recent periods
+        # Get the most recent 8-16 rates or fewer if less data available
+        recent_count = min(len(rates), 16)
+        recent_rates = rates[-recent_count:]
+        
+        # Calculate trend consistency and direction
+        increasing_count = sum(1 for i in range(1, len(recent_rates)) if recent_rates[i] > recent_rates[i-1])
+        decreasing_count = sum(1 for i in range(1, len(recent_rates)) if recent_rates[i] < recent_rates[i-1])
+        
+        trend_consistency = max(increasing_count, decreasing_count) / max(1, len(recent_rates)-1)
+        trend_direction = "increasing" if increasing_count > decreasing_count else "decreasing"
+        
+        # Determine if the recent trend is consistently in one direction
+        is_consistent_trend = trend_consistency > 0.65  # More than 65% of changes in same direction
+        
+        # Create a list of recent funding rates as strings for explanation
+        recent_rates_str = [f"{rate*100:.4f}%" for rate in recent_rates[-8:]]
+        
         # Calculate volatility
         if len(rates) >= 2:
             diffs = [abs(rates[i] - rates[i-1]) for i in range(1, len(rates))]
@@ -313,7 +330,7 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
         is_extreme = (current_rate > self.thresholds['high_positive'] or 
                       current_rate < self.thresholds['high_negative'])
                       
-        # Determine direction based on current rate
+        # Determine basic direction based on current rate
         if current_rate > self.thresholds['high_positive']:
             direction = "strongly_positive"
         elif current_rate > self.thresholds['moderate_positive']:
@@ -324,15 +341,36 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
             direction = "moderately_negative"
         else:
             direction = "neutral"
+            
+        # Determine trend pattern
+        pattern = "none"
+        if is_consistent_trend:
+            if trend_direction == "increasing":
+                if current_rate > 0:
+                    pattern = "consistently_positive_increasing"  # Strong long bias building
+                else:
+                    pattern = "negative_but_increasing"  # Shorts reducing pressure
+            else:  # decreasing
+                if current_rate < 0:
+                    pattern = "consistently_negative_decreasing"  # Strong short bias building
+                else:
+                    pattern = "positive_but_decreasing"  # Longs reducing pressure
+        elif abs(current_rate) < self.thresholds['neutral']:
+            pattern = "oscillating_near_zero"  # No strong bias in either direction
         
         return {
             "current_rate": current_rate,
             "average_rate": average_rate,
             "rate_trend": rate_trend,
+            "trend_direction": trend_direction,
+            "trend_consistency": trend_consistency,
+            "is_consistent_trend": is_consistent_trend,
             "volatility": volatility,
             "is_extreme": is_extreme,
             "direction": direction,
+            "pattern": pattern,
             "rates": rates[-10:],  # Include the last 10 rates for reference
+            "recent_rates_str": recent_rates_str,
             "rate_count": len(rates)
         }
     
@@ -354,61 +392,131 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
         is_extreme = metrics.get('is_extreme', False)
         direction = metrics.get('direction', 'neutral')
         
-        # Default to neutral
-        signal = "NEUTRAL"
-        confidence = 50
-        explanation = "Funding rates are within normal range"
+        # Extract enhanced trend metrics
+        pattern = metrics.get('pattern', 'none')
+        trend_direction = metrics.get('trend_direction', 'neutral')
+        trend_consistency = metrics.get('trend_consistency', 0)
+        is_consistent_trend = metrics.get('is_consistent_trend', False)
+        recent_rates_str = metrics.get('recent_rates_str', [])
+        rate_count = metrics.get('rate_count', 0)
         
-        # Generate signal based on funding rate direction
-        if direction == "strongly_positive":
+        # Format recent rates for explanation
+        recent_rates_formatted = ', '.join(recent_rates_str) if recent_rates_str else "N/A"
+        
+        # Default to neutral with better base confidence based on data quality
+        signal = "NEUTRAL"
+        base_confidence = min(50 + int(rate_count/2), 65) if rate_count > 0 else 50
+        confidence = base_confidence
+        explanation = f"Funding rates show balanced market conditions"
+        
+        # First, prioritize consistent trend patterns for clearer signals
+        if pattern == "consistently_positive_increasing":
+            # Persistently positive and increasing - strong long bias
+            signal = "BUY"
+            confidence = self.high_confidence if trend_consistency > 0.8 else self.medium_confidence
+            explanation = (f"Consistently positive and increasing funding rates ({current_rate*100:.4f}%) "
+                           f"indicate strong long bias building with shorts paying increasing premiums")
+                           
+        elif pattern == "consistently_negative_decreasing":
+            # Persistently negative and decreasing - strong short bias
+            signal = "SELL" 
+            confidence = self.high_confidence if trend_consistency > 0.8 else self.medium_confidence
+            explanation = (f"Consistently negative and decreasing funding rates ({current_rate*100:.4f}%) "
+                           f"indicate strong short bias building with longs paying increasing premiums")
+                           
+        elif pattern == "negative_but_increasing":
+            # Negative but increasing - short pressure reducing
+            signal = "BUY"
+            confidence = self.medium_confidence
+            explanation = (f"Funding rate is negative ({current_rate*100:.4f}%) but consistently increasing, "
+                           f"indicating short pressure is reducing, potentially bullish signal")
+                           
+        elif pattern == "positive_but_decreasing":
+            # Positive but decreasing - long pressure reducing
+            signal = "SELL"
+            confidence = self.medium_confidence
+            explanation = (f"Funding rate is positive ({current_rate*100:.4f}%) but consistently decreasing, "
+                           f"indicating long pressure is reducing, potentially bearish signal")
+                           
+        elif pattern == "oscillating_near_zero":
+            # No strong directional bias
+            signal = "NEUTRAL"
+            confidence = self.medium_confidence
+            explanation = (f"Funding rates oscillating near zero ({current_rate*100:.4f}%) with no strong trend, "
+                           f"indicating balanced market sentiment without directional bias")
+                           
+        # If no clear pattern detected, use traditional funding rate levels
+        elif direction == "strongly_positive":
             # High positive funding rates indicate longs are paying shorts
             # This often suggests the market is overly bullish, potential for reversal
             signal = "SELL"
             confidence = self.high_confidence if is_extreme else self.medium_confidence
-            explanation = (f"High positive funding rate ({current_rate:.4f}) indicates market is overly bullish, "
+            explanation = (f"High positive funding rate ({current_rate*100:.4f}%) indicates market is overly bullish, "
                            f"potential for short-term reversal (contrarian signal)")
-                           
-        elif direction == "moderately_positive":
-            signal = "NEUTRAL"
-            confidence = self.medium_confidence
-            explanation = (f"Moderately positive funding rate ({current_rate:.4f}) suggests some bullish bias, "
-                           f"but not extreme enough for a strong contrarian signal")
                            
         elif direction == "strongly_negative":
             # High negative funding rates indicate shorts are paying longs
             # This often suggests the market is overly bearish, potential for reversal
             signal = "BUY"
             confidence = self.high_confidence if is_extreme else self.medium_confidence
-            explanation = (f"High negative funding rate ({current_rate:.4f}) indicates market is overly bearish, "
+            explanation = (f"High negative funding rate ({current_rate*100:.4f}%) indicates market is overly bearish, "
                            f"potential for short-term reversal (contrarian signal)")
                            
-        elif direction == "moderately_negative":
-            signal = "NEUTRAL"
-            confidence = self.medium_confidence
-            explanation = (f"Moderately negative funding rate ({current_rate:.4f}) suggests some bearish bias, "
-                           f"but not extreme enough for a strong contrarian signal")
+        elif direction == "moderately_positive":
+            # With additional context for near-neutral rates
+            if is_consistent_trend and trend_direction == "increasing":
+                signal = "BUY" 
+                confidence = self.low_confidence
+                explanation = (f"Funding rate is moderately positive ({current_rate*100:.4f}%) but with consistent "
+                               f"increasing trend, suggesting building long bias")
+            else:
+                signal = "NEUTRAL"
+                confidence = self.medium_confidence
+                explanation = (f"Moderately positive funding rate ({current_rate*100:.4f}%) suggests some bullish bias, "
+                               f"but not extreme enough for a strong contrarian signal")
                            
-        else:  # neutral
-            signal = "NEUTRAL"
-            confidence = self.low_confidence
-            explanation = f"Neutral funding rate ({current_rate:.4f}) indicates balanced market sentiment"
+        elif direction == "moderately_negative":
+            # With additional context for near-neutral rates
+            if is_consistent_trend and trend_direction == "decreasing":
+                signal = "SELL"
+                confidence = self.low_confidence
+                explanation = (f"Funding rate is moderately negative ({current_rate*100:.4f}%) but with consistent "
+                               f"decreasing trend, suggesting building short bias")
+            else:
+                signal = "NEUTRAL"
+                confidence = self.medium_confidence
+                explanation = (f"Moderately negative funding rate ({current_rate*100:.4f}%) suggests some bearish bias, "
+                               f"but not extreme enough for a strong contrarian signal")
+                           
+        else:  # truly neutral direction
+            if is_consistent_trend:
+                if trend_direction == "increasing":
+                    signal = "BUY"
+                    confidence = self.low_confidence
+                    explanation = (f"Neutral funding rate ({current_rate*100:.4f}%) with consistent increasing trend, "
+                                   f"suggesting emerging bullish sentiment")
+                elif trend_direction == "decreasing":
+                    signal = "SELL"
+                    confidence = self.low_confidence
+                    explanation = (f"Neutral funding rate ({current_rate*100:.4f}%) with consistent decreasing trend, "
+                                   f"suggesting emerging bearish sentiment")
+            else:
+                signal = "NEUTRAL"
+                confidence = self.low_confidence
+                explanation = f"Neutral funding rate ({current_rate*100:.4f}%) indicates balanced market sentiment"
             
-        # Consider the trend in funding rates
-        if abs(rate_trend) > 0.005:
-            # Significant change in funding rates
-            trend_direction = "increasing" if rate_trend > 0 else "decreasing"
-            explanation += f", with {trend_direction} trend over the analysis period"
-            
-            # Adjust confidence based on trend confirmation or contradiction
-            if (signal == "BUY" and rate_trend < 0) or (signal == "SELL" and rate_trend > 0):
-                confidence = min(95, confidence + 10)  # Strengthen confidence if trend confirms signal
-            elif (signal == "BUY" and rate_trend > 0) or (signal == "SELL" and rate_trend < 0):
-                confidence = max(self.low_confidence, confidence - 15)  # Reduce confidence if trend contradicts
-                
-        # Consider volatility
+        # Add information about recent funding rates to the explanation
+        explanation += f". Recent funding rates: [{recent_rates_formatted}]"
+        
+        # Consider volatility to adjust confidence
         if volatility > 0.005:
             explanation += f", high volatility in funding rates indicates unstable market conditions"
             confidence = max(self.low_confidence, confidence - 10)  # Reduce confidence in volatile conditions
+        
+        # Adjust confidence based on data quality
+        if rate_count < 8:
+            explanation += f" (based on limited data set of {rate_count} periods)"
+            confidence = max(self.low_confidence, confidence - 10)
             
         return signal, confidence, explanation
         

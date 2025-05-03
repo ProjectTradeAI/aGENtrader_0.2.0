@@ -151,6 +151,13 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
                             interval=interval,
                             limit=self.lookback_periods
                         )
+                        # Log the raw data to understand its structure
+                        if oi_data:
+                            logger.info(f"Received {len(oi_data)} open interest records")
+                            if len(oi_data) > 0:
+                                logger.info(f"First record sample: {oi_data[0]}")
+                        else:
+                            logger.warning("No open interest data received from data_fetcher")
                         
                     # Fetch price data
                     if not price_data:
@@ -285,39 +292,72 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
         prices = []
         timestamps = []
         
-        # Process open interest data
-        for item in oi_data:
+        # Process open interest data - enhanced logging and error handling
+        logger.info(f"Processing {len(oi_data)} open interest records")
+        
+        for i, item in enumerate(oi_data):
+            # Extended logging for the first few items to diagnose data format issues
+            if i < 2:  # Log details for first 2 items
+                logger.info(f"Open interest item {i}: {item}")
+                
             if isinstance(item, dict):
                 oi = None
                 timestamp = None
                 
                 # Handle different field names used by different exchanges
-                if 'openInterest' in item:
+                # First, check for the expected Binance Futures API format
+                if 'sumOpenInterest' in item:
+                    oi = item['sumOpenInterest']
+                    # Binance futures API uses numerical value, not string
+                elif 'sumOpenInterestValue' in item:
+                    oi = item['sumOpenInterestValue']
+                # Fall back to other common formats
+                elif 'openInterest' in item:
                     oi = item['openInterest']
                 elif 'open_interest' in item:
                     oi = item['open_interest']
                 elif 'value' in item:
                     oi = item['value']
-                    
+                
+                # Check each potential field for timestamp
                 if 'timestamp' in item:
                     timestamp = item['timestamp']
                 elif 'time' in item:
                     timestamp = item['time']
                 
+                # Debug log for first few items
+                if i < 2:
+                    logger.info(f"Extracted OI: {oi}, Timestamp: {timestamp}")
+                
                 if oi is not None:
                     try:
-                        oi_values.append(float(oi))
+                        # Convert to float if it's a string
+                        if isinstance(oi, str):
+                            oi = float(oi)
+                        else:
+                            oi = float(oi)  # Ensure numeric
+                        
+                        oi_values.append(oi)
                         timestamps.append(timestamp)
-                    except ValueError:
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Error parsing OI value '{oi}': {str(e)}")
                         continue
+                else:
+                    # Log when no recognized OI field found
+                    if i < 5:  # Only log for first few items to avoid log spam
+                        logger.warning(f"No recognized open interest field in item {i}: {item}")
             
             elif isinstance(item, list) and len(item) >= 2:
                 # [timestamp, value] format
                 try:
                     timestamps.append(item[0])
                     oi_values.append(float(item[1]))
-                except (ValueError, IndexError):
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Error parsing list format OI: {str(e)}")
                     continue
+                    
+        # Log the parsed data summary
+        logger.info(f"Successfully parsed {len(oi_values)} open interest values out of {len(oi_data)} records")
         
         # Process price data
         for item in price_data:
@@ -517,46 +557,78 @@ class OpenInterestAnalystAgent(BaseAnalystAgent):
         # Higher base confidence with more data points
         base_confidence = min(50 + int(data_points/2), 65) if data_points > 0 else 50
         confidence = base_confidence
-        explanation = f"Open interest analysis based on {data_points} data points shows balanced market conditions"
         
-        # Primary delta-based signal generation using pattern detection
-        # These patterns take priority over other signals as they provide clearer directional bias
-        if pattern == "strong_bullish":  # Rising OI + Rising Price = Longs building up
-            signal = "BUY"
-            confidence = self.high_confidence if oi_change > 10 and price_change > 5 else self.medium_confidence
-            explanation = (f"Strong bullish pattern: Open interest increasing ({oi_change:.2f}%) with rising price ({price_change:.2f}%) "
-                          f"indicates long positions are accumulating (bullish sentiment)")
+        # Generate summary of recent changes for explanation
+        # Format change values with the requested format
+        oi_change_formatted = f"{oi_change:.1f}%"
+        price_change_formatted = f"{price_change:.1f}%"
+        
+        # Calculate time period based on data points (assuming standard intervals)
+        time_period = "recent periods"
+        if data_points >= 6:
+            time_period = "last 6 hours" if data_points <= 7 else f"last {data_points} periods"
             
-        elif pattern == "strong_bearish":  # Rising OI + Falling Price = Shorts building up
-            signal = "SELL"
-            confidence = self.high_confidence if oi_change > 10 and price_change < -5 else self.medium_confidence
-            explanation = (f"Strong bearish pattern: Open interest increasing ({oi_change:.2f}%) with falling price ({price_change:.2f}%) "
-                          f"indicates short positions are accumulating (bearish sentiment)")
-            
-        elif pattern == "weak_bullish":  # Falling OI + Rising Price = Shorts covering
-            signal = "BUY"
-            confidence = self.medium_confidence
-            explanation = (f"Weak bullish pattern: Open interest decreasing ({oi_change:.2f}%) with rising price ({price_change:.2f}%) "
-                          f"indicates short positions are being covered (moderately bullish)")
-            
-        elif pattern == "weak_bearish":  # Falling OI + Falling Price = Longs liquidating
-            signal = "SELL"
-            confidence = self.medium_confidence
-            explanation = (f"Weak bearish pattern: Open interest decreasing ({oi_change:.2f}%) with falling price ({price_change:.2f}%) "
-                          f"indicates long positions are being liquidated (moderately bearish)")
-                          
-        elif pattern == "position_equilibrium" and abs(price_change) > 2:
-            # Price is moving but OI isn't changing much
-            if price_change > 2:
+        # Create the change summary that will be included in all explanations
+        change_summary = f"Recent open interest {oi_trend} by {oi_change_formatted} over the {time_period} while price {price_trend} {price_change_formatted}."
+        
+        # Start with a basic explanation that will be enhanced based on pattern
+        explanation = f"Open interest analysis based on {data_points} data points shows balanced market conditions. {change_summary}"
+        
+        # Implement the primary delta-based logic:
+        # OI ↑ + Price ↑ = Longs increasing → BUY
+        # OI ↑ + Price ↓ = Shorts increasing → SELL
+        # OI ↓ = Positions unwinding → HOLD or NEUTRAL
+        
+        # First check if we have enough data to make a reliable signal
+        if data_points >= 3:
+            # Rising OI + Rising Price = BUY
+            if oi_change > 2 and price_change > 0:
                 signal = "BUY"
-                confidence = self.low_confidence
-                explanation = (f"Price increasing ({price_change:.2f}%) with little change in open interest ({oi_change:.2f}%) "
-                              f"suggests natural demand rather than new position building")
-            elif price_change < -2:
+                confidence = self.high_confidence if oi_change > 10 and price_change > 5 else self.medium_confidence
+                explanation = (f"Open interest increasing ({oi_change_formatted}) with rising price ({price_change_formatted}) "
+                              f"indicates long positions are accumulating - bullish signal. {change_summary}")
+                              
+            # Rising OI + Falling Price = SELL
+            elif oi_change > 2 and price_change < 0:
                 signal = "SELL"
-                confidence = self.low_confidence
-                explanation = (f"Price decreasing ({price_change:.2f}%) with little change in open interest ({oi_change:.2f}%) "
-                              f"suggests natural selling rather than new position building")
+                confidence = self.high_confidence if oi_change > 10 and price_change < -5 else self.medium_confidence
+                explanation = (f"Open interest increasing ({oi_change_formatted}) with falling price ({price_change_formatted}) "
+                              f"indicates short positions are accumulating - bearish signal. {change_summary}")
+                              
+            # Falling OI = Positions unwinding (direction depends on price)
+            elif oi_change < -2:
+                if price_change > 2:
+                    signal = "BUY"
+                    confidence = self.medium_confidence
+                    explanation = (f"Open interest decreasing ({oi_change_formatted}) with rising price ({price_change_formatted}) "
+                                  f"indicates shorts covering or unwinding - moderately bullish. {change_summary}")
+                elif price_change < -2:
+                    signal = "SELL"
+                    confidence = self.medium_confidence
+                    explanation = (f"Open interest decreasing ({oi_change_formatted}) with falling price ({price_change_formatted}) "
+                                  f"indicates longs liquidating or unwinding - moderately bearish. {change_summary}")
+                else:
+                    signal = "NEUTRAL"
+                    confidence = self.medium_confidence
+                    explanation = (f"Open interest decreasing ({oi_change_formatted}) with stable price indicates positions unwinding "
+                                  f"without clear directional bias. {change_summary}")
+            
+            # Little change in OI but significant price movement
+            elif abs(oi_change) < 2 and abs(price_change) > 2:
+                if price_change > 2:
+                    signal = "BUY"
+                    confidence = self.low_confidence
+                    explanation = (f"Price increasing ({price_change_formatted}) with little change in open interest ({oi_change_formatted}) "
+                                  f"suggests natural demand rather than new position building. {change_summary}")
+                elif price_change < -2:
+                    signal = "SELL"
+                    confidence = self.low_confidence
+                    explanation = (f"Price decreasing ({price_change_formatted}) with little change in open interest ({oi_change_formatted}) "
+                                  f"suggests natural selling rather than new position building. {change_summary}")
+            
+            # No clear signal - both OI and price stable
+            else:
+                explanation = f"No significant change in open interest ({oi_change_formatted}) or price ({price_change_formatted}) indicates market equilibrium. {change_summary}"
         
         # If we still don't have a signal from pattern analysis, check for traditional divergence or confirmation
         if signal == "NEUTRAL":

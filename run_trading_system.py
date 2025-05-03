@@ -254,8 +254,7 @@ def run_funding_rate_analysis(market_data_or_symbol, interval=None, data_provide
                 "data_provider": data_provider
             }
             
-        # The actual FundingRateAnalystAgent will be implemented later
-        # For now, return a structured error that the DecisionAgent will understand
+        # Return structured error if data_fetcher is missing
         if not data_provider:
             return {
                 "error": True, 
@@ -263,12 +262,28 @@ def run_funding_rate_analysis(market_data_or_symbol, interval=None, data_provide
                 "message": "Data fetcher not provided"
             }
         
-        logger.info(f"Funding rate analysis not fully implemented yet for {symbol}")
-        return {
-            "signal": "HOLD",
-            "confidence": 0,
-            "reasoning": "Funding rate analysis not implemented yet"
-        }
+        try:
+            # Import here to avoid circular imports
+            from agents.funding_rate_analyst_agent import FundingRateAnalystAgent
+        except ImportError as e:
+            logger.error(f"Could not import FundingRateAnalystAgent: {str(e)}")
+            return {
+                "error": True, 
+                "error_type": "IMPORT_ERROR", 
+                "message": f"Could not import FundingRateAnalystAgent: {str(e)}"
+            }
+            
+        # Create and initialize the FundingRateAnalystAgent with data_fetcher
+        logger.info(f"Creating FundingRateAnalystAgent with data provider")
+        fr_agent = FundingRateAnalystAgent(data_fetcher=data_provider)
+        
+        # Run the analysis
+        logger.info(f"Running funding rate analysis for {symbol} with interval {interval}")
+        analysis_result = fr_agent.analyze(symbol=symbol, market_data=None, interval=interval)
+        
+        logger.info(f"Funding rate analysis complete: {analysis_result.get('signal')} with confidence {analysis_result.get('confidence')}")
+        
+        return analysis_result
     except Exception as e:
         logger.error(f"Error in funding rate analysis: {str(e)}", exc_info=True)
         return {"error": True, "error_type": "Exception", "message": str(e)}
@@ -290,8 +305,7 @@ def run_open_interest_analysis(market_data_or_symbol, interval=None, data_provid
                 "data_provider": data_provider
             }
             
-        # The actual OpenInterestAnalystAgent will be implemented later
-        # For now, return a structured error that the DecisionAgent will understand
+        # Return structured error if data_fetcher is missing
         if not data_provider:
             return {
                 "error": True, 
@@ -299,12 +313,28 @@ def run_open_interest_analysis(market_data_or_symbol, interval=None, data_provid
                 "message": "Data fetcher not provided"
             }
         
-        logger.info(f"Open interest analysis not fully implemented yet for {symbol}")
-        return {
-            "signal": "HOLD",
-            "confidence": 0,
-            "reasoning": "Open interest analysis not implemented yet"
-        }
+        try:
+            # Import here to avoid circular imports
+            from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
+        except ImportError as e:
+            logger.error(f"Could not import OpenInterestAnalystAgent: {str(e)}")
+            return {
+                "error": True, 
+                "error_type": "IMPORT_ERROR", 
+                "message": f"Could not import OpenInterestAnalystAgent: {str(e)}"
+            }
+            
+        # Create and initialize the OpenInterestAnalystAgent with data_fetcher
+        logger.info(f"Creating OpenInterestAnalystAgent with data provider")
+        oi_agent = OpenInterestAnalystAgent(data_fetcher=data_provider)
+        
+        # Run the analysis
+        logger.info(f"Running open interest analysis for {symbol} with interval {interval}")
+        analysis_result = oi_agent.analyze(symbol=symbol, market_data=None, interval=interval)
+        
+        logger.info(f"Open interest analysis complete: {analysis_result.get('signal')} with confidence {analysis_result.get('confidence')}")
+        
+        return analysis_result
     except Exception as e:
         logger.error(f"Error in open interest analysis: {str(e)}", exc_info=True)
         return {"error": True, "error_type": "Exception", "message": str(e)}

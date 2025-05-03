@@ -448,13 +448,13 @@ def run_liquidity_analysis(symbol, interval, data_provider):
 def run_funding_rate_analysis(symbol, interval, data_provider):
     """Run funding rate analysis and log the results."""
     try:
-        # Initialize the funding rate analyst agent
-        funding_agent = FundingRateAnalystAgent()
+        # Initialize the funding rate analyst agent with data_provider
+        funding_agent = FundingRateAnalystAgent(data_fetcher=data_provider)
         
         # Get agent's configured timeframe from its initialization
         # We don't pass the system interval to respect the agent-specific timeframe
-        logging.info(f"Running funding rate analysis for {symbol} using agent's configured timeframe")
-        result = funding_agent.analyze(symbol=symbol)
+        logging.info(f"Running funding rate analysis for {symbol} using {interval} timeframe")
+        result = funding_agent.analyze(symbol=symbol, interval=interval)
         
         # Extract the actual interval used for logging purposes
         used_interval = result.get("interval", "unknown")
@@ -471,13 +471,13 @@ def run_funding_rate_analysis(symbol, interval, data_provider):
 def run_open_interest_analysis(symbol, interval, data_provider):
     """Run open interest analysis and log the results."""
     try:
-        # Initialize the open interest analyst agent
-        oi_agent = OpenInterestAnalystAgent()
+        # Initialize the open interest analyst agent with data_provider
+        oi_agent = OpenInterestAnalystAgent(data_fetcher=data_provider)
         
         # Get agent's configured timeframe from its initialization
-        # We don't pass the system interval to respect the agent-specific timeframe
-        logging.info(f"Running open interest analysis for {symbol} using agent's configured timeframe")
-        result = oi_agent.analyze(symbol=symbol)
+        # We pass the system interval for better consistency
+        logging.info(f"Running open interest analysis for {symbol} using {interval} timeframe")
+        result = oi_agent.analyze(symbol=symbol, interval=interval)
         
         # Extract the actual interval used for logging purposes
         used_interval = result.get("interval", "unknown")

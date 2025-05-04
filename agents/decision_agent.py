@@ -329,6 +329,7 @@ class DecisionAgent:
             "technical_analysis": "TechnicalAnalystAgent",
             "sentiment_analysis": "SentimentAnalystAgent",
             "sentiment_aggregator": "SentimentAggregatorAgent",
+            "sentiment_aggregator_analysis": "SentimentAggregatorAgent",  # Added for both naming conventions
             "fundamental_analysis": "FundamentalAnalystAgent",
             "funding_rate_analysis": "FundingRateAnalystAgent",
             "open_interest_analysis": "OpenInterestAnalystAgent"

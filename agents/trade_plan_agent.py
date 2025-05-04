@@ -198,7 +198,92 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Extract the trading signal and confidence
         signal = decision.get('signal', 'NEUTRAL')
+        original_signal = signal  # Keep the original signal for reference
         confidence = decision.get('confidence', 0)
+        
+        # Check for CONFLICTED status (either in signal or final_signal)
+        is_conflicted = signal == "CONFLICTED" or decision.get('final_signal') == "CONFLICTED"
+        
+        # Initialize conflict flag
+        conflict_flag = False
+        
+        # If conflicted, we'll still generate a plan but with additional caution
+        if is_conflicted:
+            conflict_flag = True
+            logger.warning(f"CONFLICTED signal detected. Generating cautious trade plan with reduced risk.")
+            
+            # Check if we need to override a CONFLICTED signal based on agent contributions
+            override_signal = None
+            override_reason = None
+            
+            # First check for directional bias if available
+            if decision.get('directional_bias') in ["BUY", "SELL"]:
+                override_signal = decision.get('directional_bias')
+                override_reason = "Using directional bias from decision agent"
+            
+            # If no directional bias, try to analyze agent contributions
+            elif "agent_contributions" in decision and isinstance(decision["agent_contributions"], dict):
+                # Count signal types and their confidences
+                signal_counts = {}
+                signal_total_confidences = {}
+                signal_weighted_scores = {}
+                
+                for agent, data in decision.get('agent_contributions', {}).items():
+                    if isinstance(data, dict) and 'signal' in data:
+                        agent_signal = data.get('signal')
+                        agent_confidence = data.get('confidence', 50)
+                        agent_weight = 1.0  # Default weight
+                        
+                        # Assign weights based on agent type (can be customized)
+                        if "Technical" in agent:
+                            agent_weight = 1.2
+                        elif "Sentiment" in agent:
+                            agent_weight = 0.8
+                        
+                        if agent_signal not in signal_counts:
+                            signal_counts[agent_signal] = 0
+                            signal_total_confidences[agent_signal] = 0
+                            signal_weighted_scores[agent_signal] = 0
+                        
+                        signal_counts[agent_signal] += 1
+                        signal_total_confidences[agent_signal] += agent_confidence
+                        signal_weighted_scores[agent_signal] += agent_confidence * agent_weight
+                
+                # Only consider BUY and SELL signals for override
+                actionable_signals = {s: count for s, count in signal_counts.items() if s in ["BUY", "SELL"]}
+                
+                # Find the dominant actionable signal (if any)
+                if actionable_signals:
+                    # Get the signal with highest weighted score or count if tied
+                    dominant_signal = max(actionable_signals.keys(), 
+                                         key=lambda s: (signal_weighted_scores.get(s, 0), signal_counts.get(s, 0)))
+                    dominant_count = signal_counts[dominant_signal]
+                    total_agents = sum(signal_counts.values())
+                    
+                    # If the dominant signal represents at least 50% of actionable agents or
+                    # at least 2 agents and has higher weight than any other single signal
+                    if (dominant_count / total_agents >= 0.5 or 
+                       (dominant_count >= 2 and dominant_count > max([count for sig, count in signal_counts.items() 
+                                                                   if sig != dominant_signal], default=0))):
+                        
+                        override_signal = dominant_signal
+                        avg_confidence = signal_total_confidences[override_signal] / dominant_count
+                        
+                        # Set the reason for the override
+                        override_reason = (f"{override_signal} signals had dominant weight "
+                                          f"({dominant_count}/{total_agents} agents, avg conf: {avg_confidence:.1f}%) "
+                                          f"despite conflict.")
+            
+            # Apply override if determined
+            if override_signal and override_signal in ["BUY", "SELL"]:
+                logger.warning(f"Overriding CONFLICTED signal to {override_signal}")
+                logger.info(f"Override reason: {override_reason}")
+                signal = override_signal
+            
+            # Reduce confidence for conflicted signals
+            original_confidence = confidence
+            confidence = confidence * 0.85  # Reduce confidence by 15%
+            logger.info(f"Reduced confidence from {original_confidence} to {confidence} due to conflict")
         
         # Determine if this is an actionable signal
         is_actionable = signal in ["BUY", "SELL"]
@@ -209,8 +294,11 @@ class TradePlanAgent(BaseDecisionAgent):
         # If no actionable signal, return a minimal plan
         if not is_actionable:
             logger.info(f"Non-actionable signal {signal}, generating minimal plan")
-            return {
+            
+            # Create minimal plan with additional conflict information if needed
+            minimal_plan = {
                 "signal": signal,
+                "original_signal": original_signal,  # Preserve the original signal
                 "confidence": confidence,
                 "entry_price": None,
                 "stop_loss": None,
@@ -220,6 +308,26 @@ class TradePlanAgent(BaseDecisionAgent):
                 "timestamp": datetime.now().isoformat(),
                 "execution_time_seconds": time.time() - start_time
             }
+            
+            # Add conflict flag and fallback information for CONFLICTED signals
+            if is_conflicted:
+                minimal_plan["conflict_flag"] = True
+                minimal_plan["fallback_plan"] = {
+                    "conflict": {
+                        "detected": True,
+                        "reason": "⚠️ Conflicted signal detected - applying reduced position sizing and increased caution",
+                        "original_signal": original_signal,
+                        "applied_signal": signal,
+                        "confidence_reduction": "15%"
+                    }
+                }
+                minimal_plan["tags"] = ["conflicted"]
+                
+                # Add warning to plan digest for conflicted signals
+                warning_message = "⚠️ CONFLICT DETECTED: Signal conflict among analyst agents. Using reduced position sizing (50%). Exercise caution."
+                minimal_plan["plan_digest"] = warning_message
+            
+            return minimal_plan
         
         # Extract current price from market data
         symbol = market_data.get('symbol', 'UNKNOWN')
@@ -268,8 +376,8 @@ class TradePlanAgent(BaseDecisionAgent):
                 conflict_score = round(conflict_score * 100)  # As percentage
                 logger.info(f"Calculated conflict score: {conflict_score}% based on {len(signal_counts)} different signals")
                 
-        # Calculate position size based on confidence and conflict score
-        position_size = self._calculate_position_size(confidence, conflict_score)
+        # Calculate position size based on confidence, conflict score, and conflict flag
+        position_size = self._calculate_position_size(confidence, conflict_score, is_conflicted)
         
         # Generate reason summary
         structured_reason_summary = self._generate_reason_summary(decision, analyst_outputs)
@@ -332,6 +440,16 @@ class TradePlanAgent(BaseDecisionAgent):
                 "reason": ""
             }
         }
+        
+        # Add conflict information to fallback plan if applicable
+        if is_conflicted:
+            fallback_plan["conflict"] = {
+                "detected": True,
+                "reason": "⚠️ Conflicted signal detected - applying reduced position sizing and increased caution",
+                "original_signal": original_signal,
+                "applied_signal": signal,
+                "confidence_reduction": "15%"
+            }
         
         # Check if liquidity data was used
         if liquidity_analysis and isinstance(liquidity_analysis, dict):
@@ -447,6 +565,10 @@ class TradePlanAgent(BaseDecisionAgent):
         # Auto-tagging based on logic
         auto_tags = []
         
+        # Add 'conflicted' tag if signal was CONFLICTED
+        if is_conflicted:
+            auto_tags.append("conflicted")
+        
         # Check for high conflict tag
         agent_signals = {}
         if isinstance(decision.get('agent_contributions'), dict):
@@ -505,7 +627,8 @@ class TradePlanAgent(BaseDecisionAgent):
             risk_snapshot=risk_snapshot,
             reason_summary=structured_reason_summary,
             tags=unique_tags,
-            agent_contributions=decision.get('agent_contributions', {})
+            agent_contributions=decision.get('agent_contributions', {}),
+            is_conflicted=is_conflicted  # Pass the conflict flag
         )
         
         # Prepare decision trace object for transparency and future learning
@@ -571,10 +694,12 @@ class TradePlanAgent(BaseDecisionAgent):
             
             # Core signal and pricing
             "signal": signal,
+            "original_signal": original_signal,
             "confidence": confidence,
             "normalized_confidence": normalized_confidence,
             "summary_confidence": summary_confidence,
             "conflict_score": conflict_score,
+            "conflict_flag": is_conflicted,  # Explicit flag for conflict detection
             "entry_price": entry_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
@@ -926,13 +1051,14 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return entry_price, stop_loss, take_profit, used_fallback
     
-    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None) -> float:
+    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, is_conflicted: bool = False) -> float:
         """
         Calculate position size based on confidence level and conflict score.
         
         Args:
             confidence: Decision confidence percentage
             conflict_score: Optional conflict score (0-100) indicating level of disagreement between agents
+            is_conflicted: Boolean flag indicating if the signal is explicitly CONFLICTED
             
         Returns:
             Position size multiplier (0.0 to 1.0)
@@ -951,8 +1077,15 @@ class TradePlanAgent(BaseDecisionAgent):
         # Get position size multiplier for the tier
         position_size = self.position_size_multipliers[tier]
         
+        # Apply stronger conflict reduction for explicit CONFLICTED signals
+        if is_conflicted:
+            # For explicit CONFLICTED signals, apply a fixed 50% reduction
+            original_size = position_size
+            position_size = position_size * 0.5  # 50% reduction
+            logger.warning(f"Applying 50% position reduction for CONFLICTED signal: {original_size:.2f} → {position_size:.2f}")
+        
         # Apply conflict risk reduction if conflict score is provided
-        if conflict_score is not None and conflict_score > 0:
+        elif conflict_score is not None and conflict_score > 0:
             # Calculate conflict reduction factor (higher conflict = smaller position)
             # At max conflict (100%), reduce position by up to 70%
             max_conflict_reduction = 0.7
@@ -1367,7 +1500,8 @@ class TradePlanAgent(BaseDecisionAgent):
         risk_snapshot: Dict[str, Any],
         reason_summary: List[Dict[str, Any]] = None,
         tags: List[str] = None,
-        agent_contributions: Dict[str, Any] = None
+        agent_contributions: Dict[str, Any] = None,
+        is_conflicted: bool = False  # New parameter to track conflict state
     ) -> str:
         """
         Generate a human-readable digest of the trade plan.
@@ -1390,6 +1524,18 @@ class TradePlanAgent(BaseDecisionAgent):
         if signal == "HOLD" or signal == "NEUTRAL":
             return "No clear directional edge. Monitor for better setup."
         
+        # Add conflict warning prefix if this is a conflicted signal
+        conflict_prefix = ""
+        if is_conflicted:
+            conflict_prefix = "⚠️ CONFLICTED SIGNAL: Trading with reduced position size and increased caution. "
+            # Reflect the confidence reduction in the rest of the digest
+            confidence = max(0, confidence - 15)
+        
+        # Check for 'conflicted' in tags as a backup
+        if not is_conflicted and tags and 'conflicted' in tags:
+            conflict_prefix = "⚠️ CONFLICTED SIGNAL: Trading with reduced position size and increased caution. "
+            confidence = max(0, confidence - 15)
+            
         # Core market assessment with more natural, confident tone
         if signal == "BUY":
             if confidence >= 85:
@@ -1558,7 +1704,8 @@ class TradePlanAgent(BaseDecisionAgent):
             else:
                 digest += f" Consider {trade_type} approach."  # End with period if no R:R available
         
-        return digest
+        # Add conflict prefix if necessary
+        return conflict_prefix + digest
 
     def log_trade_plan_summary(self, trade_plan: Dict[str, Any]) -> None:
         """

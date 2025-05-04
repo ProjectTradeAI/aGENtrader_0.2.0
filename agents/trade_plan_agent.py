@@ -364,9 +364,11 @@ class TradePlanAgent(BaseDecisionAgent):
             interval=interval
         )
         
-        # Extract conflict score if available
-        conflict_score = None
-        if isinstance(decision.get('agent_contributions'), dict):
+        # Extract conflict score if available in decision
+        conflict_score = decision.get('conflict_score')
+        
+        # If not provided, calculate it from agent_contributions
+        if conflict_score is None and isinstance(decision.get('agent_contributions'), dict):
             # Count agents by signal type
             signal_counts = {}
             for agent, data in decision.get('agent_contributions', {}).items():
@@ -382,9 +384,19 @@ class TradePlanAgent(BaseDecisionAgent):
                 conflict_score = min(1.0, max(0.0, conflict_score))
                 conflict_score = round(conflict_score * 100)  # As percentage
                 logger.info(f"Calculated conflict score: {conflict_score}% based on {len(signal_counts)} different signals")
+        
+        if conflict_score is not None and conflict_score > 0:
+            logger.info(f"Using conflict score: {conflict_score}%")
                 
+        # Auto-tagging based on logic
+        auto_tags = []
+        
         # Calculate position size based on confidence, conflict score, and conflict flag
-        position_size = self._calculate_position_size(confidence, conflict_score, is_conflicted)
+        position_size, conflict_type, conflict_handling_applied = self._calculate_position_size(confidence, conflict_score, is_conflicted)
+        
+        # Add conflict tag if applicable
+        if conflict_type:
+            auto_tags.append(conflict_type)
         
         # Generate reason summary
         structured_reason_summary = self._generate_reason_summary(decision, analyst_outputs)
@@ -397,9 +409,12 @@ class TradePlanAgent(BaseDecisionAgent):
             signal, confidence, valid_until, historical_data, interval
         )
         
+        # Position size is already a float value, not a tuple
+        position_size_value = position_size
+        
         # Calculate risk metrics
         risk_snapshot = self._calculate_risk_snapshot(
-            signal, entry_price, stop_loss, take_profit, position_size, current_price
+            signal, entry_price, stop_loss, take_profit, position_size_value, current_price
         )
         
         # Get custom tags or use defaults
@@ -449,13 +464,40 @@ class TradePlanAgent(BaseDecisionAgent):
         }
         
         # Add conflict information to fallback plan if applicable
-        if is_conflicted:
+        if conflict_handling_applied:
+            # New enhanced conflict handling
+            if conflict_type == "conflicted":
+                fallback_plan["conflict"] = {
+                    "detected": True,
+                    "type": "high_conflict",
+                    "reason": "⚠️ HIGH CONFLICT DETECTED - reducing position size by 50% due to significant signal disagreement",
+                    "original_signal": original_signal,
+                    "applied_signal": signal,
+                    "position_reduction": "50%",
+                    "confidence_reduction": "15%",
+                    "conflict_score": conflict_score
+                }
+            elif conflict_type == "soft_conflict":
+                fallback_plan["conflict"] = {
+                    "detected": True,
+                    "type": "soft_conflict",
+                    "reason": "⚠️ SOFT CONFLICT DETECTED - reducing position size by 20% due to moderate signal disagreement",
+                    "original_signal": original_signal,
+                    "applied_signal": signal,
+                    "position_reduction": "20%",
+                    "confidence_reduction": "10%",
+                    "conflict_score": conflict_score
+                }
+        elif is_conflicted:
+            # Legacy conflict handling for backwards compatibility
             fallback_plan["conflict"] = {
                 "detected": True,
+                "type": "legacy_conflict",
                 "reason": "⚠️ Conflicted signal detected - applying reduced position sizing and increased caution",
                 "original_signal": original_signal,
                 "applied_signal": signal,
-                "confidence_reduction": "15%"
+                "confidence_reduction": "15%",
+                "conflict_score": conflict_score
             }
         
         # Check if liquidity data was used
@@ -569,11 +611,16 @@ class TradePlanAgent(BaseDecisionAgent):
                     fallback_plan["take_profit"]["used"] = True
                     fallback_plan["take_profit"]["reason"] = f"Risk-reward ratio based take-profit ({r_r_ratio}:1)"
         
-        # Auto-tagging based on logic
-        auto_tags = []
-        
-        # Add 'conflicted' tag if signal was CONFLICTED
-        if is_conflicted:
+        # Add appropriate conflict tags
+        if conflict_handling_applied:
+            if conflict_type == "conflicted":
+                auto_tags.append("high_conflict")
+                auto_tags.append("position_reduced_50pct")
+            elif conflict_type == "soft_conflict":
+                auto_tags.append("soft_conflict")
+                auto_tags.append("position_reduced_20pct")
+        elif is_conflicted:
+            # Legacy conflict handling
             auto_tags.append("conflicted")
         
         # Check for high conflict tag
@@ -635,7 +682,9 @@ class TradePlanAgent(BaseDecisionAgent):
             reason_summary=structured_reason_summary,
             tags=unique_tags,
             agent_contributions=decision.get('agent_contributions', {}),
-            is_conflicted=is_conflicted  # Pass the conflict flag
+            is_conflicted=is_conflicted,  # Pass the conflict flag
+            conflict_type=conflict_type,  # Pass the conflict type (soft_conflict or conflicted)
+            conflict_handling_applied=conflict_handling_applied  # Whether position size was adjusted
         )
         
         # Prepare decision trace object for transparency and future learning
@@ -711,10 +760,12 @@ class TradePlanAgent(BaseDecisionAgent):
             "summary_confidence": summary_confidence,
             "conflict_score": conflict_score,
             "conflict_flag": is_conflicted,  # Explicit flag for conflict detection
+            "conflict_type": conflict_type,  # Type of conflict (soft_conflict, conflicted, etc.)
             "entry_price": entry_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
-            "position_size": position_size,
+            "position_size": position_size_value,
+            "conflict_handling_applied": conflict_handling_applied,
             
             # Analysis and reasoning
             "reasoning": decision.get('reasoning', 'No reasoning provided'),
@@ -745,7 +796,7 @@ class TradePlanAgent(BaseDecisionAgent):
             trade_plan["override_decision"] = True
             trade_plan["override_reason"] = override_reason
         
-        logger.info(f"Trade plan generated for {signal} {symbol} with position size {position_size}")
+        logger.info(f"Trade plan generated for {signal} {symbol} with position size {position_size_value}")
         
         # Log the trade plan summary if it's an actionable signal or if detailed logging is enabled
         if is_actionable or self.detailed_logging or self.test_mode:
@@ -1062,7 +1113,7 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return entry_price, stop_loss, take_profit, used_fallback
     
-    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, is_conflicted: bool = False) -> float:
+    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, is_conflicted: bool = False) -> Tuple[float, str, bool]:
         """
         Calculate position size based on confidence level and conflict score.
         
@@ -1072,7 +1123,10 @@ class TradePlanAgent(BaseDecisionAgent):
             is_conflicted: Boolean flag indicating if the signal is explicitly CONFLICTED
             
         Returns:
-            Position size multiplier (0.0 to 1.0)
+            Tuple containing:
+            - Position size multiplier (0.0 to 1.0)
+            - Conflict type: None, "soft_conflict", or "conflicted"
+            - Boolean indicating if conflict handling was applied
         """
         # Determine confidence tier
         if confidence >= self.confidence_tiers["high"]:
@@ -1083,35 +1137,48 @@ class TradePlanAgent(BaseDecisionAgent):
             tier = "low"
         else:
             # Below minimum confidence threshold
-            return 0.0
+            return 0.0, "", False
         
         # Get position size multiplier for the tier
         position_size = self.position_size_multipliers[tier]
+        original_size = position_size
+        conflict_type = ""
+        conflict_handling_applied = False
         
         # Apply stronger conflict reduction for explicit CONFLICTED signals
         if is_conflicted:
             # For explicit CONFLICTED signals, apply a fixed 50% reduction
-            original_size = position_size
             position_size = position_size * 0.5  # 50% reduction
             logger.warning(f"Applying 50% position reduction for CONFLICTED signal: {original_size:.2f} → {position_size:.2f}")
+            conflict_type = "conflicted"
+            conflict_handling_applied = True
         
-        # Apply conflict risk reduction if conflict score is provided
+        # Apply conflict risk reduction based on conflict score thresholds
         elif conflict_score is not None and conflict_score > 0:
-            # Calculate conflict reduction factor (higher conflict = smaller position)
-            # At max conflict (100%), reduce position by up to 70%
-            max_conflict_reduction = 0.7
-            conflict_reduction = (conflict_score / 100) * max_conflict_reduction
-            
-            # Apply reduction
-            original_size = position_size
-            position_size = position_size * (1 - conflict_reduction)
-            
-            logger.info(f"Applying conflict-based position reduction: {conflict_score}% conflict score reduces position from {original_size:.2f} to {position_size:.2f}")
+            if conflict_score >= 70:
+                # Strong conflict: 50% reduction
+                position_size = position_size * 0.5
+                logger.warning(f"Applying 50% position reduction for high conflict score ({conflict_score}%): {original_size:.2f} → {position_size:.2f}")
+                conflict_type = "conflicted"
+                conflict_handling_applied = True
+            elif conflict_score >= 50:
+                # Soft conflict: 20% reduction
+                position_size = position_size * 0.8
+                logger.info(f"Applying 20% position reduction for soft conflict score ({conflict_score}%): {original_size:.2f} → {position_size:.2f}")
+                conflict_type = "soft_conflict"
+                conflict_handling_applied = True
+            else:
+                # Minor conflict: scaled reduction
+                max_conflict_reduction = 0.7
+                conflict_reduction = (conflict_score / 100) * max_conflict_reduction
+                position_size = position_size * (1 - conflict_reduction)
+                logger.info(f"Applying conflict-based position reduction: {conflict_score}% conflict score reduces position from {original_size:.2f} to {position_size:.2f}")
+                conflict_handling_applied = True
         
         # Ensure position size is within limits
         position_size = max(min(position_size, self.max_position_size), self.min_position_size)
         
-        return position_size
+        return position_size, conflict_type, conflict_handling_applied
 
     def _extract_historical_data(self, market_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
         """
@@ -1512,7 +1579,9 @@ class TradePlanAgent(BaseDecisionAgent):
         reason_summary: List[Dict[str, Any]] = None,
         tags: List[str] = None,
         agent_contributions: Dict[str, Any] = None,
-        is_conflicted: bool = False  # New parameter to track conflict state
+        is_conflicted: bool = False,  # Explicit conflict flag
+        conflict_type: str = None,    # Type of conflict (soft_conflict, conflicted)
+        conflict_handling_applied: bool = False  # Whether position size was adjusted
     ) -> str:
         """
         Generate a human-readable digest of the trade plan.
@@ -1535,15 +1604,29 @@ class TradePlanAgent(BaseDecisionAgent):
         if signal == "HOLD" or signal == "NEUTRAL":
             return "No clear directional edge. Monitor for better setup."
         
-        # Add conflict warning prefix if this is a conflicted signal
+        # Add conflict warning prefix based on the conflict type
         conflict_prefix = ""
-        if is_conflicted:
+        
+        # Check for explicit conflict handling based on conflict_type
+        if conflict_handling_applied:
+            if conflict_type == "conflicted":
+                conflict_prefix = "⚠️ HIGH CONFLICT DETECTED (>70%): Position size reduced by 50% due to significant signal disagreement. "
+                confidence = max(0, confidence - 15)
+            elif conflict_type == "soft_conflict":
+                conflict_prefix = "⚠️ SOFT CONFLICT DETECTED (50-70%): Position size reduced by 20% due to mild signal disagreement. "
+                confidence = max(0, confidence - 10)
+            else:
+                # Minor conflict below the soft threshold
+                conflict_prefix = "⚠️ MINOR CONFLICT DETECTED (<50%): Position size slightly reduced due to minor signal disagreement. "
+                confidence = max(0, confidence - 5)
+        
+        # Legacy conflict handling for backwards compatibility
+        elif is_conflicted:
             conflict_prefix = "⚠️ CONFLICTED SIGNAL: Trading with reduced position size and increased caution. "
-            # Reflect the confidence reduction in the rest of the digest
             confidence = max(0, confidence - 15)
         
-        # Check for 'conflicted' in tags as a backup
-        if not is_conflicted and tags and 'conflicted' in tags:
+        # Check for 'conflicted' in tags as a fallback
+        elif not is_conflicted and tags and 'conflicted' in tags:
             conflict_prefix = "⚠️ CONFLICTED SIGNAL: Trading with reduced position size and increased caution. "
             confidence = max(0, confidence - 15)
             
@@ -1866,13 +1949,25 @@ class TradePlanAgent(BaseDecisionAgent):
         logger.info("")
         
         # Warning for conflict or low confidence
-        if conflict_score and conflict_score > 0:
+        conflict_handling_applied = trade_plan.get('conflict_handling_applied', False)
+        conflict_type = trade_plan.get('conflict_type', None)
+        
+        if conflict_handling_applied:
+            # New enhanced conflict handling with graduated thresholds
+            if conflict_type == "conflicted":
+                logger.info(f"⚠️ HIGH CONFLICT DETECTED: {conflict_score}% (Significant signal disagreement)")
+                logger.info(f"  Position size reduced by 50% for risk management")
+            elif conflict_type == "soft_conflict":
+                logger.info(f"⚠️ SOFT CONFLICT DETECTED: {conflict_score}% (Moderate signal disagreement)")
+                logger.info(f"  Position size reduced by 20% for risk management")
+        elif conflict_score and conflict_score > 0:
+            # Legacy conflict handling display for backward compatibility
             if conflict_score > 50:
-                logger.info(f"⚠️ Conflict Score: {conflict_score}% (HIGH divergence, position size reduced by {int(conflict_score * 0.7)}%)")
+                logger.info(f"⚠️ Conflict Score: {conflict_score}% (HIGH divergence)")
             elif conflict_score > 30:
-                logger.info(f"⚠️ Conflict Score: {conflict_score}% (moderate divergence, position size reduced by {int(conflict_score * 0.7)}%)")
+                logger.info(f"⚠️ Conflict Score: {conflict_score}% (moderate divergence)")
             else:
-                logger.info(f"ℹ️ Conflict Score: {conflict_score}% (minor divergence, position size reduced by {int(conflict_score * 0.7)}%)")
+                logger.info(f"ℹ️ Conflict Score: {conflict_score}% (minor divergence)")
             
             # Show conflicting agents
             opposing_signals = {}
@@ -2014,15 +2109,29 @@ class TradePlanAgent(BaseDecisionAgent):
             tier_multiplier = self.position_size_multipliers.get(tier, 0)
             logger.info(f"  → Confidence: {confidence}% (Tier: {tier}, Multiplier: {tier_multiplier})")
             
-            # Check if conflict reduction was applied
+            # Check if conflict handling was applied (new graduated approach)
+            conflict_handling_applied = trade_plan.get('conflict_handling_applied', False)
+            conflict_type = trade_plan.get('conflict_type')
             conflict_score = trade_plan.get('conflict_score')
-            if conflict_score and conflict_score > 0:
-                # Calculate original position size before conflict reduction
-                max_reduction = 0.7  # Same as in _calculate_position_size
+            
+            if conflict_handling_applied:
+                if conflict_type == "conflicted":
+                    # Hard conflict (50% reduction)
+                    estimated_original = position_size * 2
+                    logger.info(f"  → HIGH CONFLICT HANDLING: {conflict_score}% conflict score triggered 50% position reduction")
+                    logger.info(f"  → Pre-conflict position: {estimated_original:.4f} → Post-conflict: {position_size:.4f}")
+                elif conflict_type == "soft_conflict":
+                    # Soft conflict (20% reduction)
+                    estimated_original = position_size * 1.25
+                    logger.info(f"  → SOFT CONFLICT HANDLING: {conflict_score}% conflict score triggered 20% position reduction")
+                    logger.info(f"  → Pre-conflict position: {estimated_original:.4f} → Post-conflict: {position_size:.4f}")
+            elif conflict_score and conflict_score > 0:
+                # Legacy conflict handling for backwards compatibility
+                max_reduction = 0.7  # Same as in old _calculate_position_size
                 reduction_pct = (conflict_score / 100) * max_reduction
                 # Reverse the calculation to get original position size
                 estimated_original = position_size / (1 - reduction_pct)
-                logger.info(f"  → Conflict reduction: {conflict_score}% conflict score reduced position by {reduction_pct:.2%}")
+                logger.info(f"  → Legacy conflict reduction: {conflict_score}% conflict score reduced position by {reduction_pct:.2%}")
                 logger.info(f"  → Pre-conflict position: {estimated_original:.4f} → Post-conflict: {position_size:.4f}")
             else:
                 logger.info(f"  → Final position size: {position_size}")

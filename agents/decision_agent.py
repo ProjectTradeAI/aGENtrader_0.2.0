@@ -160,9 +160,15 @@ class DecisionAgent:
         for agent in all_agents:
             if agent not in self.agent_weights:
                 missing_weights.append(agent)
+                # Set default weights by agent type
+                default_weight = 1.0
+                # Assign specific default weights for certain agents
+                if agent == "SentimentAggregatorAgent":
+                    default_weight = 0.8
+                
                 # Only initialize with default weight and log a warning
-                self.logger.warning(f"⚠️ Missing weight for {agent}. Using default value 1.0. Please update settings.yaml.")
-                self.agent_weights[agent] = 1.0
+                self.logger.warning(f"⚠️ Missing weight for {agent}. Using default value {default_weight}. Please update settings.yaml.")
+                self.agent_weights[agent] = default_weight
         
         # Log a summary warning if any weights were missing
         if missing_weights:
@@ -178,6 +184,7 @@ class DecisionAgent:
         # Set default parameters
         self.default_symbol = self.trading_config.get("default_pair", "BTC/USDT")
         self.default_interval = self.trading_config.get("default_interval", "1h")
+        self.interval = self.default_interval  # Ensure interval attribute is always defined
         self.confidence_threshold = self.agent_config.get("confidence_threshold", 70)
         
         # Set conflict state handling flag
@@ -212,6 +219,8 @@ class DecisionAgent:
                 
             symbol = symbol or self.default_symbol
             interval = interval or self.default_interval
+            # Update the instance variable for interval (needed for conflict logging)
+            self.interval = interval
             
             # Use provided agent weights if specified, otherwise use config weights
             agent_weights = agent_weights_override or self.agent_weights
@@ -319,6 +328,7 @@ class DecisionAgent:
             "liquidity_analysis": "LiquidityAnalystAgent",
             "technical_analysis": "TechnicalAnalystAgent",
             "sentiment_analysis": "SentimentAnalystAgent",
+            "sentiment_aggregator": "SentimentAggregatorAgent",
             "fundamental_analysis": "FundamentalAnalystAgent",
             "funding_rate_analysis": "FundingRateAnalystAgent",
             "open_interest_analysis": "OpenInterestAnalystAgent"
@@ -708,7 +718,9 @@ class DecisionAgent:
                 try:
                     # Use proper symbol formatting for display
                     display_symbol = symbol.replace('/', '') if '/' in symbol else symbol
-                    local_interval = interval or self.default_interval
+                    
+                    # Ensure we have a valid interval
+                    local_interval = getattr(self, 'interval', self.default_interval)
                     
                     # Non-blocking conflict logging
                     log_conflict(

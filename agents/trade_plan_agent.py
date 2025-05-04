@@ -249,8 +249,27 @@ class TradePlanAgent(BaseDecisionAgent):
             interval=interval
         )
         
-        # Calculate position size based on confidence
-        position_size = self._calculate_position_size(confidence)
+        # Extract conflict score if available
+        conflict_score = None
+        if isinstance(decision.get('agent_contributions'), dict):
+            # Count agents by signal type
+            signal_counts = {}
+            for agent, data in decision.get('agent_contributions', {}).items():
+                if isinstance(data, dict) and 'signal' in data:
+                    sig = data['signal']
+                    if sig not in signal_counts:
+                        signal_counts[sig] = 0
+                    signal_counts[sig] += 1
+            
+            # Conflict score is higher when there are more opposing signals
+            if len(signal_counts) > 1:
+                conflict_score = (len(signal_counts) - 1) / len(decision.get('agent_contributions', {}))
+                conflict_score = min(1.0, max(0.0, conflict_score))
+                conflict_score = round(conflict_score * 100)  # As percentage
+                logger.info(f"Calculated conflict score: {conflict_score}% based on {len(signal_counts)} different signals")
+                
+        # Calculate position size based on confidence and conflict score
+        position_size = self._calculate_position_size(confidence, conflict_score)
         
         # Generate reason summary
         structured_reason_summary = self._generate_reason_summary(decision, analyst_outputs)
@@ -294,24 +313,6 @@ class TradePlanAgent(BaseDecisionAgent):
             "agent_version": getattr(self, "version", "0.2.0"),
             "strategy_context": "standard"
         }
-        
-        # Extract conflict score if available
-        conflict_score = None
-        if isinstance(decision.get('agent_contributions'), dict):
-            # Count agents by signal type
-            signal_counts = {}
-            for agent, data in decision.get('agent_contributions', {}).items():
-                if isinstance(data, dict) and 'signal' in data:
-                    sig = data['signal']
-                    if sig not in signal_counts:
-                        signal_counts[sig] = 0
-                    signal_counts[sig] += 1
-            
-            # Conflict score is higher when there are more opposing signals
-            if len(signal_counts) > 1:
-                conflict_score = (len(signal_counts) - 1) / len(decision.get('agent_contributions', {}))
-                conflict_score = min(1.0, max(0.0, conflict_score))
-                conflict_score = round(conflict_score * 100)  # As percentage
         
         # Normalize confidence to standard scale
         normalized_confidence = min(100, max(0, int(confidence)))
@@ -925,12 +926,13 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return entry_price, stop_loss, take_profit, used_fallback
     
-    def _calculate_position_size(self, confidence: float) -> float:
+    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None) -> float:
         """
-        Calculate position size based on confidence level.
+        Calculate position size based on confidence level and conflict score.
         
         Args:
             confidence: Decision confidence percentage
+            conflict_score: Optional conflict score (0-100) indicating level of disagreement between agents
             
         Returns:
             Position size multiplier (0.0 to 1.0)
@@ -948,6 +950,19 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Get position size multiplier for the tier
         position_size = self.position_size_multipliers[tier]
+        
+        # Apply conflict risk reduction if conflict score is provided
+        if conflict_score is not None and conflict_score > 0:
+            # Calculate conflict reduction factor (higher conflict = smaller position)
+            # At max conflict (100%), reduce position by up to 70%
+            max_conflict_reduction = 0.7
+            conflict_reduction = (conflict_score / 100) * max_conflict_reduction
+            
+            # Apply reduction
+            original_size = position_size
+            position_size = position_size * (1 - conflict_reduction)
+            
+            logger.info(f"Applying conflict-based position reduction: {conflict_score}% conflict score reduces position from {original_size:.2f} to {position_size:.2f}")
         
         # Ensure position size is within limits
         position_size = max(min(position_size, self.max_position_size), self.min_position_size)
@@ -1404,11 +1419,44 @@ class TradePlanAgent(BaseDecisionAgent):
             else:
                 factors.append("key resistance validated")
         
+        # Analyze signal conflict in more detail
         if high_conflict:
-            factors.append("mixed signals")
+            # Check for opposing directional signals (BUY vs SELL)
+            has_buy_signals = False
+            has_sell_signals = False
+            buy_agents = []
+            sell_agents = []
+            
+            if agent_contributions:
+                for agent_name, data in agent_contributions.items():
+                    if isinstance(data, dict) and 'signal' in data:
+                        if data['signal'] == 'BUY':
+                            has_buy_signals = True
+                            buy_agents.append(agent_name.replace('Agent', ''))
+                        elif data['signal'] == 'SELL':
+                            has_sell_signals = True
+                            sell_agents.append(agent_name.replace('Agent', ''))
+            
+            if has_buy_signals and has_sell_signals:
+                # Direct conflict between BUY and SELL signals
+                buy_str = ", ".join(buy_agents[:2])  # Limit to 2 agents for brevity
+                sell_str = ", ".join(sell_agents[:2])
+                
+                if len(buy_agents) > 2:
+                    buy_str += f" and {len(buy_agents) - 2} others"
+                if len(sell_agents) > 2:
+                    sell_str += f" and {len(sell_agents) - 2} others"
+                
+                factors.append(f"conflicting signals ({buy_str} vs {sell_str})")
+            else:
+                # More general conflict without direct BUY vs SELL opposition
+                factors.append("mixed signals with no clear consensus")
         else:
+            # No significant conflict detected
             if confidence >= 70:
-                factors.append("analyst consensus")
+                factors.append("strong analyst consensus")
+            elif confidence >= 55:
+                factors.append("moderate analyst consensus")
             
         # Build core statement with factors
         digest = core
@@ -1660,8 +1708,13 @@ class TradePlanAgent(BaseDecisionAgent):
         logger.info("")
         
         # Warning for conflict or low confidence
-        if conflict_score and conflict_score > 50:
-            logger.info(f"⚠️ Conflict Score: {conflict_score}% (high divergence)")
+        if conflict_score and conflict_score > 0:
+            if conflict_score > 50:
+                logger.info(f"⚠️ Conflict Score: {conflict_score}% (HIGH divergence, position size reduced by {int(conflict_score * 0.7)}%)")
+            elif conflict_score > 30:
+                logger.info(f"⚠️ Conflict Score: {conflict_score}% (moderate divergence, position size reduced by {int(conflict_score * 0.7)}%)")
+            else:
+                logger.info(f"ℹ️ Conflict Score: {conflict_score}% (minor divergence, position size reduced by {int(conflict_score * 0.7)}%)")
             
             # Show conflicting agents
             opposing_signals = {}
@@ -1802,7 +1855,19 @@ class TradePlanAgent(BaseDecisionAgent):
                 
             tier_multiplier = self.position_size_multipliers.get(tier, 0)
             logger.info(f"  → Confidence: {confidence}% (Tier: {tier}, Multiplier: {tier_multiplier})")
-            logger.info(f"  → Final position size: {position_size}")
+            
+            # Check if conflict reduction was applied
+            conflict_score = trade_plan.get('conflict_score')
+            if conflict_score and conflict_score > 0:
+                # Calculate original position size before conflict reduction
+                max_reduction = 0.7  # Same as in _calculate_position_size
+                reduction_pct = (conflict_score / 100) * max_reduction
+                # Reverse the calculation to get original position size
+                estimated_original = position_size / (1 - reduction_pct)
+                logger.info(f"  → Conflict reduction: {conflict_score}% conflict score reduced position by {reduction_pct:.2%}")
+                logger.info(f"  → Pre-conflict position: {estimated_original:.4f} → Post-conflict: {position_size:.4f}")
+            else:
+                logger.info(f"  → Final position size: {position_size}")
             
         # Log agent weight calculations if available
         decision_trace = trade_plan.get('decision_trace', {})

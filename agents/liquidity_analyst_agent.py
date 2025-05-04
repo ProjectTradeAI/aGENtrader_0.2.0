@@ -170,6 +170,20 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             
             execution_time = time.time() - start_time
             
+            # Normalize confidence for SELL signals when there are conflicting BUY consensus
+            # Check if we have other agent analyses in market_data
+            if signal == "SELL" and confidence > 85 and market_data and isinstance(market_data, dict):
+                normalized_confidence = self._normalize_confidence_for_consensus(
+                    signal=signal,
+                    confidence=confidence,
+                    market_data=market_data
+                )
+                
+                if normalized_confidence != confidence:
+                    logger.info(f"Normalized {signal} confidence from {confidence} to {normalized_confidence} due to conflicting consensus")
+                    explanation += f" (confidence adjusted due to conflicting market signals)"
+                    confidence = normalized_confidence
+            
             # Prepare results with entry and stop-loss zones
             results = {
                 "agent": self.name,
@@ -545,3 +559,63 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         except Exception as e:
             logger.error(f"Error fetching market data: {str(e)}")
             return {}
+            
+    def _normalize_confidence_for_consensus(self, signal: str, confidence: float, market_data: Dict[str, Any]) -> float:
+        """
+        Normalize confidence level based on other agent signals in market_data.
+        This prevents the LiquidityAnalystAgent from overpowering consensus with high confidence SELL signals.
+        
+        Args:
+            signal: The current signal (BUY/SELL/NEUTRAL)
+            confidence: The current confidence level
+            market_data: Dictionary containing other agent analyses
+            
+        Returns:
+            Normalized confidence level
+        """
+        # Only normalize SELL signals with high confidence
+        if signal != "SELL" or confidence <= 85:
+            return confidence
+            
+        # Look for agent analyses in market_data
+        buy_signal_count = 0
+        total_agent_count = 0
+        
+        # Check for technical analysis
+        if "technical_analysis" in market_data and isinstance(market_data["technical_analysis"], dict):
+            tech_signal = market_data["technical_analysis"].get("signal")
+            if tech_signal == "BUY":
+                buy_signal_count += 1
+            total_agent_count += 1
+            
+        # Check for sentiment analysis
+        if "sentiment_analysis" in market_data and isinstance(market_data["sentiment_analysis"], dict):
+            sent_signal = market_data["sentiment_analysis"].get("signal")
+            if sent_signal == "BUY":
+                buy_signal_count += 1
+            total_agent_count += 1
+            
+        # Check for sentiment aggregator
+        if "sentiment_aggregator" in market_data and isinstance(market_data["sentiment_aggregator"], dict):
+            agg_signal = market_data["sentiment_aggregator"].get("signal")
+            if agg_signal == "BUY":
+                buy_signal_count += 1
+            total_agent_count += 1
+            
+        # Check other agents like funding rate, open interest
+        other_analyses = ["funding_rate_analysis", "open_interest_analysis"]
+        for analysis_key in other_analyses:
+            if analysis_key in market_data and isinstance(market_data[analysis_key], dict):
+                other_signal = market_data[analysis_key].get("signal")
+                if other_signal == "BUY":
+                    buy_signal_count += 1
+                total_agent_count += 1
+        
+        # If we have enough data and majority signals are BUY, reduce confidence
+        if total_agent_count >= 2 and buy_signal_count >= total_agent_count / 2:
+            logger.info(f"Detected {buy_signal_count}/{total_agent_count} BUY signals conflicting with strong SELL")
+            # Reduce confidence by 20%
+            new_confidence = confidence * 0.8
+            return new_confidence
+        
+        return confidence

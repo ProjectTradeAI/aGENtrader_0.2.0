@@ -684,7 +684,8 @@ class TradePlanAgent(BaseDecisionAgent):
             agent_contributions=decision.get('agent_contributions', {}),
             is_conflicted=is_conflicted,  # Pass the conflict flag
             conflict_type=conflict_type,  # Pass the conflict type (soft_conflict or conflicted)
-            conflict_handling_applied=conflict_handling_applied  # Whether position size was adjusted
+            conflict_handling_applied=conflict_handling_applied,  # Whether position size was adjusted
+            conflict_score=conflict_score  # Pass the specific conflict score percentage
         )
         
         # Prepare decision trace object for transparency and future learning
@@ -1581,7 +1582,8 @@ class TradePlanAgent(BaseDecisionAgent):
         agent_contributions: Dict[str, Any] = None,
         is_conflicted: bool = False,  # Explicit conflict flag
         conflict_type: str = None,    # Type of conflict (soft_conflict, conflicted)
-        conflict_handling_applied: bool = False  # Whether position size was adjusted
+        conflict_handling_applied: bool = False,  # Whether position size was adjusted
+        conflict_score: Optional[int] = None  # Specific conflict score
     ) -> str:
         """
         Generate a human-readable digest of the trade plan.
@@ -1609,15 +1611,18 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Check for explicit conflict handling based on conflict_type
         if conflict_handling_applied:
+            # Format specific conflict score if available
+            score_text = f"{conflict_score}%" if conflict_score is not None else ""
+            
             if conflict_type == "conflicted":
-                conflict_prefix = "⚠️ HIGH CONFLICT DETECTED (>70%): Position size reduced by 50% due to significant signal disagreement. "
+                conflict_prefix = f"⚠️ HIGH CONFLICT DETECTED ({score_text}): Position size reduced by 50% due to significant signal disagreement. "
                 confidence = max(0, confidence - 15)
             elif conflict_type == "soft_conflict":
-                conflict_prefix = "⚠️ SOFT CONFLICT DETECTED (50-70%): Position size reduced by 20% due to mild signal disagreement. "
+                conflict_prefix = f"⚠️ SOFT CONFLICT DETECTED ({score_text}): Position size reduced by 20% due to mild signal disagreement. "
                 confidence = max(0, confidence - 10)
             else:
                 # Minor conflict below the soft threshold
-                conflict_prefix = "⚠️ MINOR CONFLICT DETECTED (<50%): Position size slightly reduced due to minor signal disagreement. "
+                conflict_prefix = f"⚠️ MINOR CONFLICT DETECTED ({score_text}): Position size proportionally reduced due to minor signal disagreement. "
                 confidence = max(0, confidence - 5)
         
         # Legacy conflict handling for backwards compatibility

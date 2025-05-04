@@ -13,22 +13,38 @@ import os
 import sys
 import json
 import logging
+import datetime
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger('test_integrated_conflict_handling')
+logger = logging.getLogger('test_integrated_conflict')
 
 # Add project root to path if needed
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Import the relevant agents
-from agents.decision_agent import DecisionAgent
+# Import necessary modules
 from agents.trade_plan_agent import TradePlanAgent, create_trade_plan_agent
+from agents.decision_agent import DecisionAgent
+
+# Import or create factory function for decision agent
+def create_decision_agent(config=None):
+    """
+    Create a DecisionAgent with the specified configuration.
+    
+    Args:
+        config: Optional configuration dictionary
+        
+    Returns:
+        Configured DecisionAgent instance
+    """
+    if config is None:
+        config = {}
+    
+    return DecisionAgent(config)
 
 def create_mock_analyst_results(scenario: str = "baseline") -> Dict[str, Any]:
     """
@@ -40,111 +56,85 @@ def create_mock_analyst_results(scenario: str = "baseline") -> Dict[str, Any]:
     Returns:
         Mock analyst results dictionary
     """
-    if scenario == "baseline":
-        # All agents agree - no conflict
-        return {
-            "technical_analysis": {
-                "signal": "BUY",
-                "confidence": 80,
-                "agent": "TechnicalAnalystAgent",
-                "reason": "BTC/USDT is showing strong bullish momentum with positive MACD and RSI at 65."
-            },
-            "sentiment_analysis": {
-                "signal": "BUY", 
-                "confidence": 75,
-                "agent": "SentimentAnalystAgent",
-                "reason": "Market sentiment indicators are strongly positive."
-            },
-            "liquidity_analysis": {
-                "signal": "NEUTRAL",  # Changed from BUY to NEUTRAL to avoid conflict detection
-                "confidence": 50,
-                "agent": "LiquidityAnalystAgent",
-                "reason": "No significant liquidity levels detected."
-            },
-            "funding_rate_analysis": {
-                "signal": "NEUTRAL",  # Changed from BUY to NEUTRAL to avoid conflict detection
-                "confidence": 50,
-                "agent": "FundingRateAnalystAgent",
-                "reason": "Funding rates are neutral."
-            },
-            "open_interest_analysis": {
-                "signal": "BUY",
-                "confidence": 72,
-                "agent": "OpenInterestAnalystAgent",
-                "reason": "Increasing open interest with rising price."
-            }
-        }
-    elif scenario == "soft_conflict":
-        # Soft conflict - some disagreement but majority still aligned
-        return {
-            "technical_analysis": {
-                "signal": "BUY",
-                "confidence": 80,
-                "agent": "TechnicalAnalystAgent",
-                "reason": "BTC/USDT is showing strong bullish momentum with positive MACD and RSI at 65."
-            },
-            "sentiment_analysis": {
-                "signal": "NEUTRAL", 
-                "confidence": 60,
-                "agent": "SentimentAnalystAgent",
-                "reason": "Market sentiment indicators mixed with diverging signals."
-            },
-            "liquidity_analysis": {
-                "signal": "BUY",
-                "confidence": 70,
-                "agent": "LiquidityAnalystAgent",
-                "reason": "Significant support detected at 49700."
-            },
-            "funding_rate_analysis": {
-                "signal": "SELL",
-                "confidence": 65,
-                "agent": "FundingRateAnalystAgent",
-                "reason": "Funding rates turning negative across exchanges."
-            },
-            "open_interest_analysis": {
-                "signal": "BUY",
-                "confidence": 72,
-                "agent": "OpenInterestAnalystAgent",
-                "reason": "Increasing open interest with rising price."
-            }
-        }
+    # Base analyst results with unified structure - for baseline, create strong BUY signals
+    technical_analysis = {
+        "agent": "TechnicalAnalystAgent",
+        "signal": "BUY",
+        "confidence": 90,
+        "symbol": "BTC/USDT",
+        "interval": "1h",
+        "reason": "Bullish technical indicators with strong MACD crossover and RSI showing upward momentum"
+    }
+    
+    sentiment_analysis = {
+        "agent": "SentimentAnalystAgent",
+        "signal": "BUY",
+        "confidence": 85,
+        "symbol": "BTC/USDT",
+        "interval": "1h",
+        "reason": "Positive sentiment trending across social media and news sources"
+    }
+    
+    liquidity_analysis = {
+        "agent": "LiquidityAnalystAgent",
+        "signal": "BUY",
+        "confidence": 80,
+        "symbol": "BTC/USDT",
+        "interval": "1h",
+        "reason": "Strong liquidity at support levels"
+    }
+    
+    funding_rate_analysis = {
+        "agent": "FundingRateAnalystAgent",
+        "signal": "BUY",
+        "confidence": 75,
+        "symbol": "BTC/USDT",
+        "interval": "1h",
+        "reason": "Favorable funding rates indicating strong momentum"
+    }
+    
+    open_interest_analysis = {
+        "agent": "OpenInterestAnalystAgent",
+        "signal": "BUY",
+        "confidence": 85,
+        "symbol": "BTC/USDT",
+        "interval": "1h",
+        "reason": "Increasing open interest with rising prices suggests strong bull momentum"
+    }
+    
+    # Create conflict by modifying analyst signals based on scenario
+    if scenario == "soft_conflict":
+        # Create soft conflict (50-70%) by making 2 of 5 agents disagree
+        sentiment_analysis["signal"] = "SELL"
+        sentiment_analysis["confidence"] = 75
+        sentiment_analysis["reason"] = "Some negative sentiment indicators appearing in social media"
+        
+        funding_rate_analysis["signal"] = "SELL"
+        funding_rate_analysis["confidence"] = 70
+        funding_rate_analysis["reason"] = "Funding rates showing signs of potential reversal"
+    
     elif scenario == "hard_conflict":
-        # Hard conflict - strong disagreement between agents
-        return {
-            "technical_analysis": {
-                "signal": "BUY",
-                "confidence": 80,
-                "agent": "TechnicalAnalystAgent",
-                "reason": "BTC/USDT is showing strong bullish momentum with positive MACD and RSI at 65."
-            },
-            "sentiment_analysis": {
-                "signal": "SELL", 
-                "confidence": 75,
-                "agent": "SentimentAnalystAgent",
-                "reason": "Market sentiment indicators turning extremely negative."
-            },
-            "liquidity_analysis": {
-                "signal": "BUY",
-                "confidence": 70,
-                "agent": "LiquidityAnalystAgent",
-                "reason": "Significant support detected at 49700."
-            },
-            "funding_rate_analysis": {
-                "signal": "SELL",
-                "confidence": 85,
-                "agent": "FundingRateAnalystAgent",
-                "reason": "Funding rates extremely negative across exchanges."
-            },
-            "open_interest_analysis": {
-                "signal": "SELL",
-                "confidence": 72,
-                "agent": "OpenInterestAnalystAgent",
-                "reason": "Decreasing open interest with rising price indicates weak momentum."
-            }
-        }
-    else:
-        # Default to baseline
-        return create_mock_analyst_results("baseline")
+        # Create hard conflict (>70%) by making 3 of 5 agents strongly disagree
+        sentiment_analysis["signal"] = "SELL"
+        sentiment_analysis["confidence"] = 90
+        sentiment_analysis["reason"] = "Extremely negative sentiment trending on social media and news sources"
+        
+        funding_rate_analysis["signal"] = "SELL"
+        funding_rate_analysis["confidence"] = 85
+        funding_rate_analysis["reason"] = "Funding rates indicating a strong bearish reversal"
+        
+        open_interest_analysis["signal"] = "SELL"
+        open_interest_analysis["confidence"] = 80
+        open_interest_analysis["reason"] = "Open interest pattern suggests distribution phase"
+    
+    # Return as a dictionary with agent names as keys
+    return {
+        "technical_analysis": technical_analysis,
+        "sentiment_analysis": sentiment_analysis,
+        "liquidity_analysis": liquidity_analysis,
+        "funding_rate_analysis": funding_rate_analysis,
+        "open_interest_analysis": open_interest_analysis
+    }
 
 def create_mock_market_data() -> Dict[str, Any]:
     """
@@ -154,12 +144,26 @@ def create_mock_market_data() -> Dict[str, Any]:
         Mock market data dictionary
     """
     return {
-        "current_price": 50000.0,
         "symbol": "BTC/USDT",
-        "timestamp": datetime.now().isoformat(),
+        "interval": "1h",
+        "current_price": 50000.0,
+        "timestamp": datetime.datetime.now().isoformat(),
         "historical_data": [
-            {"open": 49800, "high": 50200, "low": 49700, "close": 50000, "volume": 1000}
-            for _ in range(20)  # Mock 20 candles with flat prices
+            {"open": 49500, "high": 50200, "low": 49300, "close": 50000, "volume": 1200},
+            {"open": 49200, "high": 49800, "low": 48900, "close": 49500, "volume": 1100},
+            {"open": 48800, "high": 49500, "low": 48700, "close": 49200, "volume": 1000},
+            {"open": 48500, "high": 49000, "low": 48300, "close": 48800, "volume": 950},
+            {"open": 48300, "high": 48700, "low": 48100, "close": 48500, "volume": 900},
+            {"open": 48100, "high": 48500, "low": 47900, "close": 48300, "volume": 850},
+            {"open": 47900, "high": 48300, "low": 47700, "close": 48100, "volume": 800},
+            {"open": 47700, "high": 48000, "low": 47500, "close": 47900, "volume": 750},
+            {"open": 47500, "high": 47800, "low": 47300, "close": 47700, "volume": 700},
+            {"open": 47300, "high": 47600, "low": 47100, "close": 47500, "volume": 650},
+            {"open": 47100, "high": 47400, "low": 46900, "close": 47300, "volume": 600},
+            {"open": 46900, "high": 47200, "low": 46700, "close": 47100, "volume": 550},
+            {"open": 46700, "high": 47000, "low": 46500, "close": 46900, "volume": 500},
+            {"open": 46500, "high": 46800, "low": 46300, "close": 46700, "volume": 450},
+            {"open": 46300, "high": 46600, "low": 46100, "close": 46500, "volume": 400}
         ]
     }
 
@@ -174,43 +178,63 @@ def test_integrated_conflict_handling(scenario: str) -> Dict[str, Any]:
         Trade plan with conflict handling applied
     """
     logger.info(f"\n\n==================================================")
-    logger.info(f"Testing integrated conflict handling: {scenario}")
+    logger.info(f"Running integrated conflict test: {scenario}")
     logger.info(f"==================================================")
     
-    # Create the agents
-    decision_agent = DecisionAgent()
+    # Create mock analyst results based on the scenario
+    analyst_results = create_mock_analyst_results(scenario)
+    market_data = create_mock_market_data()
+    
+    # Create decision agent with standard weights
+    decision_agent = create_decision_agent({
+        "detailed_logging": True,
+        "agent_weights": {
+            "TechnicalAnalystAgent": 1.2,  # Higher weight for technical analysis
+            "SentimentAnalystAgent": 0.8,
+            "LiquidityAnalystAgent": 1.0,
+            "FundingRateAnalystAgent": 0.8,
+            "OpenInterestAnalystAgent": 1.0
+        }
+    })
+    
+    # Create trade plan agent
     trade_plan_agent = create_trade_plan_agent({
         "detailed_logging": True,
         "test_mode": True
     })
     
-    # Create mock data
-    analyst_results = create_mock_analyst_results(scenario)
-    market_data = create_mock_market_data()
-    
-    # 1. Make decision using decision agent
-    logger.info(f"Making decision with DecisionAgent...")
+    # Make a decision with mock analyst results
+    logger.info("Making decision with decision agent...")
     decision = decision_agent.make_decision(
         agent_analyses=analyst_results,
-        symbol="BTC/USDT", 
-        interval="1h"
+        symbol="BTC/USDT",
+        interval="1h",
+        market_data=market_data
     )
     
-    # 2. Generate trade plan from decision
-    logger.info(f"Generating trade plan with TradePlanAgent...")
+    # Log the decision
+    logger.info(f"Decision output: {decision.get('signal')} with {decision.get('confidence')}% confidence")
+    logger.info(f"Conflict score: {decision.get('conflict_score', 'None')}")
+    
+    # Generate trade plan based on the decision
+    logger.info("Generating trade plan with trade plan agent...")
     trade_plan = trade_plan_agent.generate_trade_plan(
         decision=decision,
         market_data=market_data,
         analyst_outputs=analyst_results
     )
     
-    # 3. Log the important results
-    logger.info(f"Decision signal: {decision.get('signal', 'UNKNOWN')}")
-    logger.info(f"Decision confidence: {decision.get('confidence', 0)}%")
-    logger.info(f"Conflict score: {decision.get('conflict_score', 0)}")
-    logger.info(f"Position size: {trade_plan.get('position_size', 0)}")
-    logger.info(f"Conflict type: {trade_plan.get('conflict_type', 'none')}")
+    # Log the trade plan
+    logger.info(f"Trade plan generated for {trade_plan.get('signal')} with position size {trade_plan.get('position_size')}")
+    logger.info(f"Conflict type: {trade_plan.get('conflict_type', 'None')}")
     logger.info(f"Conflict handling applied: {trade_plan.get('conflict_handling_applied', False)}")
+    
+    # Save results to a file with timestamp
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{scenario}_test_{timestamp}.json"
+    with open(filename, "w") as f:
+        json.dump(trade_plan, f, indent=2, default=str)
+    logger.info(f"Results saved to {filename}")
     
     return trade_plan
 
@@ -233,44 +257,41 @@ def compare_results(results: Dict[str, Dict[str, Any]]) -> None:
         return
     
     # Print header
-    logger.info(f"{'Scenario':<18} | {'Position Size':<13} | {'% of Baseline':<13} | {'Conflict Score':<14} | {'Conflict Type'}")
-    logger.info(f"{'-'*18}|{'-'*15}|{'-'*15}|{'-'*16}|{'-'*13}")
+    logger.info(f"{'Scenario':<15} | {'Signal':<6} | {'Position Size':<13} | {'% of Baseline':<13} | {'Conflict Score':<14} | {'Conflict Type':<15} | {'Applied'}")
+    logger.info(f"{'-'*15}|{'-'*8}|{'-'*15}|{'-'*15}|{'-'*16}|{'-'*17}|{'-'*10}")
     
     # Print results for each scenario
-    for scenario, plan in results.items():
-        position = plan.get("position_size", 0)
-        conflict_score = plan.get("conflict_score", 0)
+    for scenario, result in results.items():
+        position = result.get("position_size", 0)
         percent = (position / baseline_position * 100) if baseline_position > 0 else 0
-        conflict_type = plan.get("conflict_type", "none") or "none"  # Default to "none" if None
+        signal = result.get("signal", "Unknown")
+        conflict_score = result.get("conflict_score", "None")
+        conflict_type = result.get("conflict_type", "none") or "none"  # Default to "none" if None
+        conflict_applied = result.get("conflict_handling_applied", False)
         
-        logger.info(f"{scenario:<18} | {position:<13.2f} | {percent:<13.1f}% | {conflict_score:<14} | {conflict_type}")
+        logger.info(f"{scenario:<15} | {signal:<6} | {position:<13.2f} | {percent:<13.1f}% | {conflict_score!s:<14} | {conflict_type:<15} | {conflict_applied!s:<10}")
 
 def run_all_tests() -> None:
     """Run all tests and compare results"""
     results = {}
     
+    # Run tests for all scenarios
+    results["baseline"] = test_integrated_conflict_handling("baseline")
+    results["soft_conflict"] = test_integrated_conflict_handling("soft_conflict")
+    results["hard_conflict"] = test_integrated_conflict_handling("hard_conflict")
+    
+    # Compare results
+    compare_results(results)
+    
+    # Save combined results
+    with open("integrated_conflict_test_results.json", "w") as f:
+        # Using a default serializer for any non-serializable objects
+        json.dump(results, f, indent=2, default=str)
+    
+    logger.info("\nAll tests completed successfully!")
+    
+if __name__ == "__main__":
     try:
-        # Run all scenarios
-        results["baseline"] = test_integrated_conflict_handling("baseline")
-        results["soft_conflict"] = test_integrated_conflict_handling("soft_conflict")
-        results["hard_conflict"] = test_integrated_conflict_handling("hard_conflict")
-        
-        # Compare results across scenarios
-        compare_results(results)
-        
-        # Save results to file for analysis
-        with open("integrated_conflict_test_results.json", "w") as f:
-            # Convert datetime objects to strings for JSON serialization
-            json_results = {k: {kk: str(vv) if isinstance(vv, datetime) else vv 
-                              for kk, vv in v.items()} 
-                          for k, v in results.items()}
-            json.dump(json_results, f, indent=2)
-        
-        logger.info("\nAll tests completed successfully!")
-        logger.info("Results saved to integrated_conflict_test_results.json")
-        
+        run_all_tests()
     except Exception as e:
         logger.error(f"Tests failed with error: {e}", exc_info=True)
-
-if __name__ == "__main__":
-    run_all_tests()

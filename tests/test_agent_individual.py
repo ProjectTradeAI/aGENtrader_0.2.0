@@ -395,6 +395,12 @@ class AgentTestHarness:
                     'reasoning': 'Mock sentiment analysis for testing',
                     'data': {'sentiment_score': 0.7}
                 },
+                'sentiment_aggregator_analysis': {
+                    'signal': 'NEUTRAL',
+                    'confidence': 60,
+                    'reasoning': 'Mock sentiment aggregator analysis for testing',
+                    'data': {'social_sentiment': 0.5, 'news_sentiment': 0.6}
+                },
                 'liquidity_analysis': {
                     'signal': 'HOLD',
                     'confidence': 60,

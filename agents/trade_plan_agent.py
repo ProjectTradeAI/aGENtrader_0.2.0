@@ -269,16 +269,91 @@ class TradePlanAgent(BaseDecisionAgent):
                 override_reason = "BUY agents had dominant weight despite conflict."
             else:  # SELL
                 override_reason = "SELL agents had dominant weight despite conflict."
-        
-        # Determine fallback usage details
-        fallback_plan = {
-            "entry": entry_price == current_price,  # True if default entry price was used
-            "stop_loss": False,
-            "take_profit": False
+                
+        # Version metadata for the trade plan
+        plan_metadata = {
+            "plan_version": "1.1.0",
+            "agent_version": getattr(self, "version", "0.2.0"),
+            "strategy_context": "standard"
         }
+        
+        # Extract conflict score if available
+        conflict_score = None
+        if isinstance(decision.get('agent_contributions'), dict):
+            # Count agents by signal type
+            signal_counts = {}
+            for agent, data in decision.get('agent_contributions', {}).items():
+                if isinstance(data, dict) and 'signal' in data:
+                    sig = data['signal']
+                    if sig not in signal_counts:
+                        signal_counts[sig] = 0
+                    signal_counts[sig] += 1
+            
+            # Conflict score is higher when there are more opposing signals
+            if len(signal_counts) > 1:
+                conflict_score = (len(signal_counts) - 1) / len(decision.get('agent_contributions', {}))
+                conflict_score = min(1.0, max(0.0, conflict_score))
+                conflict_score = round(conflict_score * 100)  # As percentage
+        
+        # Normalize confidence to standard scale
+        normalized_confidence = min(100, max(0, int(confidence)))
+        
+        # Create structured reason summary with per-agent details
+        structured_reason_summary = []
+        if isinstance(decision.get('agent_contributions'), dict):
+            for agent, data in decision.get('agent_contributions', {}).items():
+                if agent == "UnknownAgent":
+                    continue
+                    
+                if isinstance(data, dict) and 'signal' in data and 'confidence' in data:
+                    agent_detail = {
+                        "agent": agent,
+                        "action": data['signal'],
+                        "confidence": data['confidence']
+                    }
+                    
+                    # Add reasoning if available
+                    if 'reasoning' in data:
+                        agent_detail["reason"] = data['reasoning']
+                    elif 'reason' in data:
+                        agent_detail["reason"] = data['reason']
+                    
+                    structured_reason_summary.append(agent_detail)
+        
+        # Determine fallback usage details with enhanced structure and reasons
+        fallback_plan = {
+            "entry": {
+                "used": entry_price == current_price,  # True if default entry price was used
+                "reason": "Default current price used as entry" if entry_price == current_price else ""
+            },
+            "stop_loss": {
+                "used": False,
+                "reason": ""
+            },
+            "take_profit": {
+                "used": False,
+                "reason": ""
+            }
+        }
+        
+        # Check if liquidity data was used
+        if liquidity_analysis and isinstance(liquidity_analysis, dict):
+            # For entry
+            suggested_entry = liquidity_analysis.get("suggested_entry")
+            if suggested_entry is not None and abs(entry_price - suggested_entry) < 0.001 * entry_price:
+                fallback_plan["entry"]["used"] = False  # Not a fallback - used liquidity data
+                fallback_plan["entry"]["reason"] = ""
+                
+            # For stop loss
+            suggested_stop_loss = liquidity_analysis.get("suggested_stop_loss")
+            if suggested_stop_loss is not None and stop_loss is not None and abs(stop_loss - suggested_stop_loss) < 0.001 * entry_price:
+                fallback_plan["stop_loss"]["used"] = False
+                fallback_plan["stop_loss"]["reason"] = ""
         
         # Check if ATR was used for stop_loss or take_profit
         atr_used = False
+        atr_method_used = None
+        
         if historical_data and len(historical_data) >= 14:
             atr_value = self._calculate_atr(historical_data, period=14)
             if atr_value is not None:
@@ -292,9 +367,11 @@ class TradePlanAgent(BaseDecisionAgent):
                 
                 if expected_atr_sl is not None:
                     # If the stop_loss is very close to the expected ATR-based value, ATR was likely used
-                    if abs(stop_loss - expected_atr_sl) < 0.001 * entry_price:  # Within 0.1% margin
-                        fallback_plan["stop_loss"] = True
+                    if stop_loss is not None and abs(stop_loss - expected_atr_sl) < 0.001 * entry_price:  # Within 0.1% margin
+                        fallback_plan["stop_loss"]["used"] = True
+                        fallback_plan["stop_loss"]["reason"] = f"ATR-based stop-loss with {atr_sl_multiplier}x multiplier"
                         atr_used = True
+                        atr_method_used = "stop_loss"
                 
                 # Similar check for take_profit
                 atr_tp_multiplier = self.volatility_multipliers.get("atr_tp", 3.0)
@@ -306,8 +383,69 @@ class TradePlanAgent(BaseDecisionAgent):
                 
                 if expected_atr_tp is not None:
                     # If the take_profit is very close to the expected ATR-based value, ATR was likely used
-                    if abs(take_profit - expected_atr_tp) < 0.001 * entry_price:  # Within 0.1% margin
-                        fallback_plan["take_profit"] = True
+                    if take_profit is not None and abs(take_profit - expected_atr_tp) < 0.001 * entry_price:  # Within 0.1% margin
+                        fallback_plan["take_profit"]["used"] = True
+                        fallback_plan["take_profit"]["reason"] = f"ATR-based take-profit with {atr_tp_multiplier}x multiplier"
+                        if not atr_used:  # Only set these if not already set
+                            atr_used = True
+                            atr_method_used = "take_profit"
+        
+        # Check for standard deviation based fallbacks
+        if historical_data and len(historical_data) >= 5 and not atr_used:
+            # Calculate recent volatility as standard deviation of close prices
+            recent_prices = [candle.get('close', 0) for candle in historical_data[-20:] 
+                            if isinstance(candle.get('close'), (int, float))]
+            
+            if len(recent_prices) >= 5:
+                volatility = self._calculate_stdev(recent_prices)
+                
+                if volatility is not None:
+                    # Check stop loss
+                    stdev_multiplier = self.volatility_multipliers.get("stdev_sl", 2.0)
+                    expected_stdev_sl = None
+                    
+                    if signal == "BUY":
+                        expected_stdev_sl = entry_price - (volatility * stdev_multiplier)
+                    else:  # SELL
+                        expected_stdev_sl = entry_price + (volatility * stdev_multiplier)
+                    
+                    if expected_stdev_sl is not None and stop_loss is not None and abs(stop_loss - expected_stdev_sl) < 0.001 * entry_price:
+                        if not fallback_plan["stop_loss"]["used"]:  # Don't overwrite ATR reason
+                            fallback_plan["stop_loss"]["used"] = True
+                            fallback_plan["stop_loss"]["reason"] = f"Standard deviation based stop-loss with {stdev_multiplier}x multiplier"
+                    
+                    # Check take profit
+                    stdev_tp_multiplier = self.volatility_multipliers.get("stdev_tp", 4.0)
+                    expected_stdev_tp = None
+                    
+                    if signal == "BUY":
+                        expected_stdev_tp = entry_price + (volatility * stdev_tp_multiplier)
+                    else:  # SELL
+                        expected_stdev_tp = entry_price - (volatility * stdev_tp_multiplier)
+                    
+                    if expected_stdev_tp is not None and take_profit is not None and abs(take_profit - expected_stdev_tp) < 0.001 * entry_price:
+                        if not fallback_plan["take_profit"]["used"]:  # Don't overwrite ATR reason
+                            fallback_plan["take_profit"]["used"] = True
+                            fallback_plan["take_profit"]["reason"] = f"Standard deviation based take-profit with {stdev_tp_multiplier}x multiplier"
+        
+        # If fallbacks still not identified, check for percentage-based fallbacks
+        if not fallback_plan["stop_loss"]["used"] and not fallback_plan["take_profit"]["used"]:
+            # Default percentage checks
+            default_stop_percent = 0.01  # 1%
+            expected_percent_sl = entry_price * (1 - default_stop_percent if signal == "BUY" else 1 + default_stop_percent)
+            
+            if stop_loss is not None and abs(stop_loss - expected_percent_sl) < 0.001 * entry_price:
+                fallback_plan["stop_loss"]["used"] = True
+                fallback_plan["stop_loss"]["reason"] = f"Default {default_stop_percent*100}% stop-loss calculation"
+            
+            r_r_ratio = self.risk_reward_ratio
+            if stop_loss is not None:
+                risk = abs(entry_price - stop_loss)
+                expected_percent_tp = entry_price + (risk * r_r_ratio) if signal == "BUY" else entry_price - (risk * r_r_ratio)
+                
+                if take_profit is not None and abs(take_profit - expected_percent_tp) < 0.001 * entry_price:
+                    fallback_plan["take_profit"]["used"] = True
+                    fallback_plan["take_profit"]["reason"] = f"Risk-reward ratio based take-profit ({r_r_ratio}:1)"
         
         # Auto-tagging based on logic
         auto_tags = []
@@ -370,24 +508,96 @@ class TradePlanAgent(BaseDecisionAgent):
             risk_snapshot=risk_snapshot
         )
         
-        # Prepare comprehensive trade plan
+        # Prepare decision trace object for transparency and future learning
+        decision_trace = {
+            "signals": {},  # Signal counts and confidences
+            "weights": {},  # Agent weights used
+            "scores": {}    # Weighted scores
+        }
+        
+        # Extract signal information from decision if available
+        if isinstance(decision.get('agent_contributions'), dict):
+            for agent, data in decision.get('agent_contributions', {}).items():
+                if isinstance(data, dict) and 'signal' in data and 'confidence' in data:
+                    signal_key = data['signal']
+                    if signal_key not in decision_trace["signals"]:
+                        decision_trace["signals"][signal_key] = []
+                    
+                    decision_trace["signals"][signal_key].append({
+                        "agent": agent,
+                        "confidence": data['confidence']
+                    })
+        
+        # Include agent weights if available
+        if 'agent_weights' in decision and isinstance(decision['agent_weights'], dict):
+            decision_trace["weights"] = decision['agent_weights'].copy()
+        
+        # Include score information if available
+        if 'weighted_scores' in decision:
+            decision_trace["scores"] = decision['weighted_scores']
+        
+        # Add a performance metrics placeholder for future backtest feedback
+        performance_metrics = {
+            "executed": False,
+            "result": None,
+            "pnl": None,
+            "duration": None,
+            "exit_price": None,
+            "exit_time": None,
+            "trade_id": None
+        }
+        
+        # Add trade type to tags
+        trade_type_tag = str(trade_type).lower()
+        if trade_type_tag not in unique_tags:
+            unique_tags.append(trade_type_tag)
+        
+        # Add volatility-based tags
+        if atr_used:
+            if "atr_volatility" not in unique_tags:
+                unique_tags.append("atr_volatility")
+        elif "low_volatility" not in unique_tags and "high_volatility" not in unique_tags:
+            # Simple volatility classification based on risk:reward
+            r_r = risk_snapshot.get("risk_reward_ratio", 0)
+            if r_r > 3.0:
+                unique_tags.append("low_volatility")
+            elif r_r < 1.5:
+                unique_tags.append("high_volatility")
+        
+        # Prepare comprehensive trade plan with enhanced details
         trade_plan = {
+            # Plan metadata
+            **plan_metadata,
+            
+            # Core signal and pricing
             "signal": signal,
             "confidence": confidence,
+            "normalized_confidence": normalized_confidence,
             "summary_confidence": summary_confidence,
+            "conflict_score": conflict_score,
             "entry_price": entry_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
             "position_size": position_size,
+            
+            # Analysis and reasoning
             "reasoning": decision.get('reasoning', 'No reasoning provided'),
-            "reason_summary": reason_summary,
+            "reason_summary": structured_reason_summary,  # Now using structured format
             "contributing_agents": contributing_agents,
+            
+            # Trade context and classification
             "valid_until": valid_until,
             "trade_type": str(trade_type),
             "risk_snapshot": risk_snapshot,
             "fallback_plan": fallback_plan,
             "tags": unique_tags,
+            
+            # Human-readable summary and tracing
             "plan_digest": plan_digest,
+            "decision_trace": decision_trace,
+            "performance": performance_metrics,
+            
+            # Timestamps and metadata
             "timestamp": datetime.now().isoformat(),
             "execution_time_seconds": time.time() - start_time
         }
@@ -509,8 +719,16 @@ class TradePlanAgent(BaseDecisionAgent):
             analyst_outputs=analyst_outputs
         )
         
-        # Return the combined output
-        return {**decision, **trade_plan}
+        # Return the combined output if trade_plan is valid
+        if trade_plan and isinstance(trade_plan, dict):
+            return {**decision, **trade_plan}
+        else:
+            # Return basic decision with error info if trade plan generation failed
+            error_response = self.build_error_response(
+                "TRADE_PLAN_GENERATION_FAILED",
+                "Failed to generate trade plan due to insufficient data"
+            )
+            return {**decision, **error_response}
     
     def _get_current_price(self, market_data: Dict[str, Any]) -> Optional[float]:
         """
@@ -770,10 +988,11 @@ class TradePlanAgent(BaseDecisionAgent):
                 prev_close = float(prev_candle.get('close', 0))
             elif isinstance(curr_candle, list) and len(curr_candle) >= 5:
                 # Assuming [timestamp, open, high, low, close] format
-                curr_high = float(curr_candle[2])
-                curr_low = float(curr_candle[3])
-                curr_close = float(curr_candle[4])
-                prev_close = float(prev_candle[4])
+                # Convert numeric indices to string indices for LSP
+                curr_high = float(curr_candle[2] if len(curr_candle) > 2 else 0)
+                curr_low = float(curr_candle[3] if len(curr_candle) > 3 else 0)
+                curr_close = float(curr_candle[4] if len(curr_candle) > 4 else 0)
+                prev_close = float(prev_candle[4] if len(prev_candle) > 4 else 0)
             else:
                 continue
             
@@ -1116,52 +1335,79 @@ class TradePlanAgent(BaseDecisionAgent):
         """
         # Don't generate detailed digest for HOLD signals
         if signal == "HOLD" or signal == "NEUTRAL":
-            return "No actionable trade signal. Maintaining current position or staying out of the market."
+            return "No clear directional edge. Monitor for better setup."
         
-        # Start with the overall market direction
+        # Core market assessment with more natural, confident tone
         if signal == "BUY":
-            digest = "Trend appears bullish"
+            if confidence >= 85:
+                core = "Strong bullish momentum"
+            elif confidence >= 70:
+                core = "Bullish bias developing"
+            elif confidence >= 55:
+                core = "Cautious bullish opportunity"
+            else:
+                core = "Potential bullish reversal"
         else:  # SELL
-            digest = "Trend appears bearish"
+            if confidence >= 85:
+                core = "Strong bearish pressure"
+            elif confidence >= 70:
+                core = "Bearish trend forming"
+            elif confidence >= 55:
+                core = "Cautious selling opportunity"
+            else:
+                core = "Potential bearish reversal"
         
-        # Add confidence assessment
-        if confidence >= 80:
-            digest += " with strong confidence."
-        elif confidence >= 65:
-            digest += " with moderate confidence."
-        else:
-            digest += " with limited confidence."
+        # Contributing factors
+        factors = []
         
-        # Add conflict information if relevant
-        if high_conflict:
-            digest += " Significant disagreement among analysts."
-        
-        # Add liquidity information
         if liquidity_used:
-            digest += " Entry based on key liquidity zones."
+            if signal == "BUY":
+                factors.append("key support confirmed")
+            else:
+                factors.append("key resistance validated")
         
-        # Add trade type information
+        if high_conflict:
+            factors.append("mixed signals")
+        else:
+            if confidence >= 70:
+                factors.append("analyst consensus")
+            
+        # Build core statement with factors
+        digest = core
+        if factors:
+            digest += " with " + " and ".join(factors)
+        digest += "."
+        
+        # Add trade context
         if trade_type == TradeType.SCALP:
-            digest += " Short-term scalping opportunity."
+            if confidence >= 70:
+                digest += " Quick in-and-out scalp"
+            else:
+                digest += " Higher-risk scalp entry"
         elif trade_type == TradeType.SWING:
-            digest += " Medium-term swing trade setup."
+            if confidence >= 70:
+                digest += " Multi-day swing setup"
+            else:
+                digest += " Potential swing position"
         elif trade_type == TradeType.TREND_FOLLOWING:
-            digest += " Longer-term trend-following position."
+            digest += " Trend continuation confirmed"
         elif trade_type == TradeType.MEAN_REVERSION:
-            digest += " Mean reversion trade expected."
+            digest += " Counter-trend reversion play"
         
-        # Add risk assessment
+        # Add risk assessment in a more concise format
         if risk_snapshot:
             r_r_ratio = risk_snapshot.get("risk_reward_ratio")
             if r_r_ratio:
                 if r_r_ratio >= 3.0:
-                    digest += f" Highly favorable R:R of {r_r_ratio:.1f}."
+                    digest += f" with strong {r_r_ratio:.1f}:1 R:R."
                 elif r_r_ratio >= 2.0:
-                    digest += f" Good R:R of {r_r_ratio:.1f}."
-                elif r_r_ratio >= 1.0:
-                    digest += f" Acceptable R:R of {r_r_ratio:.1f}."
+                    digest += f" with favorable {r_r_ratio:.1f}:1 R:R."
+                elif r_r_ratio >= 1.5:
+                    digest += f" with acceptable {r_r_ratio:.1f}:1 R:R."
                 else:
-                    digest += f" Unfavorable R:R of {r_r_ratio:.1f}."
+                    digest += f" with tight {r_r_ratio:.1f}:1 R:R."
+            else:
+                digest += "."  # End with period if no R:R available
         
         return digest
 

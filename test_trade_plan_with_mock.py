@@ -106,13 +106,46 @@ def generate_mock_analyst_outputs() -> Dict[str, Dict[str, Any]]:
     }
 
 def generate_mock_decision() -> Dict[str, Any]:
-    """Generate a mock trading decision"""
+    """Generate a mock trading decision with detailed agent contributions"""
     return {
         'signal': 'BUY',
         'confidence': 72.5,
         'contributing_agents': ['TechnicalAnalystAgent', 'SentimentAnalystAgent'],
         'reasoning': 'Technical and sentiment indicators suggesting bullish momentum',
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        # Add detailed agent contributions for structured reason_summary
+        'agent_contributions': {
+            'TechnicalAnalystAgent': {
+                'signal': 'BUY',
+                'confidence': 75,
+                'reasoning': 'Strong bullish momentum with positive MACD crossover and RSI at 65'
+            },
+            'SentimentAnalystAgent': {
+                'signal': 'BUY',
+                'confidence': 68,
+                'reasoning': 'Positive market sentiment with bullish news coverage and social media trend'
+            },
+            'LiquidityAnalystAgent': {
+                'signal': 'NEUTRAL',
+                'confidence': 60,
+                'reasoning': 'Multiple liquidity clusters identified with strong support at 48500'
+            }
+        },
+        # Add weighted confidences
+        'weighted_confidence': 73.8,
+        'directional_confidence': 68.2,
+        # Add agent weights
+        'agent_weights': {
+            'TechnicalAnalystAgent': 1.2,
+            'SentimentAnalystAgent': 0.9,
+            'LiquidityAnalystAgent': 1.0
+        },
+        # Add weighted scores
+        'weighted_scores': {
+            'BUY': 159.3,
+            'SELL': 0,
+            'NEUTRAL': 60.0
+        }
     }
 
 def test_trade_plan_agent():
@@ -161,8 +194,44 @@ def test_trade_plan_agent():
             logger.info(f"Portfolio Risk: {risk.get('portfolio_risk_percent')}%")
             logger.info(f"Portfolio Exposure: {risk.get('portfolio_exposure_percent')}%")
         
-        # Fallback info
-        logger.info(f"Used Fallback: {trade_plan.get('fallback_plan', False)}")
+        # Enhanced details
+        logger.info("===== ENHANCED DETAILS =====")
+        # Plan metadata
+        logger.info(f"Plan Version: {trade_plan.get('plan_version')}")
+        logger.info(f"Agent Version: {trade_plan.get('agent_version')}")
+        
+        # Structured reason summary
+        reason_summary = trade_plan.get('reason_summary', [])
+        logger.info(f"Reason Summary: {len(reason_summary)} agent details")
+        if reason_summary:
+            for idx, agent_detail in enumerate(reason_summary[:2]):  # Show first 2 for brevity
+                logger.info(f"  Agent {idx+1}: {agent_detail.get('agent')} - {agent_detail.get('action')} ({agent_detail.get('confidence')}%)")
+        
+        # Conflict score
+        logger.info(f"Conflict Score: {trade_plan.get('conflict_score')}")
+        
+        # Enhanced fallback info
+        fallback_plan = trade_plan.get('fallback_plan', {})
+        logger.info("Used Fallbacks:")
+        for component, details in fallback_plan.items():
+            if isinstance(details, dict):
+                if details.get('used'):
+                    logger.info(f"  {component}: Yes - {details.get('reason', 'No reason provided')}")
+                else:
+                    logger.info(f"  {component}: No")
+            else:
+                logger.info(f"  {component}: {details}")
+        
+        # Tags
+        tags = trade_plan.get('tags', [])
+        logger.info(f"Tags: {', '.join(tags)}")
+        
+        # Plan digest
+        logger.info(f"Plan Digest: {trade_plan.get('plan_digest')}")
+        
+        # Performance metrics placeholder
+        performance = trade_plan.get('performance', {})
+        logger.info(f"Performance Metrics: {len(performance)} fields defined")
         
         # Save to file for inspection
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

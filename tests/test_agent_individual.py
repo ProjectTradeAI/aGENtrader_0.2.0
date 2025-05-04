@@ -123,6 +123,12 @@ try:
         from agents.decision_agent import DecisionAgent
     except ImportError:
         DecisionAgent = None
+        
+    try:
+        from agents.trade_plan_agent import TradePlanAgent, create_trade_plan_agent
+    except ImportError:
+        TradePlanAgent = None
+        create_trade_plan_agent = None
     
     # Import data providers
     try:
@@ -215,7 +221,8 @@ AVAILABLE_AGENTS = {
     'LiquidityAnalystAgent': LiquidityAnalystAgent if IMPORTED_SUCCESSFULLY else None,
     'FundingRateAnalystAgent': FundingRateAnalystAgent if IMPORTED_SUCCESSFULLY else None,
     'OpenInterestAnalystAgent': OpenInterestAnalystAgent if IMPORTED_SUCCESSFULLY else None,
-    'DecisionAgent': DecisionAgent if IMPORTED_SUCCESSFULLY else None
+    'DecisionAgent': DecisionAgent if IMPORTED_SUCCESSFULLY else None,
+    'TradePlanAgent': TradePlanAgent if IMPORTED_SUCCESSFULLY else None
 }
 
 class AgentTestHarness:
@@ -257,6 +264,8 @@ class AgentTestHarness:
         self.explain = explain
         self.data_override = data_override or {}
         self.full_cycle = False  # Whether to run full decision cycle with all agents
+        self.trade_cycle = False  # Whether to run full trade cycle (including TradePlanAgent)
+        self.trade_log = False  # Whether to save full JSON output of trade cycle test
         self.log_conflict_traces = log_conflict_traces  # Enable conflict logging by default in test mode
         
         # Check if agent is valid
@@ -609,6 +618,7 @@ class AgentTestHarness:
     def _run_full_cycle_test(self) -> Dict[str, Any]:
         """
         Run a full decision cycle with all analyst agents and the decision agent.
+        If trade_cycle is True, also runs the TradePlanAgent to generate a comprehensive trade plan.
         
         Returns:
             Dictionary with test results
@@ -847,10 +857,82 @@ class AgentTestHarness:
             end_time = time.time()
             elapsed_time = end_time - start_time
             
+            # Determine test type and agent name display
+            test_type = "Full Trade Cycle" if hasattr(self, 'trade_cycle') and self.trade_cycle else "Decision Cycle"
+            display_agent = f"All Agents ({test_type})"
+            
+            # Check if we need to run the Trade Plan Agent (if trade_cycle is True)
+            trade_plan = None
+            if hasattr(self, 'trade_cycle') and self.trade_cycle:
+                logger.info(f"{Fore.CYAN}Running TradePlanAgent to generate comprehensive trade plan...{Style.RESET_ALL}")
+                
+                try:
+                    # Check if TradePlanAgent is available
+                    trade_plan_agent_class = AVAILABLE_AGENTS.get('TradePlanAgent')
+                    if trade_plan_agent_class is None or create_trade_plan_agent is None:
+                        logger.error(f"{Fore.RED}TradePlanAgent or create_trade_plan_agent function is not available{Style.RESET_ALL}")
+                    else:
+                        # Create the trade plan agent
+                        trade_plan_agent = create_trade_plan_agent(data_provider=self.data_provider)
+                        
+                        # Set temperature if needed
+                        if hasattr(trade_plan_agent, 'llm_client'):
+                            trade_plan_agent.llm_client.temperature = self.temperature
+                            
+                        # Generate trade plan
+                        trade_plan = trade_plan_agent.make_decision(
+                            symbol=self.symbol,
+                            analyst_results=analyses,
+                            decision=decision,
+                            market_data=market_data
+                        )
+                        
+                        # Display details
+                        logger.info(f"{Fore.GREEN}Trade plan generated successfully{Style.RESET_ALL}")
+                        
+                        # Log trade plan to file if requested
+                        if hasattr(self, 'trade_log') and self.trade_log:
+                            try:
+                                import json
+                                log_dir = "logs"
+                                os.makedirs(log_dir, exist_ok=True)
+                                log_file = f"{log_dir}/trade_plan_{self.symbol.replace('/', '')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                                
+                                # Create complete log with all data
+                                full_data = {
+                                    "trade_plan": trade_plan,
+                                    "decision": decision,
+                                    "analyses": analyses,
+                                    "market_data": market_data,
+                                    "symbol": self.symbol,
+                                    "interval": self.interval,
+                                    "timestamp": timestamp
+                                }
+                                
+                                with open(log_file, 'w') as f:
+                                    json.dump(full_data, f, indent=2)
+                                    
+                                logger.info(f"{Fore.GREEN}Trade plan log saved to: {log_file}{Style.RESET_ALL}")
+                            except Exception as e:
+                                logger.error(f"{Fore.RED}Error saving trade plan log: {str(e)}{Style.RESET_ALL}")
+                except Exception as e:
+                    import traceback
+                    logger.error(f"{Fore.RED}Error generating trade plan: {str(e)}{Style.RESET_ALL}")
+                    logger.debug(traceback.format_exc())
+                    
+                    # Create error trade plan
+                    trade_plan = {
+                        "status": "error",
+                        "signal": "UNKNOWN",
+                        "confidence": 0,
+                        "reason_summary": f"Error generating trade plan: {str(e)}",
+                        "error": str(e)
+                    }
+            
             # Format the final result with all data
             result = {
                 "status": "success",
-                "agent": "All Agents (Decision Cycle)",
+                "agent": display_agent,
                 "symbol": self.symbol,
                 "interval": self.interval,
                 "use_mock_data": self.use_mock_data,
@@ -867,6 +949,21 @@ class AgentTestHarness:
                 },
                 "all_results": all_results
             }
+            
+            # Add trade plan to result if available
+            if trade_plan:
+                result["trade_plan"] = trade_plan
+                # For display purposes, include summary in result
+                result["result"]["trade_plan_summary"] = {
+                    "signal": trade_plan.get("signal", "UNKNOWN"),
+                    "confidence": trade_plan.get("confidence", 0),
+                    "reason_summary": trade_plan.get("reason_summary", "No reason provided"),
+                    "position_size": trade_plan.get("position_size", None),
+                    "stop_loss": trade_plan.get("stop_loss", None),
+                    "take_profit": trade_plan.get("take_profit", None),
+                    "risk_reward_ratio": trade_plan.get("risk_reward_ratio", None),
+                    "timeframe": trade_plan.get("timeframe", None)
+                }
             
             # Store for possible trace saving
             self.test_results.append(result)
@@ -1185,11 +1282,97 @@ class AgentTestHarness:
         else:
             confidence_color = Fore.RED
         
+        # Determine if this is a trade cycle test
+        is_trade_cycle = "Full Trade Cycle" in result.get('agent', '') or 'trade_plan' in result
+        
         print(f"\n{Fore.CYAN}## FINAL DECISION ##")
         print(f"Signal:     {signal_color}{signal}{Style.RESET_ALL}")
         print(f"Confidence: {confidence_color}{confidence}%{Style.RESET_ALL}")
         print(f"Reasoning:  {Fore.WHITE}{reasoning}{Style.RESET_ALL}")
         print(f"{Fore.CYAN}####################{Style.RESET_ALL}")
+        
+        # If trade plan exists, display it
+        if is_trade_cycle and 'trade_plan' in result:
+            trade_plan = result['trade_plan']
+            
+            print(f"\n{Fore.CYAN}## TRADE PLAN ##")
+            
+            # Get signal and confidence
+            trade_signal = trade_plan.get('signal', 'UNKNOWN')
+            trade_confidence = trade_plan.get('confidence', 0)
+            
+            # Color-code the signal
+            if trade_signal == 'BUY':
+                trade_signal_color = Fore.GREEN
+            elif trade_signal == 'SELL':
+                trade_signal_color = Fore.RED
+            elif trade_signal in ['NEUTRAL', 'HOLD']:
+                trade_signal_color = Fore.YELLOW
+            else:
+                trade_signal_color = Fore.WHITE
+                
+            # Check for error in trade plan
+            if 'error' in trade_plan or trade_plan.get('status') == 'error':
+                error_msg = trade_plan.get('error', trade_plan.get('reason_summary', 'Unknown error'))
+                print(f"{Fore.RED}Error generating trade plan: {error_msg}{Style.RESET_ALL}")
+            else:
+                # Print trade signal and confidence
+                print(f"Signal:      {trade_signal_color}{trade_signal}{Style.RESET_ALL}")
+                print(f"Confidence:  {confidence_color}{trade_confidence}%{Style.RESET_ALL}")
+                
+                # Show reason summary
+                reason_summary = trade_plan.get('reason_summary', 'No reason provided')
+                print(f"Reason:      {Fore.WHITE}{reason_summary}{Style.RESET_ALL}")
+                
+                # Show entry details
+                entry_price = trade_plan.get('entry_price')
+                if entry_price is not None:
+                    print(f"Entry Price: ${float(entry_price):.2f}")
+                    
+                # Show stop loss and take profit
+                stop_loss = trade_plan.get('stop_loss')
+                take_profit = trade_plan.get('take_profit')
+                if stop_loss is not None:
+                    print(f"Stop Loss:   ${float(stop_loss):.2f}")
+                if take_profit is not None:
+                    print(f"Take Profit: ${float(take_profit):.2f}")
+                    
+                # Show risk metrics
+                risk_reward = trade_plan.get('risk_reward_ratio')
+                if risk_reward is not None:
+                    print(f"Risk/Reward: {float(risk_reward):.2f}")
+                
+                # Show position sizing
+                position_size = trade_plan.get('position_size')
+                if position_size is not None:
+                    print(f"Position:    {position_size}%")
+                
+                # Show trade classification and timeframe
+                classification = trade_plan.get('trade_classification')
+                if classification:
+                    print(f"Class:       {classification}")
+                    
+                timeframe = trade_plan.get('timeframe')
+                if timeframe:
+                    print(f"Timeframe:   {timeframe}")
+                    
+                # Show validity period
+                validity_period = trade_plan.get('validity_period')
+                if validity_period:
+                    print(f"Valid Until: {validity_period}")
+                
+                # Show market mood if available
+                market_mood = trade_plan.get('market_mood')
+                if market_mood:
+                    print(f"\n{Fore.CYAN}Market Mood:{Style.RESET_ALL}")
+                    for mood, value in market_mood.items():
+                        # Format as percentage
+                        if isinstance(value, (int, float)):
+                            print(f"  {mood}: {value:.1f}%")
+                        else:
+                            print(f"  {mood}: {value}")
+            
+            print(f"{Fore.CYAN}####################{Style.RESET_ALL}")
         
         # Display individual agent results
         print(f"\n{Fore.CYAN}## Individual Agent Results ##")
@@ -1418,8 +1601,11 @@ def run_interactive_mode():
         print(f"{Fore.RED}No implemented agents found.{Style.RESET_ALL}")
         return args
     
-    # Add the "All Agents" option for full decision cycle
-    display_agents = ["All Agents (Full Decision Cycle)"] + available_agents
+    # Add the full decision cycle and full trade cycle options
+    display_agents = [
+        "All Agents (Full Decision Cycle)", 
+        "Full Trade Cycle Test (All Agents + TradePlanAgent)"
+    ] + available_agents
         
     # Show available agents
     print(f"{Fore.GREEN}Available Agents:{Style.RESET_ALL}")
@@ -1434,14 +1620,28 @@ def run_interactive_mode():
             agent_idx = 0
             
         if agent_idx == 0:
-            # User selected "All Agents"
+            # User selected "All Agents (Full Decision Cycle)"
             args.full_cycle = True
+            args.trade_cycle = False
             args.agent = "DecisionAgent"  # We'll use the DecisionAgent as the main entry point
             print(f"{Fore.CYAN}Running full agent decision cycle using DecisionAgent{Style.RESET_ALL}")
+        elif agent_idx == 1:
+            # User selected "Full Trade Cycle Test"
+            args.full_cycle = True
+            args.trade_cycle = True
+            args.agent = "DecisionAgent"  # Still use DecisionAgent as entry point
+            print(f"{Fore.CYAN}Running FULL TRADE CYCLE test (All Agents + TradePlanAgent){Style.RESET_ALL}")
+            
+            # Ask if user wants to save trade logs
+            save_trade_log = input(f"{Fore.YELLOW}Save detailed trade plan JSON logs? (y/n, default: n): {Style.RESET_ALL}").lower()
+            args.trade_log = save_trade_log.startswith('y')
+            if args.trade_log:
+                print(f"{Fore.CYAN}Full trade plan logs will be saved to the logs directory{Style.RESET_ALL}")
         else:
             # User selected a specific agent
             args.full_cycle = False
-            args.agent = available_agents[agent_idx - 1]  # Subtract 1 to account for "All Agents" option
+            args.trade_cycle = False
+            args.agent = available_agents[agent_idx - 2]  # Subtract 2 to account for both special options
     except ValueError:
         if available_agents:
             print(f"{Fore.RED}Invalid input. Using first agent.{Style.RESET_ALL}")
@@ -1591,6 +1791,7 @@ Examples:
   python tests/test_agent_individual.py --agent SentimentAnalystAgent --symbol ETH/USDT --dynamic-temp --repeat 3 --save-trace
   python tests/test_agent_individual.py --interactive
   python tests/test_agent_individual.py --agent DecisionAgent --full-cycle --symbol BTC/USDT --interval 1h
+  python tests/test_agent_individual.py --agent DecisionAgent --trade-cycle --symbol BTC/USDT --interval 1h --trade-log
 """
     )
     
@@ -1628,6 +1829,8 @@ Examples:
     meta_group.add_argument('--quick', action='store_true', help='Run a quick test with default settings')
     meta_group.add_argument('--interactive', action='store_true', help='Run in interactive mode with prompts')
     meta_group.add_argument('--full-cycle', action='store_true', help='Run full decision cycle with all agents')
+    meta_group.add_argument('--trade-cycle', action='store_true', help='Run full trade cycle (all agents + TradePlanAgent)')
+    meta_group.add_argument('--trade-log', action='store_true', help='Save full JSON output of the trade cycle test')
     
     args = parser.parse_args()
     
@@ -1747,10 +1950,22 @@ def main():
             log_conflict_traces=args.log_conflict_traces
         )
         
-        # Set full_cycle attribute if specified
+        # Set full_cycle and trade_cycle attributes if specified
         if hasattr(args, 'full_cycle') and args.full_cycle:
             harness.full_cycle = True
-            logger.info(f"{Fore.CYAN}Running full agent decision cycle test{Style.RESET_ALL}")
+            
+            # Check if we're also running the trade cycle
+            if hasattr(args, 'trade_cycle') and args.trade_cycle:
+                harness.trade_cycle = True
+                logger.info(f"{Fore.CYAN}Running FULL TRADE CYCLE TEST (All Agents + TradePlanAgent){Style.RESET_ALL}")
+            else:
+                harness.trade_cycle = False
+                logger.info(f"{Fore.CYAN}Running full agent decision cycle test{Style.RESET_ALL}")
+                
+        # Set trade log option
+        if hasattr(args, 'trade_log') and args.trade_log:
+            harness.trade_log = True
+            logger.info(f"{Fore.CYAN}Will save full JSON output of trade cycle{Style.RESET_ALL}")
         
         # Check if we're doing temperature comparison
         if args.compare_temps:

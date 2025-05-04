@@ -161,7 +161,9 @@ def test_trade_plan_agent():
     config = {
         'risk_reward_ratio': 2.0,
         'portfolio_risk_per_trade': 0.02,  # 2% risk per trade
-        'default_tags': ['test', 'mock_data']
+        'default_tags': ['test', 'mock_data'],
+        'detailed_logging': True,  # Enable detailed logging
+        'test_mode': True  # Enable test mode for more verbose output
     }
     
     # Create trade plan agent
@@ -175,65 +177,12 @@ def test_trade_plan_agent():
         analyst_outputs=analyst_outputs
     )
     
-    # Log the trade plan
+    # Check for errors in the trade plan
     if not trade_plan.get('error', False):
-        logger.info("===== ENHANCED TRADE PLAN =====")
-        logger.info(f"Signal: {trade_plan.get('signal')}")
-        logger.info(f"Entry Price: {trade_plan.get('entry_price')}")
-        logger.info(f"Stop Loss: {trade_plan.get('stop_loss')}")
-        logger.info(f"Take Profit: {trade_plan.get('take_profit')}")
-        logger.info(f"Position Size: {trade_plan.get('position_size')}")
-        logger.info(f"Trade Type: {trade_plan.get('trade_type')}")
-        logger.info(f"Valid Until: {trade_plan.get('valid_until')}")
+        # The detailed logging is now handled by log_trade_plan_summary method
+        # No need to manually log all details here
         
-        # Risk metrics
-        if 'risk_snapshot' in trade_plan:
-            risk = trade_plan['risk_snapshot']
-            logger.info("===== RISK METRICS =====")
-            logger.info(f"R:R Ratio: {risk.get('risk_reward_ratio')}")
-            logger.info(f"Portfolio Risk: {risk.get('portfolio_risk_percent')}%")
-            logger.info(f"Portfolio Exposure: {risk.get('portfolio_exposure_percent')}%")
-        
-        # Enhanced details
-        logger.info("===== ENHANCED DETAILS =====")
-        # Plan metadata
-        logger.info(f"Plan Version: {trade_plan.get('plan_version')}")
-        logger.info(f"Agent Version: {trade_plan.get('agent_version')}")
-        
-        # Structured reason summary
-        reason_summary = trade_plan.get('reason_summary', [])
-        logger.info(f"Reason Summary: {len(reason_summary)} agent details")
-        if reason_summary:
-            for idx, agent_detail in enumerate(reason_summary[:2]):  # Show first 2 for brevity
-                logger.info(f"  Agent {idx+1}: {agent_detail.get('agent')} - {agent_detail.get('action')} ({agent_detail.get('confidence')}%)")
-        
-        # Conflict score
-        logger.info(f"Conflict Score: {trade_plan.get('conflict_score')}")
-        
-        # Enhanced fallback info
-        fallback_plan = trade_plan.get('fallback_plan', {})
-        logger.info("Used Fallbacks:")
-        for component, details in fallback_plan.items():
-            if isinstance(details, dict):
-                if details.get('used'):
-                    logger.info(f"  {component}: Yes - {details.get('reason', 'No reason provided')}")
-                else:
-                    logger.info(f"  {component}: No")
-            else:
-                logger.info(f"  {component}: {details}")
-        
-        # Tags
-        tags = trade_plan.get('tags', [])
-        logger.info(f"Tags: {', '.join(tags)}")
-        
-        # Plan digest
-        logger.info(f"Plan Digest: {trade_plan.get('plan_digest')}")
-        
-        # Performance metrics placeholder
-        performance = trade_plan.get('performance', {})
-        logger.info(f"Performance Metrics: {len(performance)} fields defined")
-        
-        # Save to file for inspection
+        # We will still save the plan to a file for reference
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         output_file = f"mock_trade_plan_{timestamp}.json"
         

@@ -141,6 +141,15 @@ class TradePlanAgent(BaseDecisionAgent):
             "medium": self.config.get("medium_confidence_size", 0.6),
             "high": self.config.get("high_confidence_size", 1.0)
         }
+            
+        # Logging configuration
+        self.detailed_logging = self.config.get("detailed_logging", False)
+        self.test_mode = self.config.get("test_mode", False)
+        
+        # Create logs directory for trade plans if it doesn't exist
+        self.log_dir = os.path.join("logs", "trade_plans")
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir, exist_ok=True)
         
         # Trade type thresholds for classification
         self.trade_type_thresholds = self.config.get("trade_type_thresholds", {
@@ -155,6 +164,15 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Tags for grouping and analysis
         self.default_tags = self.config.get("default_tags", [])
+        
+        # Logging configuration
+        self.detailed_logging = self.config.get("detailed_logging", False)
+        self.test_mode = self.config.get("test_mode", False)
+        
+        # Create logs directory for trade plans if it doesn't exist
+        self.log_dir = os.path.join("logs", "trade_plans")
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir, exist_ok=True)
         
         logger.info(f"Trade plan agent initialized with risk:reward ratio {self.risk_reward_ratio}")
     
@@ -608,6 +626,13 @@ class TradePlanAgent(BaseDecisionAgent):
             trade_plan["override_reason"] = override_reason
         
         logger.info(f"Trade plan generated for {signal} {symbol} with position size {position_size}")
+        
+        # Log the trade plan summary if it's an actionable signal or if detailed logging is enabled
+        if is_actionable or self.detailed_logging or self.test_mode:
+            self.log_trade_plan_summary(trade_plan)
+        else:
+            logger.info(f"Non-actionable signal {signal}, minimal trade plan generated")
+            
         return trade_plan
     
     def make_decision(self, symbol: str = "UNKNOWN", interval: str = "1h", analyst_results: Dict[str, Any] = None, **kwargs) -> Dict[str, Any]:
@@ -721,13 +746,20 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Return the combined output if trade_plan is valid
         if trade_plan and isinstance(trade_plan, dict):
-            return {**decision, **trade_plan}
+            combined_plan = {**decision, **trade_plan}
+            
+            # Log the combined plan if it's not already logged
+            if not self.detailed_logging and not self.test_mode and final_signal in ["BUY", "SELL"]:
+                self.log_trade_plan_summary(combined_plan)
+                
+            return combined_plan
         else:
             # Return basic decision with error info if trade plan generation failed
             error_response = self.build_error_response(
                 "TRADE_PLAN_GENERATION_FAILED",
                 "Failed to generate trade plan due to insufficient data"
             )
+            logger.warning("Failed to generate trade plan due to insufficient data")
             return {**decision, **error_response}
     
     def _get_current_price(self, market_data: Dict[str, Any]) -> Optional[float]:
@@ -1411,6 +1443,331 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return digest
 
+    def log_trade_plan_summary(self, trade_plan: Dict[str, Any]) -> None:
+        """
+        Log a formatted, human-readable summary of the trade plan.
+        
+        This method prints a well-structured summary of the trade plan, highlighting
+        key information and formatting it for easy reading in terminal logs.
+        
+        Args:
+            trade_plan: The complete trade plan dictionary
+        """
+        if not trade_plan:
+            logger.info("❌ No valid trade plan to log")
+            return
+            
+        # Get trade_type and convert to string if it's an enum
+        trade_type = trade_plan.get('trade_type')
+        if trade_type is not None and hasattr(trade_type, 'value'):  # Check if it's an enum
+            trade_type = trade_type.value
+            
+        # Format symbol if available
+        symbol = trade_plan.get('symbol', 'UNKNOWN')
+        interval = trade_plan.get('interval', '1h')
+        symbol_display = f"{symbol} ({interval})" if interval else symbol
+        
+        # Get signal and confidence
+        signal = trade_plan.get('signal', 'UNKNOWN')
+        confidence = trade_plan.get('confidence', 0)
+        normalized_confidence = trade_plan.get('normalized_confidence', confidence)
+        
+        # Calculate price distances if possible
+        entry_price = trade_plan.get('entry_price')
+        stop_loss = trade_plan.get('stop_loss')
+        take_profit = trade_plan.get('take_profit')
+        
+        sl_distance = ""
+        tp_distance = ""
+        
+        if entry_price and entry_price > 0:
+            # Format stop loss with distance percentage
+            if stop_loss and stop_loss > 0:
+                sl_percent = ((stop_loss - entry_price) / entry_price) * 100
+                sl_direction = "↓" if sl_percent < 0 else "↑"
+                sl_distance = f" ({sl_direction} {sl_percent:.2f}%)"
+                
+            # Format take profit with distance percentage
+            if take_profit and take_profit > 0:
+                tp_percent = ((take_profit - entry_price) / entry_price) * 100
+                tp_direction = "↑" if tp_percent > 0 else "↓"
+                tp_distance = f" ({tp_direction} {tp_percent:.2f}%)"
+        
+        # Get fallback information
+        fallback_plan = trade_plan.get('fallback_plan', {})
+        entry_fallback = fallback_plan.get('entry', {}).get('used', False) if isinstance(fallback_plan, dict) else False
+        sl_fallback = fallback_plan.get('stop_loss', {}).get('used', False) if isinstance(fallback_plan, dict) else False
+        tp_fallback = fallback_plan.get('take_profit', {}).get('used', False) if isinstance(fallback_plan, dict) else False
+        
+        # Format entry_fallback_reason
+        entry_fallback_reason = fallback_plan.get('entry', {}).get('reason', '') if isinstance(fallback_plan, dict) else ''
+        sl_fallback_reason = fallback_plan.get('stop_loss', {}).get('reason', '') if isinstance(fallback_plan, dict) else ''
+        tp_fallback_reason = fallback_plan.get('take_profit', {}).get('reason', '') if isinstance(fallback_plan, dict) else ''
+        
+        # Get risk metrics
+        risk_snapshot = trade_plan.get('risk_snapshot', {})
+        rr_ratio = risk_snapshot.get('risk_reward_ratio', 0) if isinstance(risk_snapshot, dict) else 0
+        portfolio_risk = risk_snapshot.get('portfolio_risk_percent', 0) if isinstance(risk_snapshot, dict) else 0
+        
+        # Get other details
+        position_size = trade_plan.get('position_size', 0)
+        valid_until = trade_plan.get('valid_until', '')
+        plan_digest = trade_plan.get('plan_digest', '')
+        conflict_score = trade_plan.get('conflict_score', 0)
+        
+        # Format tags
+        tags = trade_plan.get('tags', [])
+        tags_str = f"{tags}" if tags else "None"
+        
+        # Get contributing agents
+        contributing_agents = trade_plan.get('contributing_agents', [])
+        
+        # Get reason summary
+        reason_summary = trade_plan.get('reason_summary', [])
+        
+        # Format top 3 contributors by confidence
+        top_contributors = []
+        if isinstance(reason_summary, list):
+            # Sort by confidence descending
+            sorted_contributors = sorted(reason_summary, 
+                                      key=lambda x: x.get('confidence', 0) if isinstance(x, dict) else 0, 
+                                      reverse=True)
+            top_contributors = sorted_contributors[:3]  # Take top 3
+        
+        # Start building the output
+        logger.info(f"✅ Trade Plan Summary — {symbol_display}")
+        logger.info("")
+        
+        # Core trade details
+        logger.info(f"- Signal:        {signal} (Confidence: {normalized_confidence}%)")
+        
+        # Price levels
+        if entry_price:
+            logger.info(f"- Entry:         {entry_price:.2f}")
+        else:
+            logger.info(f"- Entry:         Not specified")
+            
+        if stop_loss:
+            logger.info(f"- Stop-Loss:     {stop_loss:.2f}{sl_distance}")
+        else:
+            logger.info(f"- Stop-Loss:     Not specified")
+            
+        if take_profit:
+            logger.info(f"- Take-Profit:   {take_profit:.2f}{tp_distance}")
+        else:
+            logger.info(f"- Take-Profit:   Not specified")
+        
+        # Risk metrics
+        logger.info(f"- R:R Ratio:     {rr_ratio:.2f}")
+        logger.info(f"- Portfolio Risk: {portfolio_risk:.1f}%")
+        logger.info(f"- Position Size:  {position_size:.4f}")
+        
+        # Trade info
+        if trade_type:
+            logger.info(f"- Trade Type:     {trade_type}")
+        
+        logger.info(f"- Tags:          {tags_str}")
+        
+        if valid_until:
+            logger.info(f"- Valid Until:   {valid_until}")
+            
+        logger.info("")
+        
+        # Agent consensus section
+        logger.info("📊 Agent Consensus:")
+        if top_contributors:
+            for contributor in top_contributors:
+                if isinstance(contributor, dict):
+                    agent = contributor.get('agent', 'Unknown')
+                    action = contributor.get('action', 'UNKNOWN')
+                    conf = contributor.get('confidence', 0)
+                    reason = contributor.get('reason', '')
+                    
+                    reason_display = f" → \"{reason}\"" if reason else ""
+                    logger.info(f"- {agent:<25} → {action} ({conf}%){reason_display}")
+        else:
+            logger.info("- No agent details available")
+            
+        logger.info("")
+        
+        # Warning for conflict or low confidence
+        if conflict_score and conflict_score > 50:
+            logger.info(f"⚠️ Conflict Score: {conflict_score}% (high divergence)")
+            
+            # Show conflicting agents
+            opposing_signals = {}
+            if isinstance(reason_summary, list):
+                for agent_data in reason_summary:
+                    if isinstance(agent_data, dict):
+                        action = agent_data.get('action')
+                        if action and action != signal:  # Different from final signal
+                            if action not in opposing_signals:
+                                opposing_signals[action] = []
+                            opposing_signals[action].append(agent_data)
+                
+                # Show top opposing agent for each signal
+                for oppose_signal, agents in opposing_signals.items():
+                    if agents:
+                        # Take highest confidence agent for this signal
+                        top_agent = max(agents, key=lambda x: x.get('confidence', 0) if isinstance(x, dict) else 0)
+                        agent_name = top_agent.get('agent', 'Unknown')
+                        confidence = top_agent.get('confidence', 0)
+                        logger.info(f"  {agent_name} suggests {oppose_signal} ({confidence}%)")
+                        
+        elif normalized_confidence and normalized_confidence < 60:
+            logger.info(f"⚠️ Low Confidence Plan: {normalized_confidence}%")
+            logger.info("  Consider skipping or reducing position size")
+        
+        # Fallback heuristics used
+        logger.info(f"📌 Fallback Heuristics Used:")
+        if entry_fallback or sl_fallback or tp_fallback:
+            if entry_fallback:
+                logger.info(f"  Entry: Yes - {entry_fallback_reason}")
+            if sl_fallback:
+                logger.info(f"  Stop-Loss: Yes - {sl_fallback_reason}")
+            if tp_fallback:
+                logger.info(f"  Take-Profit: Yes - {tp_fallback_reason}")
+        else:
+            logger.info("  No")
+            
+        # Plan digest if available
+        if plan_digest:
+            logger.info(f"\n💡 {plan_digest}")
+            
+        logger.info("\n" + "-" * 50)
+        
+        # If detailed logging is enabled, log full calculation steps
+        if self.detailed_logging or self.test_mode:
+            self._log_detailed_calculations(trade_plan)
+            
+        # Write to log file in logs/trade_plans directory
+        self._write_trade_plan_log(trade_plan)
+            
+    def _log_detailed_calculations(self, trade_plan: Dict[str, Any]) -> None:
+        """
+        Log detailed calculation steps for debugging and analysis.
+        Only used when detailed_logging=True or test_mode=True.
+        
+        Args:
+            trade_plan: The complete trade plan dictionary
+        """
+        if not (self.detailed_logging or self.test_mode):
+            return
+            
+        logger.info("\n🔍 DETAILED CALCULATION STEPS:")
+        
+        # Log entry price determination
+        entry_price = trade_plan.get('entry_price')
+        fallback_plan = trade_plan.get('fallback_plan', {})
+        
+        if entry_price:
+            logger.info(f"Entry Price Determination:")
+            entry_fallback = fallback_plan.get('entry', {}).get('used', False) if isinstance(fallback_plan, dict) else False
+            entry_reason = fallback_plan.get('entry', {}).get('reason', '') if isinstance(fallback_plan, dict) else ''
+            
+            if entry_fallback:
+                logger.info(f"  → Used fallback: {entry_reason}")
+            else:
+                logger.info("  → Used primary method (liquidity-based or custom)")
+        
+        # Log stop loss calculation
+        stop_loss = trade_plan.get('stop_loss')
+        if stop_loss:
+            logger.info(f"Stop Loss Determination:")
+            sl_fallback = fallback_plan.get('stop_loss', {}).get('used', False) if isinstance(fallback_plan, dict) else False
+            sl_reason = fallback_plan.get('stop_loss', {}).get('reason', '') if isinstance(fallback_plan, dict) else ''
+            
+            if sl_fallback:
+                logger.info(f"  → Used fallback: {sl_reason}")
+            else:
+                logger.info("  → Used primary method (liquidity-based or custom)")
+                
+        # Log take profit calculation
+        take_profit = trade_plan.get('take_profit')
+        if take_profit:
+            logger.info(f"Take Profit Determination:")
+            tp_fallback = fallback_plan.get('take_profit', {}).get('used', False) if isinstance(fallback_plan, dict) else False
+            tp_reason = fallback_plan.get('take_profit', {}).get('reason', '') if isinstance(fallback_plan, dict) else ''
+            
+            if tp_fallback:
+                logger.info(f"  → Used fallback: {tp_reason}")
+            else:
+                logger.info("  → Used primary method (liquidity-based or custom)")
+                
+        # Log position sizing calculation
+        position_size = trade_plan.get('position_size')
+        if position_size:
+            logger.info(f"Position Sizing:")
+            confidence = trade_plan.get('confidence', 0)
+            
+            # Determine tier that would have been used
+            tier = "low"
+            if confidence >= self.confidence_tiers["high"]:
+                tier = "high"
+            elif confidence >= self.confidence_tiers["medium"]:
+                tier = "medium"
+                
+            tier_multiplier = self.position_size_multipliers.get(tier, 0)
+            logger.info(f"  → Confidence: {confidence}% (Tier: {tier}, Multiplier: {tier_multiplier})")
+            logger.info(f"  → Final position size: {position_size}")
+            
+        # Log agent weight calculations if available
+        decision_trace = trade_plan.get('decision_trace', {})
+        if decision_trace and isinstance(decision_trace, dict):
+            logger.info(f"Agent Weight Distribution:")
+            weights = decision_trace.get('weights', {})
+            if weights and isinstance(weights, dict):
+                for agent, weight in weights.items():
+                    logger.info(f"  → {agent}: {weight}")
+            
+            logger.info(f"Signal Scores:")
+            scores = decision_trace.get('scores', {})
+            if scores and isinstance(scores, dict):
+                for signal, score in scores.items():
+                    logger.info(f"  → {signal}: {score}")
+                    
+    def _write_trade_plan_log(self, trade_plan: Dict[str, Any]) -> None:
+        """
+        Write trade plan details to a log file for persistent review.
+        
+        Args:
+            trade_plan: The complete trade plan dictionary
+        """
+        if not trade_plan:
+            return
+            
+        try:
+            # Create a unique filename with timestamp and symbol
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            symbol = trade_plan.get('symbol', 'UNKNOWN').replace('/', '_')
+            filename = f"{timestamp}_{symbol}_plan.log"
+            log_path = os.path.join(self.log_dir, filename)
+            
+            # Format the content similar to the terminal output
+            with open(log_path, 'w') as f:
+                # Use the same format as terminal output but write to file
+                f.write(f"Trade Plan Summary — {symbol}\n\n")
+                
+                # Core trade details
+                f.write(f"Signal: {trade_plan.get('signal')} (Confidence: {trade_plan.get('normalized_confidence', 0)}%)\n")
+                f.write(f"Entry: {trade_plan.get('entry_price')}\n")
+                f.write(f"Stop-Loss: {trade_plan.get('stop_loss')}\n")
+                f.write(f"Take-Profit: {trade_plan.get('take_profit')}\n")
+                
+                # Risk metrics
+                risk_snapshot = trade_plan.get('risk_snapshot', {})
+                f.write(f"R:R Ratio: {risk_snapshot.get('risk_reward_ratio', 0) if isinstance(risk_snapshot, dict) else 0}\n")
+                f.write(f"Portfolio Risk: {risk_snapshot.get('portfolio_risk_percent', 0) if isinstance(risk_snapshot, dict) else 0}%\n")
+                f.write(f"Position Size: {trade_plan.get('position_size', 0)}\n\n")
+                
+                # Add raw trade plan JSON for reference
+                f.write("Raw Trade Plan:\n")
+                f.write(json.dumps(trade_plan, indent=2))
+                
+            logger.debug(f"Trade plan log written to {log_path}")
+        except Exception as e:
+            logger.warning(f"Failed to write trade plan log: {str(e)}")
+            
     def build_error_response(self, error_type: str, message: str) -> Dict[str, Any]:
         """
         Build a standardized error response.

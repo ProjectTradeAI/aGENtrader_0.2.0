@@ -306,7 +306,9 @@ class TradePlanAgent(BaseDecisionAgent):
                 "position_size": 0,
                 "reasoning": "No actionable signal generated",
                 "timestamp": datetime.now().isoformat(),
-                "execution_time_seconds": time.time() - start_time
+                "execution_time_seconds": time.time() - start_time,
+                "symbol": market_data.get('symbol', 'UNKNOWN'),
+                "interval": interval
             }
             
             # Add conflict flag and fallback information for CONFLICTED signals
@@ -691,6 +693,10 @@ class TradePlanAgent(BaseDecisionAgent):
         trade_plan = {
             # Plan metadata
             **plan_metadata,
+            
+            # Symbol and interval information
+            "symbol": symbol,
+            "interval": interval,
             
             # Core signal and pricing
             "signal": signal,

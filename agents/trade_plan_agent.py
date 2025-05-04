@@ -253,7 +253,7 @@ class TradePlanAgent(BaseDecisionAgent):
         position_size = self._calculate_position_size(confidence)
         
         # Generate reason summary
-        reason_summary = self._generate_reason_summary(decision, analyst_outputs)
+        structured_reason_summary = self._generate_reason_summary(decision, analyst_outputs)
         
         # Determine validity period
         valid_until = self._calculate_validity_period(interval, confidence, historical_data)
@@ -315,28 +315,6 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Normalize confidence to standard scale
         normalized_confidence = min(100, max(0, int(confidence)))
-        
-        # Create structured reason summary with per-agent details
-        structured_reason_summary = []
-        if isinstance(decision.get('agent_contributions'), dict):
-            for agent, data in decision.get('agent_contributions', {}).items():
-                if agent == "UnknownAgent":
-                    continue
-                    
-                if isinstance(data, dict) and 'signal' in data and 'confidence' in data:
-                    agent_detail = {
-                        "agent": agent,
-                        "action": data['signal'],
-                        "confidence": data['confidence']
-                    }
-                    
-                    # Add reasoning if available
-                    if 'reasoning' in data:
-                        agent_detail["reason"] = data['reasoning']
-                    elif 'reason' in data:
-                        agent_detail["reason"] = data['reason']
-                    
-                    structured_reason_summary.append(agent_detail)
         
         # Determine fallback usage details with enhanced structure and reasons
         fallback_plan = {
@@ -1092,11 +1070,114 @@ class TradePlanAgent(BaseDecisionAgent):
         else:
             return 1
     
+    def _format_agent_contributions(
+        self,
+        decision: Dict[str, Any],
+        analyst_outputs: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Format agent contributions into a structured list for easy display.
+        
+        Args:
+            decision: Decision dictionary from DecisionAgent
+            analyst_outputs: Optional dictionary of analyst agent outputs
+            
+        Returns:
+            List of dictionaries containing structured agent contributions
+        """
+        structured_contributions = []
+        
+        # First check if we have agent_contributions in the decision
+        agent_contributions = decision.get('agent_contributions', {})
+        contributing_agents = decision.get('contributing_agents', [])
+        
+        # Process agent_contributions if available
+        if agent_contributions and isinstance(agent_contributions, dict):
+            for agent_name, contribution in agent_contributions.items():
+                if agent_name == "UnknownAgent":
+                    continue
+                    
+                if isinstance(contribution, dict):
+                    agent_item = {
+                        'agent': agent_name,
+                        'action': contribution.get('signal', 'UNKNOWN'),
+                        'confidence': contribution.get('confidence', 0),
+                        'reason': ''  # Default empty reason
+                    }
+                    
+                    # Get reasoning from contribution if available
+                    if 'reasoning' in contribution:
+                        agent_item['reason'] = contribution['reasoning']
+                    
+                    # Try to get detailed reasoning from analyst_outputs
+                    if analyst_outputs and isinstance(analyst_outputs, dict) and agent_name in analyst_outputs:
+                        analyst_data = analyst_outputs[agent_name]
+                        if isinstance(analyst_data, dict):
+                            # Get the full reasoning and truncate if needed
+                            full_reason = analyst_data.get('reasoning', '')
+                            # Take first sentence or truncate to 100 chars
+                            if full_reason:
+                                short_reason = full_reason.split('.')[0]
+                                if len(short_reason) > 100:
+                                    short_reason = short_reason[:97] + "..."
+                                agent_item['reason'] = short_reason
+                    
+                    structured_contributions.append(agent_item)
+        
+        # If no agent_contributions but we have analyst_outputs, extract from there
+        elif analyst_outputs and isinstance(analyst_outputs, dict):
+            for agent_name, agent_data in analyst_outputs.items():
+                if not isinstance(agent_data, dict):
+                    continue
+                
+                agent_signal = agent_data.get('signal', '')
+                agent_confidence = agent_data.get('confidence', 0)
+                
+                # Get reasoning - try multiple possible fields
+                agent_reason = ''
+                if 'reasoning' in agent_data:
+                    agent_reason = agent_data['reasoning']
+                elif 'reason' in agent_data:
+                    agent_reason = agent_data['reason']
+                
+                # Truncate long reasons
+                if agent_reason and len(agent_reason) > 100:
+                    agent_reason = agent_reason.split('.')[0]
+                    if len(agent_reason) > 100:
+                        agent_reason = agent_reason[:97] + "..."
+                
+                # Add to structured contributions
+                structured_contributions.append({
+                    'agent': agent_name,
+                    'action': agent_signal,
+                    'confidence': agent_confidence,
+                    'reason': agent_reason
+                })
+        
+        # If nothing else, try to extract from contributing_agents
+        elif contributing_agents:
+            signal = decision.get('signal', 'UNKNOWN')
+            confidence = decision.get('confidence', 0)
+            reasoning = decision.get('reasoning', '')
+            
+            for agent_name in contributing_agents:
+                structured_contributions.append({
+                    'agent': agent_name,
+                    'action': signal,  # Use decision signal as fallback
+                    'confidence': confidence,  # Use decision confidence as fallback
+                    'reason': reasoning if agent_name == contributing_agents[0] else ''
+                })
+        
+        # Sort by confidence (descending)
+        structured_contributions.sort(key=lambda x: x.get('confidence', 0), reverse=True)
+        
+        return structured_contributions
+    
     def _generate_reason_summary(
         self, 
         decision: Dict[str, Any], 
         analyst_outputs: Optional[Dict[str, Any]] = None
-    ) -> str:
+    ) -> List[Dict[str, Any]]:
         """
         Generate a detailed reason summary from decision and analyst outputs.
         
@@ -1105,111 +1186,10 @@ class TradePlanAgent(BaseDecisionAgent):
             analyst_outputs: Optional dictionary of analyst agent outputs
             
         Returns:
-            Detailed reason summary
+            List of dictionaries containing structured agent contributions
         """
-        # Extract key information
-        signal = decision.get('signal', 'NEUTRAL')
-        confidence = decision.get('confidence', 0)
-        contributing_agents = decision.get('contributing_agents', [])
-        
-        # Start building the summary
-        summary_parts = []
-        
-        # Add signal and confidence
-        summary_parts.append(f"{signal} signal with {confidence:.1f}% confidence")
-        
-        # Add contributing agents
-        if contributing_agents:
-            agents_str = ", ".join(contributing_agents)
-            summary_parts.append(f"based on {agents_str}")
-        
-        # Use agent_contributions from decision if available (new enhancement)
-        agent_contributions = decision.get('agent_contributions', {})
-        if agent_contributions and isinstance(agent_contributions, dict):
-            for agent_name, contribution in agent_contributions.items():
-                if agent_name == "UnknownAgent":
-                    continue
-                
-                if isinstance(contribution, dict):
-                    agent_signal = contribution.get('signal', '')
-                    agent_confidence = contribution.get('confidence', 0)
-                    agent_reason = contribution.get('reasoning', '')
-                    
-                    if agent_signal and agent_reason:
-                        summary_parts.append(f"{agent_name}: {agent_signal} {agent_confidence}% - {agent_reason}")
-        
-        # Add key analyst insights if available
-        if analyst_outputs and isinstance(analyst_outputs, dict):
-            insights = []
-            
-            # Check for technical signals
-            if "TechnicalAnalystAgent" in analyst_outputs:
-                tech = analyst_outputs["TechnicalAnalystAgent"]
-                if tech.get('reasoning'):
-                    insights.append(f"Technical: {tech['reasoning']}")
-            
-            # Check for traditional sentiment
-            if "SentimentAnalystAgent" in analyst_outputs:
-                sent = analyst_outputs["SentimentAnalystAgent"]
-                if sent.get('reasoning'):
-                    insights.append(f"Sentiment: {sent['reasoning']}")
-                    
-            # Check for Grok-based advanced sentiment from SentimentAggregatorAgent
-            if "SentimentAggregatorAgent" in analyst_outputs:
-                grok_sent = analyst_outputs["SentimentAggregatorAgent"]
-                
-                # Add Grok sentiment analysis if available
-                if grok_sent.get('grok_sentiment_summary'):
-                    # Extract first sentence for conciseness
-                    first_sentence = grok_sent['grok_sentiment_summary'].split('.')[0]
-                    insights.append(f"Grok sentiment: {first_sentence}")
-                
-                # Add sentiment rating if available
-                if grok_sent.get('sentiment_rating'):
-                    insights.append(f"Market mood: {grok_sent['sentiment_rating']}/5")
-                    
-                # Add key market drivers if available
-                if grok_sent.get('market_drivers') and isinstance(grok_sent['market_drivers'], list):
-                    drivers = grok_sent['market_drivers']
-                    if drivers:
-                        main_driver = drivers[0]
-                        insights.append(f"Key driver: {main_driver}")
-            
-            # Check for liquidity analysis
-            if "LiquidityAnalystAgent" in analyst_outputs:
-                liq = analyst_outputs["LiquidityAnalystAgent"]
-                if liq.get('reasoning'):
-                    insights.append(f"Liquidity: {liq['reasoning']}")
-                    
-                # Add support/resistance clusters if available
-                if liq.get('support_clusters') and signal == "BUY":
-                    support = liq['support_clusters'][0] if isinstance(liq['support_clusters'], list) and liq['support_clusters'] else None
-                    if support:
-                        insights.append(f"Support: {support}")
-                
-                if liq.get('resistance_clusters') and signal == "SELL":
-                    resistance = liq['resistance_clusters'][0] if isinstance(liq['resistance_clusters'], list) and liq['resistance_clusters'] else None
-                    if resistance:
-                        insights.append(f"Resistance: {resistance}")
-                        
-            # Add funding rate analysis if available
-            if "FundingRateAnalystAgent" in analyst_outputs:
-                fund = analyst_outputs["FundingRateAnalystAgent"]
-                if fund.get('funding_summary'):
-                    insights.append(f"Funding: {fund['funding_summary']}")
-                    
-            # Add open interest analysis if available
-            if "OpenInterestAnalystAgent" in analyst_outputs:
-                oi = analyst_outputs["OpenInterestAnalystAgent"]
-                if oi.get('oi_summary'):
-                    insights.append(f"Open Interest: {oi['oi_summary']}")
-            
-            # Add the top insights to the summary
-            if insights:
-                for insight in insights[:3]:  # Limit to top 3 insights
-                    summary_parts.append(insight)
-        
-        return ". ".join(summary_parts)
+        # Use the new _format_agent_contributions method to get structured agent data
+        return self._format_agent_contributions(decision, analyst_outputs)
     
     def _calculate_validity_period(
         self, 

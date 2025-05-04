@@ -960,7 +960,7 @@ class AgentTestHarness:
                 "result": {
                     "decision": decision,
                     "analyses": analyses,
-                    "signal": decision.get("signal", "UNKNOWN"),
+                    "signal": decision.get("final_signal") or decision.get("action") or decision.get("signal") or decision.get("pair") or "UNKNOWN",
                     "confidence": decision.get("confidence", 0),
                     "reasoning": decision.get("reasoning", decision.get("reason", "No reasoning provided"))
                 },
@@ -975,7 +975,7 @@ class AgentTestHarness:
                 
                 # For display purposes, include summary in result
                 result["result"]["trade_plan_summary"] = {
-                    "signal": trade_plan.get("signal", "UNKNOWN"),
+                    "signal": trade_plan.get("signal") or trade_plan.get("final_signal") or trade_plan.get("action") or trade_plan.get("pair") or "UNKNOWN",
                     "confidence": trade_plan.get("confidence", 0),
                     "reason_summary": trade_plan.get("reason_summary", "No reason provided"),
                     "position_size": trade_plan.get("position_size", None),
@@ -1044,7 +1044,8 @@ class AgentTestHarness:
         # Handle different result structures based on agent type
         if 'analysis' in analysis:
             # For agents that return nested results inside an 'analysis' key (like SentimentAnalystAgent)
-            signal = analysis['analysis'].get('signal', 'UNKNOWN')
+            # Look for signal in any of the possible field names to improve compatibility
+            signal = analysis['analysis'].get('signal') or analysis['analysis'].get('final_signal') or analysis['analysis'].get('action') or analysis['analysis'].get('pair') or 'UNKNOWN'
             confidence = analysis['analysis'].get('confidence', 0)
             
             # Get reasoning from various possible fields
@@ -1079,10 +1080,11 @@ class AgentTestHarness:
             # Special handling for DecisionAgent
             if result['agent'] == 'DecisionAgent':
                 # DecisionAgent uses 'final_signal' or 'action' fields, not 'signal'
-                signal = analysis.get('final_signal', analysis.get('action', 'UNKNOWN'))
+                signal = analysis.get('final_signal') or analysis.get('action') or analysis.get('signal') or analysis.get('pair') or 'UNKNOWN'
                 confidence = analysis.get('confidence', 0)
             else:
-                signal = analysis.get('signal', 'UNKNOWN')
+                # Look for signal in any of the possible field names to improve compatibility
+                signal = analysis.get('signal') or analysis.get('final_signal') or analysis.get('action') or analysis.get('pair') or 'UNKNOWN'
                 confidence = analysis.get('confidence', 0)
             
             # Get reasoning from various possible fields with improved extraction
@@ -1248,7 +1250,8 @@ class AgentTestHarness:
         # 1. final_signal (new field for conflict detection)
         # 2. action (standard field for backward compatibility)
         # 3. signal (fallback)
-        signal = decision.get('final_signal', decision.get('action', decision.get('signal', 'UNKNOWN')))
+        # Get signal from any of the possible field names to improve compatibility 
+        signal = decision.get('final_signal') or decision.get('action') or decision.get('signal') or decision.get('pair') or 'UNKNOWN'
         
         # Special handling for CONFLICTED signal
         if signal == 'CONFLICTED':
@@ -1317,8 +1320,8 @@ class AgentTestHarness:
             
             print(f"\n{Fore.CYAN}## TRADE PLAN ##")
             
-            # Get signal and confidence
-            trade_signal = trade_plan.get('signal', 'UNKNOWN')
+            # Get signal and confidence from any of the possible field names
+            trade_signal = trade_plan.get('signal') or trade_plan.get('final_signal') or trade_plan.get('action') or trade_plan.get('pair') or 'UNKNOWN'
             trade_confidence = trade_plan.get('confidence', 0)
             
             # Color-code the signal
@@ -1403,8 +1406,8 @@ class AgentTestHarness:
             if not analysis or not isinstance(analysis, dict):
                 continue
                 
-            # Extract key data
-            agent_signal = analysis.get('signal', 'UNKNOWN')
+            # Extract key data using multiple possible field names for better compatibility
+            agent_signal = analysis.get('signal') or analysis.get('final_signal') or analysis.get('action') or analysis.get('pair') or 'UNKNOWN'
             agent_confidence = analysis.get('confidence', 0)
             
             # Extract reasoning with improved logic

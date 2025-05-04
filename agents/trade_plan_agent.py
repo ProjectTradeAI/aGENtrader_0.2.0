@@ -296,6 +296,9 @@ class TradePlanAgent(BaseDecisionAgent):
             logger.info(f"Non-actionable signal {signal}, generating minimal plan")
             
             # Create minimal plan with additional conflict information if needed
+            # Extract symbol from market_data or decision for better reliability
+            minimal_symbol = market_data.get('symbol') or decision.get('pair') or decision.get('symbol') or 'UNKNOWN'
+            
             minimal_plan = {
                 "signal": signal,
                 "original_signal": original_signal,  # Preserve the original signal
@@ -307,7 +310,7 @@ class TradePlanAgent(BaseDecisionAgent):
                 "reasoning": "No actionable signal generated",
                 "timestamp": datetime.now().isoformat(),
                 "execution_time_seconds": time.time() - start_time,
-                "symbol": market_data.get('symbol', 'UNKNOWN'),
+                "symbol": minimal_symbol,
                 "interval": interval
             }
             
@@ -331,15 +334,17 @@ class TradePlanAgent(BaseDecisionAgent):
             
             return minimal_plan
         
-        # Extract current price from market data
-        symbol = market_data.get('symbol', 'UNKNOWN')
+        # Extract symbol from market_data or decision object for better reliability
+        symbol = market_data.get('symbol') or decision.get('pair') or decision.get('symbol') or 'UNKNOWN'
         current_price = self._get_current_price(market_data)
         
         if current_price is None:
             logger.warning(f"Could not determine current price for {symbol}")
             return self.build_error_response(
                 "INSUFFICIENT_DATA",
-                f"Could not determine current price for {symbol}"
+                f"Could not determine current price for {symbol}",
+                symbol,
+                interval
             )
         
         # Extract historical data for volatility calculations if available
@@ -2086,13 +2091,15 @@ class TradePlanAgent(BaseDecisionAgent):
         except Exception as e:
             logger.warning(f"Failed to write trade plan log: {str(e)}")
             
-    def build_error_response(self, error_type: str, message: str) -> Dict[str, Any]:
+    def build_error_response(self, error_type: str, message: str, symbol: str = "UNKNOWN", interval: str = "1h") -> Dict[str, Any]:
         """
         Build a standardized error response.
         
         Args:
             error_type: Type of error
             message: Error message
+            symbol: Trading symbol (defaults to "UNKNOWN")
+            interval: Trading interval (defaults to "1h")
             
         Returns:
             Error response dictionary
@@ -2124,7 +2131,9 @@ class TradePlanAgent(BaseDecisionAgent):
             "confidence": 0,
             "summary_confidence": summary_confidence,
             "fallback_plan": fallback_plan,
-            "plan_digest": f"Error: {message}"
+            "plan_digest": f"Error: {message}",
+            "symbol": symbol,
+            "interval": interval
         }
 
 

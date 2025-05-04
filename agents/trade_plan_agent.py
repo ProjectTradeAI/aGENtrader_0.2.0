@@ -255,25 +255,147 @@ class TradePlanAgent(BaseDecisionAgent):
         if "tags" in decision:
             tags.extend(decision["tags"])
         
+        # Filter out any "UnknownAgent" entries from contributing_agents
+        contributing_agents = [agent for agent in decision.get('contributing_agents', []) 
+                              if agent != "UnknownAgent"]
+        
+        # Check if decision was CONFLICTED but we're recommending a trade
+        override_decision = False
+        override_reason = None
+        
+        if decision.get('final_signal') == "CONFLICTED" and signal in ["BUY", "SELL"]:
+            override_decision = True
+            if signal == "BUY":
+                override_reason = "BUY agents had dominant weight despite conflict."
+            else:  # SELL
+                override_reason = "SELL agents had dominant weight despite conflict."
+        
+        # Determine fallback usage details
+        fallback_plan = {
+            "entry": entry_price == current_price,  # True if default entry price was used
+            "stop_loss": False,
+            "take_profit": False
+        }
+        
+        # Check if ATR was used for stop_loss or take_profit
+        atr_used = False
+        if historical_data and len(historical_data) >= 14:
+            atr_value = self._calculate_atr(historical_data, period=14)
+            if atr_value is not None:
+                # Compare the actual values with what ATR would have given
+                atr_sl_multiplier = self.volatility_multipliers.get("atr_sl", 1.5)
+                expected_atr_sl = None
+                if signal == "BUY":
+                    expected_atr_sl = entry_price - (atr_value * atr_sl_multiplier)
+                else:  # SELL
+                    expected_atr_sl = entry_price + (atr_value * atr_sl_multiplier)
+                
+                if expected_atr_sl is not None:
+                    # If the stop_loss is very close to the expected ATR-based value, ATR was likely used
+                    if abs(stop_loss - expected_atr_sl) < 0.001 * entry_price:  # Within 0.1% margin
+                        fallback_plan["stop_loss"] = True
+                        atr_used = True
+                
+                # Similar check for take_profit
+                atr_tp_multiplier = self.volatility_multipliers.get("atr_tp", 3.0)
+                expected_atr_tp = None
+                if signal == "BUY":
+                    expected_atr_tp = entry_price + (atr_value * atr_tp_multiplier)
+                else:  # SELL
+                    expected_atr_tp = entry_price - (atr_value * atr_tp_multiplier)
+                
+                if expected_atr_tp is not None:
+                    # If the take_profit is very close to the expected ATR-based value, ATR was likely used
+                    if abs(take_profit - expected_atr_tp) < 0.001 * entry_price:  # Within 0.1% margin
+                        fallback_plan["take_profit"] = True
+        
+        # Auto-tagging based on logic
+        auto_tags = []
+        
+        # Check for high conflict tag
+        agent_signals = {}
+        if isinstance(decision.get('agent_contributions'), dict):
+            for agent, data in decision.get('agent_contributions', {}).items():
+                if isinstance(data, dict) and 'signal' in data and 'confidence' in data:
+                    # Only consider strong signals (confidence >= 70)
+                    if data['confidence'] >= 70:
+                        signal = data['signal']
+                        if signal not in agent_signals:
+                            agent_signals[signal] = 0
+                        agent_signals[signal] += 1
+        
+        # If there are multiple strong opposing signals, add high_conflict tag
+        opposing_signals = 0
+        for sig in ["BUY", "SELL", "HOLD"]:
+            if sig in agent_signals and agent_signals[sig] > 0:
+                opposing_signals += 1
+        
+        if opposing_signals >= 2:
+            auto_tags.append("high_conflict")
+        
+        # Check for liquidity-based entry
+        if liquidity_analysis and isinstance(liquidity_analysis, dict) and liquidity_analysis.get("suggested_entry") is not None:
+            auto_tags.append("liquidity_based_entry")
+        
+        # Check for ATR-based stop loss or take profit
+        if atr_used:
+            auto_tags.append("ATR_SL")
+        
+        # Combine with existing tags
+        tags.extend(auto_tags)
+        
+        # Remove duplicates while preserving order
+        unique_tags = []
+        for tag in tags:
+            if tag not in unique_tags:
+                unique_tags.append(tag)
+        
+        # Calculate summary confidence metrics
+        weighted_confidence = decision.get('weighted_confidence', confidence)
+        directional_confidence = decision.get('directional_confidence', 0)
+        
+        summary_confidence = {
+            "average": confidence,
+            "weighted": weighted_confidence,
+            "directional": directional_confidence
+        }
+        
+        # Generate a human-readable plan digest
+        plan_digest = self._generate_plan_digest(
+            signal=signal,
+            confidence=confidence,
+            liquidity_used="liquidity_based_entry" in unique_tags,
+            high_conflict="high_conflict" in unique_tags,
+            trade_type=trade_type,
+            risk_snapshot=risk_snapshot
+        )
+        
         # Prepare comprehensive trade plan
         trade_plan = {
             "signal": signal,
             "confidence": confidence,
+            "summary_confidence": summary_confidence,
             "entry_price": entry_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
             "position_size": position_size,
             "reasoning": decision.get('reasoning', 'No reasoning provided'),
             "reason_summary": reason_summary,
-            "contributing_agents": decision.get('contributing_agents', []),
+            "contributing_agents": contributing_agents,
             "valid_until": valid_until,
             "trade_type": str(trade_type),
             "risk_snapshot": risk_snapshot,
-            "fallback_plan": used_fallback,
-            "tags": tags,
+            "fallback_plan": fallback_plan,
+            "tags": unique_tags,
+            "plan_digest": plan_digest,
             "timestamp": datetime.now().isoformat(),
             "execution_time_seconds": time.time() - start_time
         }
+        
+        # Add override information if applicable
+        if override_decision:
+            trade_plan["override_decision"] = True
+            trade_plan["override_reason"] = override_reason
         
         logger.info(f"Trade plan generated for {signal} {symbol} with position size {position_size}")
         return trade_plan
@@ -969,6 +1091,80 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return risk_snapshot
     
+    def _generate_plan_digest(
+        self,
+        signal: str,
+        confidence: float,
+        liquidity_used: bool,
+        high_conflict: bool,
+        trade_type: TradeType,
+        risk_snapshot: Dict[str, Any]
+    ) -> str:
+        """
+        Generate a human-readable digest of the trade plan.
+        
+        Args:
+            signal: Trading signal (BUY/SELL/HOLD)
+            confidence: Decision confidence
+            liquidity_used: Whether liquidity data was used for entry
+            high_conflict: Whether there was high conflict in agent recommendations
+            trade_type: The type of trade (scalp, swing, etc.)
+            risk_snapshot: Risk metrics for the trade
+            
+        Returns:
+            Human-readable plan digest
+        """
+        # Don't generate detailed digest for HOLD signals
+        if signal == "HOLD" or signal == "NEUTRAL":
+            return "No actionable trade signal. Maintaining current position or staying out of the market."
+        
+        # Start with the overall market direction
+        if signal == "BUY":
+            digest = "Trend appears bullish"
+        else:  # SELL
+            digest = "Trend appears bearish"
+        
+        # Add confidence assessment
+        if confidence >= 80:
+            digest += " with strong confidence."
+        elif confidence >= 65:
+            digest += " with moderate confidence."
+        else:
+            digest += " with limited confidence."
+        
+        # Add conflict information if relevant
+        if high_conflict:
+            digest += " Significant disagreement among analysts."
+        
+        # Add liquidity information
+        if liquidity_used:
+            digest += " Entry based on key liquidity zones."
+        
+        # Add trade type information
+        if trade_type == TradeType.SCALP:
+            digest += " Short-term scalping opportunity."
+        elif trade_type == TradeType.SWING:
+            digest += " Medium-term swing trade setup."
+        elif trade_type == TradeType.TREND_FOLLOWING:
+            digest += " Longer-term trend-following position."
+        elif trade_type == TradeType.MEAN_REVERSION:
+            digest += " Mean reversion trade expected."
+        
+        # Add risk assessment
+        if risk_snapshot:
+            r_r_ratio = risk_snapshot.get("risk_reward_ratio")
+            if r_r_ratio:
+                if r_r_ratio >= 3.0:
+                    digest += f" Highly favorable R:R of {r_r_ratio:.1f}."
+                elif r_r_ratio >= 2.0:
+                    digest += f" Good R:R of {r_r_ratio:.1f}."
+                elif r_r_ratio >= 1.0:
+                    digest += f" Acceptable R:R of {r_r_ratio:.1f}."
+                else:
+                    digest += f" Unfavorable R:R of {r_r_ratio:.1f}."
+        
+        return digest
+
     def build_error_response(self, error_type: str, message: str) -> Dict[str, Any]:
         """
         Build a standardized error response.
@@ -980,6 +1176,20 @@ class TradePlanAgent(BaseDecisionAgent):
         Returns:
             Error response dictionary
         """
+        # Create a structured fallback plan object
+        fallback_plan = {
+            "entry": False,
+            "stop_loss": False,
+            "take_profit": False
+        }
+        
+        # Create an empty summary confidence object
+        summary_confidence = {
+            "average": 0,
+            "weighted": 0,
+            "directional": 0
+        }
+        
         return {
             "status": "error",
             "error": True,
@@ -990,7 +1200,10 @@ class TradePlanAgent(BaseDecisionAgent):
             "timestamp": datetime.now().isoformat(),
             "signal": "UNKNOWN" if error_type == "INSUFFICIENT_DATA" else "HOLD",
             "action": "HOLD",
-            "confidence": 0
+            "confidence": 0,
+            "summary_confidence": summary_confidence,
+            "fallback_plan": fallback_plan,
+            "plan_digest": f"Error: {message}"
         }
 
 

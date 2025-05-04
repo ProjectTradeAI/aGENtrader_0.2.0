@@ -523,7 +523,10 @@ class TradePlanAgent(BaseDecisionAgent):
             liquidity_used="liquidity_based_entry" in unique_tags,
             high_conflict="high_conflict" in unique_tags,
             trade_type=trade_type,
-            risk_snapshot=risk_snapshot
+            risk_snapshot=risk_snapshot,
+            reason_summary=structured_reason_summary,
+            tags=unique_tags,
+            agent_contributions=decision.get('agent_contributions', {})
         )
         
         # Prepare decision trace object for transparency and future learning
@@ -617,7 +620,9 @@ class TradePlanAgent(BaseDecisionAgent):
             
             # Timestamps and metadata
             "timestamp": datetime.now().isoformat(),
-            "execution_time_seconds": time.time() - start_time
+            "execution_time_seconds": time.time() - start_time,
+            "version": "1.0.0",
+            "agent_version": "0.2.0"
         }
         
         # Add override information if applicable
@@ -1118,6 +1123,21 @@ class TradePlanAgent(BaseDecisionAgent):
             agents_str = ", ".join(contributing_agents)
             summary_parts.append(f"based on {agents_str}")
         
+        # Use agent_contributions from decision if available (new enhancement)
+        agent_contributions = decision.get('agent_contributions', {})
+        if agent_contributions and isinstance(agent_contributions, dict):
+            for agent_name, contribution in agent_contributions.items():
+                if agent_name == "UnknownAgent":
+                    continue
+                
+                if isinstance(contribution, dict):
+                    agent_signal = contribution.get('signal', '')
+                    agent_confidence = contribution.get('confidence', 0)
+                    agent_reason = contribution.get('reasoning', '')
+                    
+                    if agent_signal and agent_reason:
+                        summary_parts.append(f"{agent_name}: {agent_signal} {agent_confidence}% - {agent_reason}")
+        
         # Add key analyst insights if available
         if analyst_outputs and isinstance(analyst_outputs, dict):
             insights = []
@@ -1349,7 +1369,10 @@ class TradePlanAgent(BaseDecisionAgent):
         liquidity_used: bool,
         high_conflict: bool,
         trade_type: TradeType,
-        risk_snapshot: Dict[str, Any]
+        risk_snapshot: Dict[str, Any],
+        reason_summary: List[Dict[str, Any]] = None,
+        tags: List[str] = None,
+        agent_contributions: Dict[str, Any] = None
     ) -> str:
         """
         Generate a human-readable digest of the trade plan.
@@ -1361,9 +1384,12 @@ class TradePlanAgent(BaseDecisionAgent):
             high_conflict: Whether there was high conflict in agent recommendations
             trade_type: The type of trade (scalp, swing, etc.)
             risk_snapshot: Risk metrics for the trade
+            reason_summary: Optional list of agent contribution summaries
+            tags: Optional list of tags associated with the trade plan
+            agent_contributions: Optional dictionary of agent contributions
             
         Returns:
-            Human-readable plan digest
+            Human-readable plan digest with enhanced insights from agent contributions and tags
         """
         # Don't generate detailed digest for HOLD signals
         if signal == "HOLD" or signal == "NEUTRAL":
@@ -1426,20 +1452,83 @@ class TradePlanAgent(BaseDecisionAgent):
         elif trade_type == TradeType.MEAN_REVERSION:
             digest += " Counter-trend reversion play"
         
+        # Add agent insights if available
+        agent_insights = []
+        
+        # Extract technical signals from reason_summary
+        if reason_summary and isinstance(reason_summary, list):
+            technical_agent = None
+            sentiment_agent = None
+            liquidity_agent = None
+            
+            # Find relevant agents in reason_summary
+            for agent_data in reason_summary:
+                if not isinstance(agent_data, dict):
+                    continue
+                    
+                agent_name = agent_data.get('agent', '')
+                agent_reason = agent_data.get('reason', '')
+                
+                if 'Technical' in agent_name and agent_reason:
+                    technical_agent = agent_data
+                elif 'Sentiment' in agent_name and agent_reason:
+                    sentiment_agent = agent_data
+                elif 'Liquidity' in agent_name and agent_reason:
+                    liquidity_agent = agent_data
+            
+            # Add technical insight
+            if technical_agent:
+                if 'RSI' in technical_agent.get('reason', ''):
+                    if 'oversold' in technical_agent.get('reason', '').lower():
+                        agent_insights.append('RSI oversold')
+                    elif 'overbought' in technical_agent.get('reason', '').lower():
+                        agent_insights.append('RSI overbought')
+                
+                if 'MACD' in technical_agent.get('reason', ''):
+                    if 'cross' in technical_agent.get('reason', '').lower():
+                        agent_insights.append('MACD crossover')
+            
+            # Add sentiment insight
+            if sentiment_agent:
+                if 'bullish' in sentiment_agent.get('reason', '').lower():
+                    agent_insights.append('sentiment bullish')
+                elif 'bearish' in sentiment_agent.get('reason', '').lower():
+                    agent_insights.append('sentiment bearish')
+            
+            # Add liquidity insight
+            if liquidity_agent:
+                if 'support' in liquidity_agent.get('reason', '').lower():
+                    agent_insights.append('liquidity support strong')
+                elif 'resistance' in liquidity_agent.get('reason', '').lower():
+                    agent_insights.append('resistance overhead')
+        
+        # Add tag-based insights
+        if tags and isinstance(tags, list):
+            if 'breakout' in tags:
+                agent_insights.append('breakout confirmed')
+            if 'trend_continuation' in tags:
+                agent_insights.append('trend aligned')
+            if 'tight_range' in tags:
+                agent_insights.append('low volatility setup')
+        
+        # Add agent insights to digest
+        if agent_insights:
+            digest += f" {', '.join(agent_insights[:2])}."  # Limit to top 2 insights
+        
         # Add risk assessment in a more concise format
         if risk_snapshot:
             r_r_ratio = risk_snapshot.get("risk_reward_ratio")
             if r_r_ratio:
                 if r_r_ratio >= 3.0:
-                    digest += f" with strong {r_r_ratio:.1f}:1 R:R."
+                    digest += f" Favors strong {r_r_ratio:.1f}:1 {trade_type} play."
                 elif r_r_ratio >= 2.0:
-                    digest += f" with favorable {r_r_ratio:.1f}:1 R:R."
+                    digest += f" Favorable {r_r_ratio:.1f}:1 {trade_type} setup."
                 elif r_r_ratio >= 1.5:
-                    digest += f" with acceptable {r_r_ratio:.1f}:1 R:R."
+                    digest += f" Acceptable {r_r_ratio:.1f}:1 {trade_type} opportunity."
                 else:
-                    digest += f" with tight {r_r_ratio:.1f}:1 R:R."
+                    digest += f" Tight {r_r_ratio:.1f}:1 {trade_type} with caution."
             else:
-                digest += "."  # End with period if no R:R available
+                digest += f" Consider {trade_type} approach."  # End with period if no R:R available
         
         return digest
 
@@ -1629,6 +1718,30 @@ class TradePlanAgent(BaseDecisionAgent):
                 logger.info(f"  Take-Profit: Yes - {tp_fallback_reason}")
         else:
             logger.info("  No")
+        
+        # Execution and version details
+        logger.info("")
+        logger.info(f"⚙️ Execution Details:")
+        logger.info(f"  Execution Time: {trade_plan.get('execution_time_seconds', 0):.4f} seconds")
+        logger.info(f"  Plan Version: {trade_plan.get('version', '1.0.0')}")
+        logger.info(f"  Agent Version: {self.__class__.__name__} v{trade_plan.get('agent_version', '0.2.0')}")
+        
+        # Trade type rationale
+        trade_type = trade_plan.get('trade_type')
+        if trade_type:
+            logger.info("")
+            logger.info(f"🔍 Trade Type: {trade_type}")
+            confidence = trade_plan.get('confidence', 0)
+            
+            # Add rationale for trade type classification
+            if trade_type == TradeType.SCALP.value:
+                logger.info(f"  Classified as scalp due to short timeframe and/or high volatility")
+            elif trade_type == TradeType.SWING.value:
+                logger.info(f"  Classified as swing trade with medium-term horizon (confidence: {confidence}%)")
+            elif trade_type == TradeType.TREND_FOLLOWING.value:
+                logger.info(f"  Classified as trend-following based on high confidence ({confidence}%) and aligned indicators")
+            elif trade_type == TradeType.MEAN_REVERSION.value:
+                logger.info(f"  Classified as mean-reversion based on overextended metrics and reversal signals")
             
         # Plan digest if available
         if plan_digest:
@@ -1763,6 +1876,13 @@ class TradePlanAgent(BaseDecisionAgent):
                 # Add raw trade plan JSON for reference
                 f.write("Raw Trade Plan:\n")
                 f.write(json.dumps(trade_plan, indent=2))
+                
+                # Add execution metrics
+                execution_time = trade_plan.get('execution_time_seconds', 0)
+                if execution_time:
+                    f.write(f"\n\nExecution Time: {execution_time:.4f} seconds")
+                    f.write(f"\nPlan Version: {trade_plan.get('version', '1.0.0')}")
+                    f.write(f"\nAgent Version: {self.__class__.__name__} v{trade_plan.get('agent_version', '0.2.0')}")
                 
             logger.debug(f"Trade plan log written to {log_path}")
         except Exception as e:

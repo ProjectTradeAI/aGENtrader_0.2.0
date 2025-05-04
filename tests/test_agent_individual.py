@@ -865,19 +865,30 @@ class AgentTestHarness:
             trade_plan = None
             if hasattr(self, 'trade_cycle') and self.trade_cycle:
                 logger.info(f"{Fore.CYAN}Running TradePlanAgent to generate comprehensive trade plan...{Style.RESET_ALL}")
+                print(f"DEBUG: Running TradePlanAgent with trade_cycle={self.trade_cycle}")
                 
                 try:
                     # Check if TradePlanAgent is available
                     trade_plan_agent_class = AVAILABLE_AGENTS.get('TradePlanAgent')
+                    print(f"DEBUG: TradePlanAgent class found: {trade_plan_agent_class is not None}")
+                    print(f"DEBUG: create_trade_plan_agent exists: {create_trade_plan_agent is not None}")
+                    
                     if trade_plan_agent_class is None or create_trade_plan_agent is None:
                         logger.error(f"{Fore.RED}TradePlanAgent or create_trade_plan_agent function is not available{Style.RESET_ALL}")
+                        print(f"DEBUG: Missing TradePlanAgent or create_trade_plan_agent function")
                     else:
                         # Create the trade plan agent
-                        trade_plan_agent = create_trade_plan_agent(data_provider=self.data_provider)
+                        print(f"DEBUG: Creating trade plan agent with data_provider")
+                        trade_plan_agent = create_trade_plan_agent(config={"data_provider": self.data_provider})
+                        print(f"DEBUG: Created trade_plan_agent successfully: {trade_plan_agent is not None}")
                         
                         # Set temperature if needed
                         if hasattr(trade_plan_agent, 'llm_client'):
+                            print(f"DEBUG: Setting temperature on llm_client")
                             trade_plan_agent.llm_client.temperature = self.temperature
+                        # Check if the agent has a temperature attribute directly
+                        elif hasattr(trade_plan_agent, 'temperature'):
+                            trade_plan_agent.temperature = self.temperature
                             
                         # Generate trade plan
                         trade_plan = trade_plan_agent.make_decision(
@@ -951,8 +962,11 @@ class AgentTestHarness:
             }
             
             # Add trade plan to result if available
+            print(f"DEBUG: Trade plan available: {trade_plan is not None}")
             if trade_plan:
                 result["trade_plan"] = trade_plan
+                print(f"DEBUG: Trade plan keys: {list(trade_plan.keys())}")
+                
                 # For display purposes, include summary in result
                 result["result"]["trade_plan_summary"] = {
                     "signal": trade_plan.get("signal", "UNKNOWN"),
@@ -1951,16 +1965,19 @@ def main():
         )
         
         # Set full_cycle and trade_cycle attributes if specified
+        print(f"DEBUG: args.full_cycle = {getattr(args, 'full_cycle', 'Not set')}")
+        print(f"DEBUG: args.trade_cycle = {getattr(args, 'trade_cycle', 'Not set')}")
+        
         if hasattr(args, 'full_cycle') and args.full_cycle:
             harness.full_cycle = True
+            logger.info(f"{Fore.CYAN}Running full agent decision cycle test{Style.RESET_ALL}")
             
-            # Check if we're also running the trade cycle
-            if hasattr(args, 'trade_cycle') and args.trade_cycle:
-                harness.trade_cycle = True
-                logger.info(f"{Fore.CYAN}Running FULL TRADE CYCLE TEST (All Agents + TradePlanAgent){Style.RESET_ALL}")
-            else:
-                harness.trade_cycle = False
-                logger.info(f"{Fore.CYAN}Running full agent decision cycle test{Style.RESET_ALL}")
+        # Handle trade_cycle separately from full_cycle
+        if hasattr(args, 'trade_cycle') and args.trade_cycle:
+            harness.trade_cycle = True
+            logger.info(f"{Fore.CYAN}Running FULL TRADE CYCLE TEST (All Agents + TradePlanAgent){Style.RESET_ALL}")
+        else:
+            harness.trade_cycle = False
                 
         # Set trade log option
         if hasattr(args, 'trade_log') and args.trade_log:

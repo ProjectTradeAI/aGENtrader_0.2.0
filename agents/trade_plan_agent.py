@@ -28,7 +28,7 @@ from agents.base_decision_agent import BaseDecisionAgent
 # Configure logging
 logger = logging.getLogger(__name__)
 
-def create_trade_plan_agent(config: Optional[Dict[str, Any]] = None) -> 'TradePlanAgent':
+def create_trade_plan_agent(config: Optional[Dict[str, Any]] = None, **kwargs) -> 'TradePlanAgent':
     """
     Create a TradePlanAgent with the specified configuration.
     
@@ -39,10 +39,28 @@ def create_trade_plan_agent(config: Optional[Dict[str, Any]] = None) -> 'TradePl
     Args:
         config: Optional configuration dictionary with parameters like
                risk_reward_ratio, portfolio_risk_per_trade, etc.
+        **kwargs: Additional keyword arguments that will be added to config
                
     Returns:
         Configured TradePlanAgent instance
     """
+    # Handle legacy calls with data_provider parameter
+    if 'data_provider' in kwargs and config is None:
+        config = {'data_provider': kwargs['data_provider']}
+    elif 'data_provider' in kwargs:
+        if config is None:
+            config = {}
+        config['data_provider'] = kwargs['data_provider']
+    
+    # Create a new config dict if None was provided
+    if config is None:
+        config = {}
+    
+    # Add any other kwargs to config
+    for key, value in kwargs.items():
+        if key != 'data_provider':  # Skip data_provider since we already handled it
+            config[key] = value
+    
     trade_plan_agent = TradePlanAgent(config)
     logger.info(f"Created enhanced TradePlanAgent with config parameters: {list(config.keys()) if config else 'default'}")
     return trade_plan_agent

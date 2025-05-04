@@ -339,6 +339,38 @@ def run_open_interest_analysis(market_data_or_symbol, interval=None, data_provid
         logger.error(f"Error in open interest analysis: {str(e)}", exc_info=True)
         return {"error": True, "error_type": "Exception", "message": str(e)}
 
+def generate_trade_plan(decision, market_data, analyses=None):
+    """Generate a detailed trade plan based on a trading decision"""
+    try:
+        from agents.trade_plan_agent import TradePlanAgent
+        
+        # Initialize trade plan agent with default configuration
+        trade_plan_agent = TradePlanAgent()
+        
+        # Extract necessary data from market_data
+        symbol = market_data.get("symbol", "BTC/USDT")
+        current_price = market_data.get("current_price", None)
+        
+        # Prepare analyst outputs for trade plan generation
+        analyst_outputs = {}
+        
+        # Add liquidity analysis if available for optimal entry and stop-loss levels
+        if analyses and "liquidity_analysis" in analyses:
+            analyst_outputs["liquidity_analysis"] = analyses["liquidity_analysis"]
+            
+        # Generate trade plan
+        logger.info(f"Generating trade plan for {decision.get('signal')} decision on {symbol}")
+        trade_plan = trade_plan_agent.generate_trade_plan(
+            decision=decision,
+            market_data=market_data,
+            analyst_outputs=analyst_outputs
+        )
+        
+        return trade_plan
+    except Exception as e:
+        logger.error(f"Error generating trade plan: {str(e)}", exc_info=True)
+        return {"error": True, "error_type": "Exception", "message": str(e)}
+
 def make_trading_decision(analyses, market_data_or_symbol, interval=None, data_provider=None):
     """Make a trading decision based on agent analyses"""
     try:
@@ -456,6 +488,16 @@ def run_demo_cycle(symbol="BTC/USDT", interval="1h"):
     logger.info("✅ Making decision using: " + ", ".join(analyses.keys()))
     decision = make_trading_decision(analyses, market_data)
     
+    # Generate a trade plan if a trading decision was made
+    if decision and not decision.get('error', False) and decision.get('signal') in ['BUY', 'SELL']:
+        logger.info("✅ Generating trade plan")
+        trade_plan = generate_trade_plan(decision, market_data, analyses)
+        
+        # Combine the decision and trade plan
+        if trade_plan and not trade_plan.get('error', False):
+            decision.update(trade_plan)
+            logger.info(f"Trade plan generated: Entry: {trade_plan.get('entry_price')}, SL: {trade_plan.get('stop_loss')}, TP: {trade_plan.get('take_profit')}, Size: {trade_plan.get('position_size')}")
+    
     # Return results
     return {
         "status": "success",
@@ -510,9 +552,17 @@ def main():
             if not decision.get('error', False):
                 signal = decision.get('signal', 'UNKNOWN')
                 confidence = decision.get('confidence', 0)
-                logger.info(f"===== FINAL DECISION =====")
+                logger.info(f"===== FINAL DECISION & TRADE PLAN =====")
                 logger.info(f"{signal} {args.symbol} with {confidence}% confidence")
                 logger.info(f"Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
+                
+                # Display trade plan details if available
+                if signal in ['BUY', 'SELL'] and 'entry_price' in decision:
+                    logger.info(f"===== TRADE PLAN DETAILS =====")
+                    logger.info(f"Entry Price: {decision.get('entry_price')}")
+                    logger.info(f"Stop-Loss: {decision.get('stop_loss')}")
+                    logger.info(f"Take-Profit: {decision.get('take_profit')}")
+                    logger.info(f"Position Size: {decision.get('position_size')}")
             else:
                 logger.error(f"Decision error: {decision.get('message', 'Unknown error')}")
         

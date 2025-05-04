@@ -13,7 +13,7 @@ from datetime import datetime
 
 from agents.base_agent import BaseAgent
 from agents.agent_interface import DecisionAgentInterface
-from core.logging.decision_logger import decision_logger
+from core.logging import decision_logger
 
 # Configure logging
 logger = logging.getLogger("aGENtrader.agents.decision")

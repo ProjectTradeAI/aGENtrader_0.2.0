@@ -1,123 +1,171 @@
 """
-Test script for Grok sentiment analysis client
+aGENtrader v2 - Trade Plan Integration with Grok Sentiment
 
-This script tests the Grok sentiment client's ability to analyze market text
-and convert sentiment to trading signals.
+This script tests the integration between TradePlanAgent and
+the SentimentAggregatorAgent using Grok's xAI API for enhanced
+market sentiment analysis.
 """
+
 import os
+import sys
 import json
 import logging
-from dotenv import load_dotenv
+from typing import Dict, Any, List, Optional
+from datetime import datetime
 
-# Load environment variables from .env file
-load_dotenv()
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("test_grok_sentiment")
-logger.info("Loaded environment variables from .env file")
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-# Import the sentiment client
-try:
-    from models.grok_sentiment_client import GrokSentimentClient
-except ImportError:
-    logger.error("Could not import GrokSentimentClient")
-    exit(1)
+# Import agent modules
+from agents.trade_plan_agent import create_trade_plan_agent
 
-def test_sentiment_analysis():
-    """Test basic sentiment analysis functionality."""
-    client = GrokSentimentClient()
-    if not client.enabled:
-        logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
-        return False
-        
-    # Test with positive text
-    positive_text = "Bitcoin price reaches new all-time high as institutional adoption grows"
-    positive_result = client.analyze_sentiment(positive_text)
-    logger.info(f"Positive text analysis: {json.dumps(positive_result, indent=2)}")
-    
-    # Test with negative text
-    negative_text = "Major crypto exchange hacked, billions lost in security breach"
-    negative_result = client.analyze_sentiment(negative_text)
-    logger.info(f"Negative text analysis: {json.dumps(negative_result, indent=2)}")
-    
-    # Test with neutral text
-    neutral_text = "Regulatory authorities announce plans to review cryptocurrency guidelines"
-    neutral_result = client.analyze_sentiment(neutral_text)
-    logger.info(f"Neutral text analysis: {json.dumps(neutral_result, indent=2)}")
-    
-    return True
+def create_mock_grok_sentiment() -> Dict[str, Any]:
+    """Create a mock SentimentAggregatorAgent response with Grok sentiment"""
+    return {
+        "agent": "SentimentAggregatorAgent",
+        "signal": "BUY",
+        "confidence": 78,
+        "grok_sentiment_summary": "Market sentiment is bullish with institutional investors accumulating BTC. Recent regulatory clarity has improved overall market outlook. Altcoins are showing strong momentum.",
+        "sentiment_rating": 4.2,
+        "market_drivers": [
+            "Positive regulatory developments",
+            "Institutional accumulation",
+            "Technical breakout from key resistance"
+        ],
+        "market_risks": [
+            "Macroeconomic uncertainty",
+            "Potential profit-taking at resistance levels"
+        ],
+        "time_horizon": "medium-term",
+        "timestamp": datetime.now().isoformat()
+    }
 
-def test_market_news_analysis():
-    """Test analysis of multiple news items."""
-    client = GrokSentimentClient()
-    if not client.enabled:
-        logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
-        return False
-        
-    news_items = [
-        "Bitcoin reaches $70,000 as El Salvador announces increased BTC reserves",
-        "SEC approves first spot Ethereum ETF applications, setting stage for market entry",
-        "Concerns grow over stablecoin regulations as lawmakers debate new framework",
-        "Major DeFi protocol faces security vulnerability, funds reported safe",
-        "Central banks across Asia announce CBDC pilot programs for cross-border payments"
-    ]
-    
-    result = client.analyze_market_news(news_items)
-    logger.info(f"Market news analysis: {json.dumps(result, indent=2)}")
-    
-    return True
+def create_mock_technical_analysis() -> Dict[str, Any]:
+    """Create a mock TechnicalAnalystAgent response"""
+    return {
+        "agent": "TechnicalAnalystAgent",
+        "signal": "BUY",
+        "confidence": 82,
+        "reasoning": "Multiple indicators showing bullish divergence with strong uptrend",
+        "indicators": [
+            {"name": "MACD", "value": 0.35, "signal": "BUY"},
+            {"name": "RSI", "value": 62, "signal": "BUY"},
+            {"name": "MA Crossover", "value": "Positive", "signal": "BUY"}
+        ]
+    }
 
-def test_signal_conversion():
-    """Test conversion of sentiment to trading signals."""
-    client = GrokSentimentClient()
-    if not client.enabled:
-        logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
-        return False
-        
-    # Test conversion from sentiment analysis
-    sentiment_result = {
-        "sentiment": "positive",
-        "confidence": 0.85,
-        "rating": 4,
-        "reasoning": "Strong positive market indicators and institutional adoption"
+def create_mock_liquidity_analysis() -> Dict[str, Any]:
+    """Create a mock LiquidityAnalystAgent response"""
+    return {
+        "agent": "LiquidityAnalystAgent",
+        "signal": "NEUTRAL",
+        "confidence": 65,
+        "reasoning": "Liquidity zones identified at 49500 and 51200",
+        "support_clusters": [49500, 48900, 47800],
+        "resistance_clusters": [51200, 52500, 54000]
+    }
+
+def create_mock_funding_rate_analysis() -> Dict[str, Any]:
+    """Create a mock FundingRateAnalystAgent response"""
+    return {
+        "agent": "FundingRateAnalystAgent",
+        "signal": "BUY",
+        "confidence": 70,
+        "reasoning": "Funding rates neutral to slightly positive, bullish long-term",
+        "funding_summary": "Neutral funding suggests balanced market without overleveraging"
+    }
+
+def create_mock_open_interest_analysis() -> Dict[str, Any]:
+    """Create a mock OpenInterestAnalystAgent response"""
+    return {
+        "agent": "OpenInterestAnalystAgent",
+        "signal": "BUY",
+        "confidence": 75,
+        "reasoning": "Rising open interest with price increase confirms trend strength",
+        "oi_summary": "Growing OI supports uptrend continuation"
+    }
+
+def test_trade_plan_with_grok_sentiment():
+    """
+    Test TradePlanAgent integration with Grok sentiment analysis
+    """
+    logger.info("Testing TradePlanAgent with Grok sentiment analysis")
+    
+    # Create the trade plan agent
+    trade_plan_agent = create_trade_plan_agent()
+    
+    # Create analyst outputs
+    analyst_outputs = {
+        "SentimentAggregatorAgent": create_mock_grok_sentiment(),
+        "TechnicalAnalystAgent": create_mock_technical_analysis(),
+        "LiquidityAnalystAgent": create_mock_liquidity_analysis(),
+        "FundingRateAnalystAgent": create_mock_funding_rate_analysis(),
+        "OpenInterestAnalystAgent": create_mock_open_interest_analysis()
     }
     
-    signal = client.convert_sentiment_to_signal(sentiment_result)
-    logger.info(f"Converted signal: {json.dumps(signal, indent=2)}")
+    # Create decision based on analyst outputs
+    decision = {
+        "signal": "BUY",
+        "confidence": 80,
+        "contributing_agents": [
+            "SentimentAggregatorAgent",
+            "TechnicalAnalystAgent",
+            "FundingRateAnalystAgent",
+            "OpenInterestAnalystAgent"
+        ],
+        "reasoning": "Strong bullish consensus across multiple analysis dimensions"
+    }
     
-    # Test conversion from market news analysis
-    news_result = {
-        "overall_sentiment": "negative",
-        "confidence": 0.72,
-        "summary": "Regulatory concerns and security issues outweigh positive developments",
-        "items": [
-            {"text": "Item 1", "sentiment": "positive", "rating": 4},
-            {"text": "Item 2", "sentiment": "negative", "rating": 2}
+    # Create market data
+    market_data = {
+        "symbol": "BTC/USDT",
+        "interval": "4h",
+        "current_price": 50800.42,
+        "ohlcv": [
+            {"timestamp": "2022-01-01T00:00:00", "open": 49500, "high": 51200, "low": 49200, "close": 50900, "volume": 1200},
+            {"timestamp": "2022-01-01T04:00:00", "open": 50900, "high": 51500, "low": 50500, "close": 51000, "volume": 950},
+            {"timestamp": "2022-01-01T08:00:00", "open": 51000, "high": 51200, "low": 50400, "close": 50800, "volume": 800}
         ]
     }
     
-    news_signal = client.convert_sentiment_to_signal(news_result)
-    logger.info(f"Converted news signal: {json.dumps(news_signal, indent=2)}")
+    # Generate trade plan
+    trade_plan = trade_plan_agent.generate_trade_plan(
+        decision=decision,
+        market_data=market_data,
+        analyst_outputs=analyst_outputs
+    )
     
-    return True
-
-def main():
-    """Main function to run all tests."""
-    logger.info("Starting Grok sentiment client tests")
+    # Display the results
+    logger.info(f"Trade plan generated successfully for {trade_plan['signal']} signal with {trade_plan['confidence']}% confidence")
+    logger.info(f"Entry price: {trade_plan['entry_price']}")
+    logger.info(f"Stop loss: {trade_plan['stop_loss']}")
+    logger.info(f"Take profit: {trade_plan['take_profit']}")
+    logger.info(f"Position size: {trade_plan['position_size']}")
+    logger.info(f"Trade type: {trade_plan['trade_type']}")
+    logger.info(f"Valid until: {trade_plan['valid_until']}")
+    logger.info(f"Reason summary: {trade_plan['reason_summary']}")
     
-    # Check if API key is available
-    if not os.environ.get("XAI_API_KEY"):
-        logger.error("XAI_API_KEY not found in environment variables")
-        logger.info("Please set XAI_API_KEY in your .env file")
-        return
-        
-    # Run tests - testing one at a time to avoid timeouts
-    # Uncomment each test as needed
-    sentiment_test = test_sentiment_analysis()
-    # news_test = test_market_news_analysis()
-    signal_test = test_signal_conversion()
+    # Save to file for inspection
+    with open("grok_sentiment_trade_plan.json", "w") as f:
+        json.dump(trade_plan, f, indent=2)
     
-    # Simplified check
-    logger.info("Tests completed. Check logs for results.")
+    logger.info("Trade plan saved to grok_sentiment_trade_plan.json")
+    logger.info("Test completed successfully!")
+    
+    return trade_plan
 
 if __name__ == "__main__":
-    main()
+    # Load environment variables
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+        logger.info("Loaded environment variables from .env file")
+    except ImportError:
+        logger.warning("dotenv package not found, skipping .env loading")
+    
+    # Run the test
+    test_trade_plan_with_grok_sentiment()

@@ -340,12 +340,30 @@ def run_open_interest_analysis(market_data_or_symbol, interval=None, data_provid
         return {"error": True, "error_type": "Exception", "message": str(e)}
 
 def generate_trade_plan(decision, market_data, analyses=None):
-    """Generate a detailed trade plan based on a trading decision"""
+    """
+    Generate a detailed trade plan based on a trading decision using the enhanced TradePlanAgent.
+    
+    The trade plan includes:
+    - Entry, stop-loss, and take-profit levels based on volatility and liquidity
+    - Position sizing based on confidence
+    - Risk management metrics
+    - Trade classification (scalp, swing, trend following, etc.)
+    - Time-based validity period
+    - Detailed reason summary from contributing agents
+    """
     try:
-        from agents.trade_plan_agent import TradePlanAgent
+        # Import the enhanced trade plan agent function
+        from agents.trade_plan_agent import create_trade_plan_agent
         
-        # Initialize trade plan agent with default configuration
-        trade_plan_agent = TradePlanAgent()
+        # Get configuration from environment or default
+        config = {
+            'risk_reward_ratio': float(os.environ.get('TRADE_PLAN_RISK_REWARD', '1.5')),
+            'portfolio_risk_per_trade': float(os.environ.get('TRADE_PLAN_RISK_PERCENT', '0.02')),  # 2% risk per trade
+            'default_tags': ['production']
+        }
+        
+        # Create the enhanced trade plan agent
+        trade_plan_agent = create_trade_plan_agent(config)
         
         # Extract necessary data from market_data
         symbol = market_data.get("symbol", "BTC/USDT")
@@ -354,17 +372,40 @@ def generate_trade_plan(decision, market_data, analyses=None):
         # Prepare analyst outputs for trade plan generation
         analyst_outputs = {}
         
-        # Add liquidity analysis if available for optimal entry and stop-loss levels
-        if analyses and "liquidity_analysis" in analyses:
-            analyst_outputs["liquidity_analysis"] = analyses["liquidity_analysis"]
+        # Add all available analyses for comprehensive trade plan generation
+        if analyses:
+            # Add liquidity analysis for optimal entry and stop-loss levels
+            if "liquidity_analysis" in analyses:
+                analyst_outputs["liquidity_analysis"] = analyses["liquidity_analysis"]
             
-        # Generate trade plan
-        logger.info(f"Generating trade plan for {decision.get('signal')} decision on {symbol}")
+            # Add technical analysis for volatility assessment
+            if "technical_analysis" in analyses:
+                analyst_outputs["technical_analysis"] = analyses["technical_analysis"]
+            
+            # Add other analyses that might be useful
+            for analysis_type in ["sentiment_analysis", "open_interest_analysis", "funding_rate_analysis"]:
+                if analysis_type in analyses:
+                    analyst_outputs[analysis_type] = analyses[analysis_type]
+            
+        # Generate enhanced trade plan
+        logger.info(f"Generating enhanced trade plan for {decision.get('signal')} decision on {symbol}")
         trade_plan = trade_plan_agent.generate_trade_plan(
             decision=decision,
             market_data=market_data,
             analyst_outputs=analyst_outputs
         )
+        
+        # Log additional details from enhanced plan
+        if not trade_plan.get('error', False):
+            logger.info(f"Trade type: {trade_plan.get('trade_type', 'unknown')}")
+            logger.info(f"Valid until: {trade_plan.get('valid_until', 'not specified')}")
+            
+            # Log risk metrics if available
+            if 'risk_snapshot' in trade_plan:
+                risk = trade_plan['risk_snapshot']
+                logger.info(f"Risk metrics - R:R: {risk.get('risk_reward_ratio', 'N/A')}, "
+                           f"Portfolio risk: {risk.get('portfolio_risk_percent', 'N/A')}%, "
+                           f"Portfolio exposure: {risk.get('portfolio_exposure_percent', 'N/A')}%")
         
         return trade_plan
     except Exception as e:
@@ -490,13 +531,24 @@ def run_demo_cycle(symbol="BTC/USDT", interval="1h"):
     
     # Generate a trade plan if a trading decision was made
     if decision and not decision.get('error', False) and decision.get('signal') in ['BUY', 'SELL']:
-        logger.info("✅ Generating trade plan")
+        logger.info("✅ Generating enhanced trade plan")
         trade_plan = generate_trade_plan(decision, market_data, analyses)
         
         # Combine the decision and trade plan
         if trade_plan and not trade_plan.get('error', False):
             decision.update(trade_plan)
-            logger.info(f"Trade plan generated: Entry: {trade_plan.get('entry_price')}, SL: {trade_plan.get('stop_loss')}, TP: {trade_plan.get('take_profit')}, Size: {trade_plan.get('position_size')}")
+            logger.info(f"Enhanced trade plan generated:")
+            logger.info(f"Entry: {trade_plan.get('entry_price')}, SL: {trade_plan.get('stop_loss')}, TP: {trade_plan.get('take_profit')}")
+            logger.info(f"Position Size: {trade_plan.get('position_size')}, Trade Type: {trade_plan.get('trade_type', 'unknown')}")
+            
+            # Log enhanced metrics if available
+            if 'risk_snapshot' in trade_plan:
+                risk = trade_plan['risk_snapshot']
+                logger.info(f"Risk metrics - R:R: {risk.get('risk_reward_ratio', 'N/A')}, "
+                           f"Portfolio risk: {risk.get('portfolio_risk_percent', 'N/A')}%, "
+                           f"Exposure: {risk.get('portfolio_exposure_percent', 'N/A')}%")
+                
+            logger.info(f"Valid until: {trade_plan.get('valid_until', 'not specified')}")
     
     # Return results
     return {
@@ -556,13 +608,34 @@ def main():
                 logger.info(f"{signal} {args.symbol} with {confidence}% confidence")
                 logger.info(f"Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
                 
-                # Display trade plan details if available
+                # Display enhanced trade plan details if available
                 if signal in ['BUY', 'SELL'] and 'entry_price' in decision:
-                    logger.info(f"===== TRADE PLAN DETAILS =====")
+                    logger.info(f"===== ENHANCED TRADE PLAN DETAILS =====")
                     logger.info(f"Entry Price: {decision.get('entry_price')}")
                     logger.info(f"Stop-Loss: {decision.get('stop_loss')}")
                     logger.info(f"Take-Profit: {decision.get('take_profit')}")
                     logger.info(f"Position Size: {decision.get('position_size')}")
+                    
+                    # Display enhanced features
+                    if 'trade_type' in decision:
+                        logger.info(f"Trade Type: {decision.get('trade_type', 'unknown')}")
+                    if 'valid_until' in decision:
+                        logger.info(f"Valid Until: {decision.get('valid_until', 'not specified')}")
+                    if 'reason_summary' in decision:
+                        logger.info(f"Reason Summary: {decision.get('reason_summary', 'N/A')}")
+                    
+                    # Display risk metrics if available
+                    if 'risk_snapshot' in decision:
+                        risk = decision.get('risk_snapshot', {})
+                        logger.info(f"===== RISK METRICS =====")
+                        logger.info(f"Risk/Reward Ratio: {risk.get('risk_reward_ratio', 'N/A')}")
+                        logger.info(f"Portfolio Risk: {risk.get('portfolio_risk_percent', 'N/A')}%")
+                        logger.info(f"Portfolio Exposure: {risk.get('portfolio_exposure_percent', 'N/A')}%")
+                        
+                    # Display fallback usage
+                    fallback = decision.get('fallback_plan', False)
+                    if fallback:
+                        logger.info(f"Note: Trade levels were calculated using fallback methods due to insufficient data")
             else:
                 logger.error(f"Decision error: {decision.get('message', 'Unknown error')}")
         

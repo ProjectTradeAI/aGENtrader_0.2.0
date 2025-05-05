@@ -111,12 +111,25 @@ class PortfolioManagerAgent(BaseAnalystAgent):
     def _load_existing_trades(self) -> None:
         """
         Load existing trades from the trade log and initialize portfolio state.
+        If the file doesn't exist, create it as an empty JSONL file.
         """
         self.logger.info("Loading existing trades to initialize portfolio state")
         
         if not os.path.exists(self.trade_log_file):
             self.logger.warning(f"Trade log file not found at {self.trade_log_file}")
-            return
+            try:
+                # Create the trades directory if it doesn't exist (double-check)
+                os.makedirs(os.path.dirname(self.trade_log_file), exist_ok=True)
+                
+                # Create an empty trade log file
+                with open(self.trade_log_file, 'w') as f:
+                    f.write("")  # Create an empty file for JSONL format
+                
+                self.logger.info(f"Created empty trade log file at {self.trade_log_file}")
+                return
+            except Exception as e:
+                self.logger.error(f"Failed to create trade log file: {str(e)}")
+                return
         
         try:
             trades = []

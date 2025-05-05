@@ -688,7 +688,7 @@ class TradePlanAgent(BaseDecisionAgent):
             self.portfolio_info = {}
         
         # Calculate position size based on confidence, conflict score, conflict flag, and symbol
-        position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason = self._calculate_position_size(
+        position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason, portfolio_risk_exceeded = self._calculate_position_size(
             confidence=confidence, 
             conflict_score=conflict_score, 
             is_conflicted=is_conflicted, 
@@ -961,7 +961,9 @@ class TradePlanAgent(BaseDecisionAgent):
             auto_tags.append("ATR_SL")
             
         # Add trade strategy tags based on market conditions (from analyst outputs)
-        trade_strategy_tags = self._generate_strategy_tags(signal, analyst_outputs, historical_data)
+        # Ensure signal is a valid string to avoid type errors
+        signal_for_tags = signal if signal in ["BUY", "SELL", "HOLD"] else "HOLD"
+        trade_strategy_tags = self._generate_strategy_tags(signal_for_tags, analyst_outputs, historical_data)
         auto_tags.extend(trade_strategy_tags)
         
         # Combine with existing tags
@@ -1076,6 +1078,7 @@ class TradePlanAgent(BaseDecisionAgent):
             # Core signal and pricing
             "signal": signal,
             "original_signal": original_signal,
+            "final_signal": plan_signal,  # The transformed signal after processing (e.g., CONFLICTED → HOLD)
             "confidence": confidence,
             "normalized_confidence": normalized_confidence,
             "summary_confidence": summary_confidence,
@@ -1102,6 +1105,7 @@ class TradePlanAgent(BaseDecisionAgent):
             
             # Add risk warning for conflicted scenarios
             "risk_warning": self._generate_risk_warning(is_conflicted, conflict_type, decision) if is_conflicted or conflict_type in ["conflicted", "soft_conflict"] else None,
+            "risk_feedback": self._generate_risk_feedback(is_conflicted, conflict_type, position_size_value, portfolio_risk_exceeded),
             
             # Trade context and classification
             "valid_until": valid_until,
@@ -1451,7 +1455,7 @@ class TradePlanAgent(BaseDecisionAgent):
         return entry_price, stop_loss, take_profit, used_fallback
     
     def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, 
-                          is_conflicted: bool = False, symbol: str = "") -> Tuple[float, str, bool, Dict[str, Any]]:
+                          is_conflicted: bool = False, symbol: str = "") -> Tuple[float, str, bool, Dict[str, Any], bool]:
         """
         Calculate position size based on confidence level, conflict score, and portfolio state.
         
@@ -1467,6 +1471,7 @@ class TradePlanAgent(BaseDecisionAgent):
             - Conflict type: None, "soft_conflict", or "conflicted"
             - Boolean indicating if conflict handling was applied
             - Dictionary containing confidence adjustment reasoning
+            - Boolean indicating if portfolio risk limits were exceeded
         """
         # Initialize detailed reasoning dictionary
         confidence_adjustment_reason = {
@@ -1494,7 +1499,7 @@ class TradePlanAgent(BaseDecisionAgent):
             confidence_adjustment_reason.update({
                 "explanation": "Confidence below minimum threshold, position size set to 0"
             })
-            return 0.0, "", False, confidence_adjustment_reason
+            return 0.0, "", False, confidence_adjustment_reason, False
         
         # Get position size multiplier for the tier
         position_size = self.position_size_multipliers[tier]
@@ -1613,6 +1618,7 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Apply portfolio-based adjustments if portfolio manager is available
         portfolio_adjustment_applied = False
+        portfolio_risk_exceeded = False  # New flag to track portfolio risk limits
         self.portfolio_info = {}  # Store as instance attribute for use in other methods
         
         if self.portfolio_manager is not None:
@@ -1679,6 +1685,7 @@ class TradePlanAgent(BaseDecisionAgent):
                             prev_position = position_size
                             position_size = min(position_size, portfolio_max_size)
                             portfolio_adjustment_applied = True
+                            portfolio_risk_exceeded = True  # Set the portfolio risk exceeded flag
                             
                             adjustment_reason = f"Portfolio limit: {available_exposure:.1f}% total, {available_asset_exposure:.1f}% {asset}"
                             confidence_adjustment_reason["adjustment_factors"]["portfolio_limit"] = adjustment_reason
@@ -1722,7 +1729,7 @@ class TradePlanAgent(BaseDecisionAgent):
         confidence_adjustment_reason["final_size"] = position_size
         confidence_adjustment_reason["explanation"] = " → ".join(confidence_adjustment_reason["adjustment_factors"].values())
         
-        return position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason
+        return position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason, portfolio_risk_exceeded
 
     def _extract_historical_data(self, market_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
         """
@@ -2046,7 +2053,8 @@ class TradePlanAgent(BaseDecisionAgent):
                     continue
                 
                 # Generate agent-specific tags
-                agent_tags = self._generate_agent_specific_tags(agent_name, signal, confidence, key_insight)
+                safe_signal = signal if isinstance(signal, str) else "NEUTRAL"
+                agent_tags = self._generate_agent_specific_tags(agent_name, safe_signal, confidence, key_insight)
                 if agent_tags:
                     market_mood_tags.update(agent_tags)
                 
@@ -3474,6 +3482,65 @@ class TradePlanAgent(BaseDecisionAgent):
             return f"Position size reduced by 20% due to moderate conflict ({conflict_score}% conflict score) between analyst signals."
             
         return None
+        
+    def _generate_risk_feedback(self, is_conflicted: bool, conflict_type: Optional[str], position_size: float, portfolio_constraints_applied: bool = False) -> str:
+        """
+        Generate a comprehensive risk feedback message explaining any position size adjustments 
+        due to conflicts or portfolio constraints.
+        
+        Args:
+            is_conflicted: Whether the signal is explicitly CONFLICTED
+            conflict_type: Type of conflict detected (soft_conflict, conflicted, etc.)
+            position_size: The final position size
+            portfolio_constraints_applied: Whether portfolio risk limits were exceeded
+            
+        Returns:
+            Risk feedback message as string
+        """
+        # Trade blocked due to explicit conflict
+        if is_conflicted and position_size == 0:
+            return "🚫 TRADE BLOCKED: High-confidence conflicting signals indicate significant market uncertainty. Trade automatically blocked for risk management."
+        
+        # High conflict with 50% position reduction
+        if conflict_type == "conflicted":
+            conflict_reduction = "50%"
+            return f"⚠️ HIGH CONFLICT ADJUSTMENT: Position size reduced by {conflict_reduction} due to significant disagreement between analyst signals."
+        
+        # Soft conflict with 20% position reduction
+        if conflict_type == "soft_conflict":
+            soft_reduction = "20%"
+            return f"ℹ️ MILD CONFLICT ADJUSTMENT: Position size reduced by {soft_reduction} due to moderate signal disagreement."
+        
+        # Portfolio constraint applied
+        if portfolio_constraints_applied:
+            portfolio_info = getattr(self, 'portfolio_info', {})
+            if portfolio_info:
+                # Get more detailed portfolio information if available
+                total_exposure = portfolio_info.get('total_exposure_pct', 0)
+                max_exposure = portfolio_info.get('max_exposure_pct', 0)
+                asset = portfolio_info.get('asset', '')
+                
+                if 'asset_exposure_pct' in portfolio_info and 'asset_max_exposure_pct' in portfolio_info:
+                    asset_exposure = portfolio_info.get('asset_exposure_pct', 0)
+                    asset_max_exposure = portfolio_info.get('asset_max_exposure_pct', 0)
+                    
+                    # Determine which limit was more restrictive
+                    if asset_exposure > 0 and asset_max_exposure > 0:
+                        asset_available = asset_max_exposure - asset_exposure
+                        total_available = max_exposure - total_exposure
+                        
+                        if asset_available < total_available:
+                            # Asset-specific limit was more restrictive
+                            return f"📊 ASSET EXPOSURE LIMIT: Position size limited because {asset} already represents {asset_exposure:.1f}% of portfolio (max allowed: {asset_max_exposure:.1f}%)."
+                
+                # Default to total portfolio exposure message
+                return f"📊 PORTFOLIO EXPOSURE LIMIT: Position size limited because total exposure is already {total_exposure:.1f}% (max allowed: {max_exposure:.1f}%)."
+            
+            # Fallback if no detailed portfolio info is available
+            return f"📊 PORTFOLIO CONSTRAINT: Position size limited by maximum portfolio exposure settings to maintain risk parameters."
+        
+        # No risk adjustment applied
+        return "✅ No risk adjustments applied to position size."
         
     def build_error_response(self, error_type: str, message: str, symbol: str = "UNKNOWN", interval: str = "1h") -> Dict[str, Any]:
         """

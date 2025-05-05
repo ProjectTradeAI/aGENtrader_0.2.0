@@ -359,6 +359,7 @@ def generate_trade_plan(decision, market_data, analyses=None):
         config = {
             'risk_reward_ratio': float(os.environ.get('TRADE_PLAN_RISK_REWARD', '1.5')),
             'portfolio_risk_per_trade': float(os.environ.get('TRADE_PLAN_RISK_PERCENT', '0.02')),  # 2% risk per trade
+            'allow_fallback_on_hold': False,  # Ensure TradePlanAgent respects HOLD & CONFLICTED signals
             'default_tags': ['production']
         }
         
@@ -529,8 +530,8 @@ def run_demo_cycle(symbol="BTC/USDT", interval="1h"):
     logger.info("✅ Making decision using: " + ", ".join(analyses.keys()))
     decision = make_trading_decision(analyses, market_data)
     
-    # Generate a trade plan if a trading decision was made
-    if decision and not decision.get('error', False) and decision.get('signal') in ['BUY', 'SELL']:
+    # Generate a trade plan if a trading decision is valid (including HOLD/CONFLICTED)
+    if decision and not decision.get('error', False):
         logger.info("✅ Generating enhanced trade plan")
         trade_plan = generate_trade_plan(decision, market_data, analyses)
         
@@ -609,7 +610,7 @@ def main():
                 logger.info(f"Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
                 
                 # Display enhanced trade plan details if available
-                if signal in ['BUY', 'SELL'] and 'entry_price' in decision:
+                if 'trade_plan_generated' in decision or ('entry_price' in decision and signal in ['BUY', 'SELL']):
                     logger.info(f"===== ENHANCED TRADE PLAN DETAILS =====")
                     logger.info(f"Entry Price: {decision.get('entry_price')}")
                     logger.info(f"Stop-Loss: {decision.get('stop_loss')}")

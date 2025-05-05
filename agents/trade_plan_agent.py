@@ -331,9 +331,15 @@ class TradePlanAgent(BaseDecisionAgent):
                 signal = override_signal
                 
                 # Mark decision consistency as false if we're overriding DecisionAgent's final signal
-                if signal != final_decision_signal:
+                if signal != final_decision_signal and final_decision_signal != "CONFLICTED":
                     decision_consistency = False
                     logger.warning(f"Decision consistency mismatch: TradePlanAgent {signal} vs DecisionAgent {final_decision_signal}")
+                
+                # Special check: if DecisionAgent returned CONFLICTED and we kept that signal,
+                # ensure decision_consistency is True to reflect that we respected the decision
+                if final_decision_signal == "CONFLICTED" and plan_signal == "CONFLICTED":
+                    decision_consistency = True
+                    logger.info("Decision consistency TRUE - TradePlanAgent respecting DecisionAgent's CONFLICTED signal")
             
             # Reduce confidence for conflicted signals
             original_confidence = confidence
@@ -386,8 +392,15 @@ class TradePlanAgent(BaseDecisionAgent):
                 reasoning = "DecisionAgent returned HOLD due to low directional confidence. No trade plan generated."
                 logger.info(reasoning)
             
+            # For CONFLICTED signals, we should preserve the original CONFLICTED signal
+            # instead of using the potentially modified signal value
+            if original_signal == "CONFLICTED" or decision.get('final_signal') == "CONFLICTED":
+                plan_signal = "CONFLICTED"
+            else:
+                plan_signal = signal
+                
             minimal_plan = {
-                "signal": signal,
+                "signal": plan_signal,
                 "original_signal": original_signal,  # Preserve the original signal
                 "confidence": confidence,
                 "entry_price": None,

@@ -883,9 +883,15 @@ class AgentTestHarness:
                         logger.error(f"{Fore.RED}TradePlanAgent or create_trade_plan_agent function is not available{Style.RESET_ALL}")
                         print(f"DEBUG: Missing TradePlanAgent or create_trade_plan_agent function")
                     else:
-                        # Create the trade plan agent
+                        # Create the trade plan agent with updated configuration
                         print(f"DEBUG: Creating trade plan agent with data_provider")
-                        trade_plan_agent = create_trade_plan_agent(config={"data_provider": self.data_provider})
+                        trade_plan_agent = create_trade_plan_agent(config={
+                            "data_provider": self.data_provider,
+                            "allow_fallback_on_hold": False,  # Ensure it respects HOLD and CONFLICTED signals
+                            "risk_reward_ratio": 1.5,
+                            "portfolio_risk_per_trade": 0.02,
+                            "test_mode": True
+                        })
                         print(f"DEBUG: Created trade_plan_agent successfully: {trade_plan_agent is not None}")
                         
                         # Set temperature if needed
@@ -896,12 +902,20 @@ class AgentTestHarness:
                         elif hasattr(trade_plan_agent, 'temperature'):
                             trade_plan_agent.temperature = self.temperature
                             
-                        # Generate trade plan
-                        trade_plan = trade_plan_agent.make_decision(
-                            symbol=self.symbol,
-                            analyst_results=analyses,
+                        # Generate trade plan using the proper method
+                        logger.info(f"TradePlanAgent generating plan for {self.symbol} at {self.interval} interval")
+                        market_data = {
+                            "symbol": self.symbol,
+                            "interval": self.interval,
+                            "current_price": self.current_price,
+                            "data_provider": self.data_provider
+                        }
+                        
+                        # Use generate_trade_plan to respect the decision from DecisionAgent
+                        trade_plan = trade_plan_agent.generate_trade_plan(
                             decision=decision,
-                            market_data=market_data
+                            market_data=market_data,
+                            analyst_outputs=analyses
                         )
                         
                         # Display details

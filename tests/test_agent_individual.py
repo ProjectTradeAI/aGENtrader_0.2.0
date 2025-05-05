@@ -904,10 +904,13 @@ class AgentTestHarness:
                             
                         # Generate trade plan using the proper method
                         logger.info(f"TradePlanAgent generating plan for {self.symbol} at {self.interval} interval")
+                        # Get current price from data provider
+                        current_price = self.data_provider.get_current_price(self.symbol)
+                        
                         market_data = {
                             "symbol": self.symbol,
                             "interval": self.interval,
-                            "current_price": self.current_price,
+                            "current_price": current_price,
                             "data_provider": self.data_provider
                         }
                         

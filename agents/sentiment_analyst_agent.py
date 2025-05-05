@@ -159,8 +159,9 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         if symbol is not None:
             # Don't log potentially large data structures
             if isinstance(symbol, dict):
-                if "symbol" in symbol:
-                    self.logger.info(f"Using symbol from symbol parameter: {symbol['symbol']}")
+                symbol_dict: Dict[str, Any] = symbol  # Type hint for proper indexing
+                if "symbol" in symbol_dict:
+                    self.logger.info(f"Using symbol from symbol parameter: {symbol_dict.get('symbol')}")
                 else:
                     self.logger.info("Using provided symbol parameter (dictionary without symbol key)")
             else:
@@ -311,32 +312,57 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             if "news" in self.data_sources and "news" in market_data and market_data["news"]:
                 news_items = market_data["news"]
                 self.logger.info(f"Analyzing {len(news_items)} news items")
-                news_sentiment = self.grok_client.analyze_market_news(news_items, temperature=temperature)
-                sentiments.append(news_sentiment)
+                try:
+                    news_sentiment = self.grok_client.analyze_market_news(news_items, temperature=temperature)
+                    sentiments.append(news_sentiment)
+                except Exception as e:
+                    # Handle API errors with specific checks for rate limits (429)
+                    if "429" in str(e) or "rate limit" in str(e).lower():
+                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429): {str(e)}")
+                        return self._api_error_response(symbol, error_type="rate_limit")
+                    else:
+                        self.logger.error(f"Error analyzing news sentiment: {str(e)}")
                 
             # Process social media posts if available
             if "social" in self.data_sources and "social_posts" in market_data and market_data["social_posts"]:
                 social_posts = market_data["social_posts"]
                 self.logger.info(f"Analyzing {len(social_posts)} social media posts")
-                social_sentiment = self.grok_client.analyze_market_news(social_posts, temperature=temperature)
-                sentiments.append(social_sentiment)
+                try:
+                    social_sentiment = self.grok_client.analyze_market_news(social_posts, temperature=temperature)
+                    sentiments.append(social_sentiment)
+                except Exception as e:
+                    # Handle API errors with specific checks for rate limits (429)
+                    if "429" in str(e) or "rate limit" in str(e).lower():
+                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429): {str(e)}")
+                        return self._api_error_response(symbol, error_type="rate_limit")
+                    else:
+                        self.logger.error(f"Error analyzing social sentiment: {str(e)}")
                 
             # If no data was provided, analyze the general market context
             if not sentiments:
                 self.logger.info("No specific sentiment data provided, analyzing general market sentiment")
                 context = f"Current market conditions for {symbol} as of {datetime.now().strftime('%Y-%m-%d')}"
-                general_sentiment = self.grok_client.analyze_sentiment(context, temperature=temperature)
-                
-                # Convert to signal format with full reasoning preserved
-                signal_result = self.grok_client.convert_sentiment_to_signal(general_sentiment)
-                
-                # Store the complete sentiment data for access by the decision agent
-                signal_result["full_sentiment_data"] = general_sentiment
-                
-                # Log full reasoning for debugging truncation issues
-                self.logger.info(f"Generated sentiment reasoning (full): {signal_result['reasoning']}")
-                
-                return signal_result
+                try:
+                    general_sentiment = self.grok_client.analyze_sentiment(context, temperature=temperature)
+                    
+                    # Convert to signal format with full reasoning preserved
+                    signal_result = self.grok_client.convert_sentiment_to_signal(general_sentiment)
+                    
+                    # Store the complete sentiment data for access by the decision agent
+                    signal_result["full_sentiment_data"] = general_sentiment
+                    
+                    # Log full reasoning for debugging truncation issues
+                    self.logger.info(f"Generated sentiment reasoning (full): {signal_result['reasoning']}")
+                    
+                    return signal_result
+                except Exception as e:
+                    # Handle API errors with specific checks for rate limits (429)
+                    if "429" in str(e) or "rate limit" in str(e).lower():
+                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429): {str(e)}")
+                        return self._api_error_response(symbol, error_type="rate_limit")
+                    else:
+                        self.logger.error(f"Error analyzing general sentiment: {str(e)}")
+                        return self._api_error_response(symbol, error_type="api_error")
                 
             # Aggregate sentiments from different sources
             # For simplicity, we'll use the first source if multiple are available
@@ -360,6 +386,50 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         except Exception as e:
             self.logger.error(f"Error in sentiment analysis: {str(e)}")
             return self._fallback_analysis(symbol)
+            
+    def _api_error_response(self, symbol=None, error_type: str = "api_error") -> Dict[str, Any]:
+        """
+        Handle API errors gracefully, particularly rate limiting (429) errors.
+        
+        Args:
+            symbol: Trading symbol (string, dict, or None)
+            error_type: Type of error ("rate_limit", "api_error", etc.)
+            
+        Returns:
+            Dictionary with standardized error response that won't reduce system confidence
+        """
+        # Extract symbol string if it's a dictionary
+        symbol_str = "BTC/USDT"  # Default
+        try:
+            if isinstance(symbol, dict) and "symbol" in symbol:
+                symbol_str = symbol["symbol"]
+            elif isinstance(symbol, str):
+                symbol_str = symbol
+        except:
+            pass
+            
+        # Create timestamp for tracking
+        timestamp = datetime.now()
+        request_id = f"{hash(timestamp.isoformat() + symbol_str) % 10000:04d}"
+        
+        # Create an error response that won't reduce system confidence
+        # Per requirements, set confidence=0, signal="UNKNOWN" when API fails
+        if error_type == "rate_limit":
+            reason = "Sentiment data unavailable (API limit)"
+            self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429)")
+        else:
+            reason = "Sentiment API error, data unavailable"
+            self.logger.warning(f"[WARNING] SentimentAnalystAgent API error: {error_type}")
+            
+        return {
+            "signal": "UNKNOWN",  # Using UNKNOWN for API errors
+            "confidence": 0,      # Zero confidence to prevent affecting system
+            "reasoning": reason,
+            "timestamp": timestamp.isoformat(),
+            "request_id": request_id,
+            "error": error_type,
+            "full_sentiment_data": {}  # Empty data as it's unavailable
+        }
             
     def _fallback_analysis(self, symbol=None) -> Dict[str, Any]:
         """
@@ -524,8 +594,10 @@ if __name__ == "__main__":
         ]
     }
     
-    # Run analysis
-    result = agent.analyze(test_data)
+    # Run analysis using the extracted symbol string from test_data and the test_data as market_data
+    symbol_str = test_data.get("symbol", "BTC/USDT")
+    # Make sure we're passing a string not a dict for the symbol parameter
+    result = agent.analyze(symbol=symbol_str, market_data=test_data)
     
     # Print result
     print(json.dumps(result, indent=2))

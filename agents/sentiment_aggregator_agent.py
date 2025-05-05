@@ -71,12 +71,14 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         self.sentiment_log_path = os.path.join('logs', 'sentiment_feed.jsonl')
         os.makedirs(os.path.dirname(self.sentiment_log_path), exist_ok=True)
     
-    def analyze(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+    def analyze(self, symbol: Optional[str] = None, market_data: Optional[Dict[str, Any]] = None, 
+               interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
         Analyze market sentiment for a specific symbol.
         
         Args:
             symbol: Trading symbol
+            market_data: Pre-fetched market data (optional)
             interval: Time interval (different timeframe for sentiment analysis)
             **kwargs: Additional parameters
             
@@ -110,11 +112,18 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             if symbol is None:
                 symbol = "BTC/USDT"  # Default symbol if none provided
             
-            # Get market news and social media data for the symbol
-            market_data = self._fetch_market_data(symbol)
-            
-            # Analyze sentiment using Grok AI
-            sentiment_result = self._analyze_sentiment_with_grok(symbol, market_data)
+            # Check if market_data was provided, otherwise fetch it
+            if market_data is None:
+                # Get market news and social media data for the symbol
+                market_data_text = self._fetch_market_data_text(symbol)
+                
+                # Analyze sentiment using Grok AI with the text data
+                sentiment_result = self._analyze_sentiment_with_grok(symbol, market_data_text)
+            else:
+                # Use the provided market_data, but we need to convert it to the text format our model expects
+                # For now, just use the symbol to generate text as we normally would
+                market_data_text = self._fetch_market_data_text(symbol)
+                sentiment_result = self._analyze_sentiment_with_grok(symbol, market_data_text)
             
             # Log sentiment data
             self._log_sentiment_data(symbol, sentiment_result)
@@ -203,16 +212,31 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             return results
             
         except Exception as e:
-            logger.error(f"Error analyzing sentiment: {str(e)}", exc_info=True)
-            error_response = self.build_error_response(
-                "SENTIMENT_ANALYSIS_ERROR",
-                f"Error analyzing sentiment: {str(e)}"
-            )
-            # Add interval to error response for consistency
-            error_response["interval"] = interval
-            return error_response
+            execution_time = time.time() - start_time
+            error_str = str(e).lower()
+            
+            # Check for specific API-related errors
+            if "429" in error_str or "rate limit" in error_str or "too many requests" in error_str:
+                logger.warning(f"SentimentAggregatorAgent API rate limited: {str(e)}")
+                return self._api_error_response(symbol, "rate_limit", interval)
+            elif "api key" in error_str or "authentication" in error_str or "unauthorized" in error_str:
+                logger.error(f"SentimentAggregatorAgent API authentication error: {str(e)}")
+                return self._api_error_response(symbol, "auth_error", interval)
+            elif "timeout" in error_str or "connection" in error_str:
+                logger.error(f"SentimentAggregatorAgent API connection error: {str(e)}")
+                return self._api_error_response(symbol, "connection_error", interval)
+            else:
+                # Log the general exception details
+                logger.error(f"Error analyzing sentiment: {str(e)}", exc_info=True)
+                error_response = self.build_error_response(
+                    "SENTIMENT_ANALYSIS_ERROR",
+                    f"Error analyzing sentiment: {str(e)}"
+                )
+                # Add interval to error response for consistency
+                error_response["interval"] = interval
+                return error_response
     
-    def _fetch_market_data(self, symbol) -> str:
+    def _fetch_market_data_text(self, symbol) -> str:
         """
         Fetch market news and social media data related to the symbol.
         
@@ -408,6 +432,96 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 ]
             }
     
+    def _fetch_market_data(self, symbol: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Fetch market data for the specified symbol.
+        This method implements the base class interface but delegates to our text-based method.
+        
+        Args:
+            symbol: Trading symbol (can be string or dictionary)
+            **kwargs: Additional parameters
+            
+        Returns:
+            Dictionary containing market data
+        """
+        # Extract proper symbol string
+        symbol_str = "BTC/USDT"  # Default
+        if isinstance(symbol, dict) and "symbol" in symbol:
+            symbol_str = symbol.get("symbol", "BTC/USDT")
+        elif isinstance(symbol, str):
+            symbol_str = symbol
+            
+        # Generate the prompt text using our specialized method
+        market_text = self._fetch_market_data_text(symbol)
+        
+        # Create a standardized market_data dictionary to match base class expectations
+        return {
+            "symbol": symbol_str,
+            "timestamp": datetime.now().isoformat(),
+            "news_text": market_text,
+            "data_type": "sentiment_text",
+            "data_source": "sentiment_aggregator_template",
+            "status": "success"
+        }
+    
+    def _api_error_response(self, symbol, error_type: str = "api_error", interval: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Handle API errors gracefully, particularly rate limiting (429) errors.
+        
+        Args:
+            symbol: Trading symbol (string, dict, or None)
+            error_type: Type of error ("rate_limit", "auth_error", "connection_error", etc.)
+            interval: Time interval for consistency with other methods
+            
+        Returns:
+            Dictionary with standardized error response that won't reduce system confidence
+        """
+        # Extract symbol string if it's a dictionary
+        symbol_str = "BTC/USDT"  # Default
+        try:
+            if isinstance(symbol, dict) and "symbol" in symbol:
+                symbol_str = symbol.get("symbol", "BTC/USDT")
+            elif isinstance(symbol, str):
+                symbol_str = symbol
+        except:
+            pass
+            
+        # Create timestamp for tracking
+        timestamp = datetime.now()
+        request_id = f"{hash(timestamp.isoformat() + symbol_str) % 10000:04d}"
+        
+        # Create an error response that won't reduce system confidence
+        # Using UNKNOWN signal with confidence=0 to ensure it doesn't affect decision
+        if error_type == "rate_limit":
+            reason = "Sentiment data unavailable (API rate limit exceeded)"
+            logger.warning(f"[WARNING] SentimentAggregatorAgent API rate limited (429)")
+        elif error_type == "auth_error":
+            reason = "Sentiment data unavailable (API authentication error)"
+            logger.warning(f"[WARNING] SentimentAggregatorAgent API authentication error")
+        elif error_type == "connection_error":
+            reason = "Sentiment data unavailable (API connection error)"
+            logger.warning(f"[WARNING] SentimentAggregatorAgent API connection error")
+        else:
+            reason = "Sentiment API error, data unavailable"
+            logger.warning(f"[WARNING] SentimentAggregatorAgent API error: {error_type}")
+            
+        return {
+            "agent": self.name,
+            "timestamp": timestamp.isoformat(),
+            "symbol": symbol_str,
+            "interval": interval or self.default_interval,
+            "current_price": 0.0,  # Placeholder
+            "sentiment_score": 3,  # Neutral
+            "confidence": 0,      # Zero confidence to prevent affecting system
+            "signal": "UNKNOWN",  # Using UNKNOWN for API errors
+            "analysis_summary": reason,
+            "sentiment_signals": ["API error, reliable data unavailable"],
+            "execution_time_seconds": 0.0,
+            "status": "error",
+            "error_type": error_type,
+            "error_reason": reason
+        }
+            
     def _log_sentiment_data(self, symbol, sentiment_result: Dict[str, Any]) -> None:
         """
         Log sentiment data to a file.

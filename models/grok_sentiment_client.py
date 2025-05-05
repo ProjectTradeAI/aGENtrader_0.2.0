@@ -117,7 +117,21 @@ class GrokSentimentClient:
                 temperature=actual_temperature
             )
             
-            result = json.loads(response.choices[0].message.content)
+            # Check for empty or invalid response
+            if not response or not response.choices or not response.choices[0].message or not response.choices[0].message.content:
+                raise ValueError("Empty or invalid response received from Grok API")
+            
+            content = response.choices[0].message.content
+            
+            # Check if content is valid before parsing JSON
+            if not content or not content.strip():
+                raise ValueError("Empty content received from Grok API")
+                
+            try:
+                result = json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from Grok API: {e}, Content: {content[:100]}...")
+                raise ValueError(f"Invalid JSON format in API response: {str(e)}")
             
             # Validate response format and enforce constraints
             rating = int(max(1, min(5, round(result.get("rating", 3)))))
@@ -206,7 +220,21 @@ class GrokSentimentClient:
                 temperature=actual_temperature
             )
             
-            result = json.loads(response.choices[0].message.content)
+            # Check for empty or invalid response
+            if not response or not response.choices or not response.choices[0].message or not response.choices[0].message.content:
+                raise ValueError("Empty or invalid response received from Grok API")
+            
+            content = response.choices[0].message.content
+            
+            # Check if content is valid before parsing JSON
+            if not content or not content.strip():
+                raise ValueError("Empty content received from Grok API")
+                
+            try:
+                result = json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from Grok API: {e}, Content: {content[:100]}...")
+                raise ValueError(f"Invalid JSON format in API response: {str(e)}")
             
             # Add actual temperature to the result for tracking
             result["actual_temperature"] = actual_temperature

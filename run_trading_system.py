@@ -626,38 +626,125 @@ def main():
             if not decision.get('error', False):
                 signal = decision.get('signal', 'UNKNOWN')
                 confidence = decision.get('confidence', 0)
-                logger.info(f"===== FINAL DECISION & TRADE PLAN =====")
-                logger.info(f"{signal} {args.symbol} with {confidence}% confidence")
-                logger.info(f"Reasoning: {decision.get('reasoning', 'No reasoning provided')}")
+                # Import colorful formatting
+                from colorama import Fore, Style, Back
                 
-                # Display enhanced trade plan details if available
-                if 'trade_plan_generated' in decision or ('entry_price' in decision and signal in ['BUY', 'SELL']):
-                    logger.info(f"===== ENHANCED TRADE PLAN DETAILS =====")
-                    logger.info(f"Entry Price: {decision.get('entry_price')}")
-                    logger.info(f"Stop-Loss: {decision.get('stop_loss')}")
-                    logger.info(f"Take-Profit: {decision.get('take_profit')}")
-                    logger.info(f"Position Size: {decision.get('position_size')}")
+                # Create a visually appealing trade plan summary frame
+                banner_width = 80
+                logger.info("="*banner_width)
+                logger.info(f"{Fore.CYAN}╔{'═'*(banner_width-2)}╗{Style.RESET_ALL}")
+                
+                # Signal-based color coding
+                signal_color = Fore.YELLOW  # Default HOLD/NEUTRAL color
+                if signal == "BUY":
+                    signal_color = Fore.GREEN
+                elif signal == "SELL":
+                    signal_color = Fore.RED
+                elif signal == "CONFLICTED":
+                    signal_color = Fore.MAGENTA
+                
+                # Center-aligned title with padding
+                title = f" TRADE PLAN SUMMARY: {signal_color}{signal}{Style.RESET_ALL} {args.symbol} "
+                padding = (banner_width - len(title) + len(signal_color) + len(Style.RESET_ALL)) // 2
+                logger.info(f"{Fore.CYAN}║{' ' * padding}{Style.RESET_ALL}{title}{' ' * (banner_width - padding - len(title) - 2)}{Fore.CYAN}║{Style.RESET_ALL}")
+                logger.info(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                
+                # Confidence bar visualization
+                confidence_bar_width = banner_width - 30
+                filled_blocks = int((confidence / 100) * confidence_bar_width)
+                confidence_bar = f"{Fore.GREEN}{'█' * filled_blocks}{Fore.WHITE}{'░' * (confidence_bar_width - filled_blocks)}{Style.RESET_ALL}"
+                logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Confidence: {confidence_bar} {confidence:.1f}% {' ' * 5}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # Decision details section
+                logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Decision Basis:{Style.RESET_ALL}{' ' * (banner_width - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+                reasoning = decision.get('reasoning', 'No reasoning provided')
+                # Wrap reasoning to fit within the banner width
+                wrapped_reasoning = []
+                current_line = ""
+                for word in reasoning.split():
+                    if len(current_line) + len(word) + 1 <= banner_width - 10:
+                        current_line += word + " "
+                    else:
+                        wrapped_reasoning.append(current_line)
+                        current_line = word + " "
+                if current_line:
+                    wrapped_reasoning.append(current_line)
+                
+                # Print wrapped reasoning
+                for line in wrapped_reasoning:
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} {line}{' ' * (banner_width - len(line) - 4)}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # Display enhanced trade plan details if available for BUY/SELL signals
+                if signal in ['BUY', 'SELL'] and ('trade_plan_generated' in decision or 'entry_price' in decision):
+                    logger.info(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Trade Details:{Style.RESET_ALL}{' ' * (banner_width - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
                     
-                    # Display enhanced features
-                    if 'trade_type' in decision:
-                        logger.info(f"Trade Type: {decision.get('trade_type', 'unknown')}")
-                    if 'valid_until' in decision:
-                        logger.info(f"Valid Until: {decision.get('valid_until', 'not specified')}")
-                    if 'reason_summary' in decision:
-                        logger.info(f"Reason Summary: {decision.get('reason_summary', 'N/A')}")
+                    # Entry, Stop-Loss, Take-Profit
+                    entry_price = decision.get('entry_price', 'N/A')
+                    stop_loss = decision.get('stop_loss', 'N/A')
+                    take_profit = decision.get('take_profit', 'N/A')
                     
-                    # Display risk metrics if available
+                    # Format prices with proper alignment
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Entry: {Fore.WHITE}{entry_price}{Style.RESET_ALL}{' ' * (banner_width - len(str(entry_price)) - 15)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Stop-Loss: {Fore.RED}{stop_loss}{Style.RESET_ALL}{' ' * (banner_width - len(str(stop_loss)) - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Take-Profit: {Fore.GREEN}{take_profit}{Style.RESET_ALL}{' ' * (banner_width - len(str(take_profit)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Position size and type
+                    position_size = decision.get('position_size', 'N/A')
+                    trade_type = decision.get('trade_type', 'unknown')
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Position Size: {position_size}{' ' * (banner_width - len(str(position_size)) - 25)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Trade Type: {trade_type}{' ' * (banner_width - len(trade_type) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Validity period
+                    valid_until = decision.get('valid_until', 'not specified')
+                    logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Valid Until: {valid_until}{' ' * (banner_width - len(str(valid_until)) - 23)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Risk metrics if available
                     if 'risk_snapshot' in decision:
                         risk = decision.get('risk_snapshot', {})
-                        logger.info(f"===== RISK METRICS =====")
-                        logger.info(f"Risk/Reward Ratio: {risk.get('risk_reward_ratio', 'N/A')}")
-                        logger.info(f"Portfolio Risk: {risk.get('portfolio_risk_percent', 'N/A')}%")
-                        logger.info(f"Portfolio Exposure: {risk.get('portfolio_exposure_percent', 'N/A')}%")
+                        logger.info(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                        logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Risk Metrics:{Style.RESET_ALL}{' ' * (banner_width - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
                         
-                    # Display fallback usage
-                    fallback = decision.get('fallback_plan', False)
-                    if fallback:
-                        logger.info(f"Note: Trade levels were calculated using fallback methods due to insufficient data")
+                        risk_reward = risk.get('risk_reward_ratio', 'N/A')
+                        portfolio_risk = risk.get('portfolio_risk_percent', 'N/A')
+                        exposure = risk.get('portfolio_exposure_percent', 'N/A')
+                        
+                        logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Risk/Reward: {risk_reward}{' ' * (banner_width - len(str(risk_reward)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                        logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Portfolio Risk: {portfolio_risk}%{' ' * (banner_width - len(str(portfolio_risk)) - 23)}{Fore.CYAN}║{Style.RESET_ALL}")
+                        logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} Portfolio Exposure: {exposure}%{' ' * (banner_width - len(str(exposure)) - 27)}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # For HOLD/NEUTRAL signals, provide reasoning
+                elif signal in ['HOLD', 'NEUTRAL', 'CONFLICTED']:
+                    logger.info(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                    
+                    reason_summary = decision.get('reason_summary', None)
+                    if reason_summary:
+                        logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Reason Summary:{Style.RESET_ALL}{' ' * (banner_width - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                        
+                        # Wrap reason summary
+                        wrapped_summary = []
+                        current_line = ""
+                        for word in reason_summary.split():
+                            if len(current_line) + len(word) + 1 <= banner_width - 10:
+                                current_line += word + " "
+                            else:
+                                wrapped_summary.append(current_line)
+                                current_line = word + " "
+                        if current_line:
+                            wrapped_summary.append(current_line)
+                        
+                        # Print wrapped summary
+                        for line in wrapped_summary:
+                            logger.info(f"{Fore.CYAN}║{Style.RESET_ALL} {line}{' ' * (banner_width - len(line) - 4)}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # Close the box
+                logger.info(f"{Fore.CYAN}╚{'═'*(banner_width-2)}╝{Style.RESET_ALL}")
+                logger.info("="*banner_width)
+                
+                # Note for fallback methods
+                fallback = decision.get('fallback_plan', False)
+                if fallback:
+                    logger.info(f"{Fore.YELLOW}Note: Trade levels were calculated using fallback methods due to insufficient data{Style.RESET_ALL}")
             else:
                 logger.error(f"Decision error: {decision.get('message', 'Unknown error')}")
         

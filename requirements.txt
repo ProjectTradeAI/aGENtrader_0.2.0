@@ -35,3 +35,4 @@ matplotlib
 matplotlib
 numpy
 pandas
+colorama

@@ -69,8 +69,8 @@ from colorama import Fore, Style
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-# Initialize colorama
-colorama.init()
+# Initialize colorama for cross-platform color support
+colorama.init(autoreset=True)
 
 # Set up logging
 logging.basicConfig(
@@ -483,6 +483,12 @@ class AgentTestHarness:
         Returns:
             Dictionary with test results
         """
+        # Import colorama here to ensure it's available
+        try:
+            from colorama import init
+            init()  # Initialize colorama
+        except ImportError:
+            pass  # Continue without colorama if not available
         # Check if we're running a full decision cycle with all agents
         if hasattr(self, 'full_cycle') and getattr(self, 'full_cycle', False):
             return self._run_full_cycle_test()
@@ -629,6 +635,12 @@ class AgentTestHarness:
         Returns:
             Dictionary with test results
         """
+        # Initialize colorama here to ensure colors work in this method
+        try:
+            from colorama import init
+            init(autoreset=True)  # Initialize colorama with autoreset
+        except ImportError:
+            pass  # Continue without colorama if not available
         logger.info(f"{Fore.CYAN}Running full agent decision cycle test{Style.RESET_ALL}")
         
         start_time = time.time()
@@ -986,6 +998,112 @@ class AgentTestHarness:
                         "reason_summary": f"Error generating trade plan: {str(e)}",
                         "error": str(e)
                     }
+            
+            # Show full trade plan detailed visualization if available
+            if trade_plan is not None and not display_agent == "All Agents (Decision Cycle)":
+                # Create a beautiful trade plan visualization
+                banner_width = 80
+                
+                # Get signal and confidence
+                signal = trade_plan.get('signal', 'UNKNOWN')
+                confidence = trade_plan.get('confidence', 0)
+                
+                # Get reasoning
+                reasoning = trade_plan.get('reason_summary', trade_plan.get('reasoning', 'No reason provided'))
+                
+                # Color coding based on signal
+                signal_color = Fore.YELLOW  # Default HOLD color
+                if signal == "BUY":
+                    signal_color = Fore.GREEN
+                elif signal == "SELL":
+                    signal_color = Fore.RED
+                elif signal == "CONFLICTED":
+                    signal_color = Fore.MAGENTA
+                
+                print("\n" + "="*banner_width)
+                print(f"{Fore.CYAN}╔{'═'*(banner_width-2)}╗{Style.RESET_ALL}")
+                
+                # Title with centered signal
+                title = f" TRADE PLAN: {signal_color}{signal}{Style.RESET_ALL} {self.symbol} "
+                padding = (banner_width - len(title) + len(signal_color) + len(Style.RESET_ALL)) // 2
+                print(f"{Fore.CYAN}║{' ' * padding}{Style.RESET_ALL}{title}{' ' * (banner_width - padding - len(title) - 2)}{Fore.CYAN}║{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                
+                # Visual confidence bar
+                confidence_bar_width = banner_width - 30
+                filled_blocks = int((confidence / 100) * confidence_bar_width)
+                confidence_bar = f"{Fore.GREEN}{'█' * filled_blocks}{Fore.WHITE}{'░' * (confidence_bar_width - filled_blocks)}{Style.RESET_ALL}"
+                print(f"{Fore.CYAN}║{Style.RESET_ALL} Confidence: {confidence_bar} {confidence:.1f}% {' ' * 5}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # Display reasoning
+                print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Reasoning:{Style.RESET_ALL}{' ' * (banner_width - 15)}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # Wrap reasoning to fit within the box
+                wrapped_reasoning = []
+                current_line = ""
+                for word in reasoning.split():
+                    if len(current_line) + len(word) + 1 <= banner_width - 10:
+                        current_line += word + " "
+                    else:
+                        wrapped_reasoning.append(current_line)
+                        current_line = word + " "
+                if current_line:
+                    wrapped_reasoning.append(current_line)
+                
+                # Print wrapped reasoning
+                for line in wrapped_reasoning:
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} {line}{' ' * (banner_width - len(line) - 4)}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # Display trade details for BUY/SELL signals
+                if signal in ['BUY', 'SELL'] and trade_plan.get('position_size', 0) > 0:
+                    print(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Trade Details:{Style.RESET_ALL}{' ' * (banner_width - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Format trade levels
+                    entry_price = trade_plan.get('entry_price', 'N/A')
+                    stop_loss = trade_plan.get('stop_loss', 'N/A')
+                    take_profit = trade_plan.get('take_profit', 'N/A')
+                    
+                    if isinstance(entry_price, (int, float)):
+                        entry_price = f"${float(entry_price):.2f}"
+                    if isinstance(stop_loss, (int, float)):
+                        stop_loss = f"${float(stop_loss):.2f}"
+                    if isinstance(take_profit, (int, float)):
+                        take_profit = f"${float(take_profit):.2f}"
+                    
+                    # Display trade levels with color coding
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Entry: {Fore.WHITE}{entry_price}{Style.RESET_ALL}{' ' * (banner_width - len(str(entry_price)) - 15)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Stop-Loss: {Fore.RED}{stop_loss}{Style.RESET_ALL}{' ' * (banner_width - len(str(stop_loss)) - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Take-Profit: {Fore.GREEN}{take_profit}{Style.RESET_ALL}{' ' * (banner_width - len(str(take_profit)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Display other trade metrics
+                    position_size = trade_plan.get('position_size', 'N/A')
+                    if isinstance(position_size, (int, float)):
+                        position_size = f"{position_size}%"
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Position Size: {position_size}{' ' * (banner_width - len(str(position_size)) - 25)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    risk_reward = trade_plan.get('risk_reward_ratio', None)
+                    if risk_reward is not None:
+                        if isinstance(risk_reward, (int, float)):
+                            risk_reward = f"{float(risk_reward):.2f}"
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Risk/Reward: {risk_reward}{' ' * (banner_width - len(str(risk_reward)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Trade classification info
+                    classification = trade_plan.get('trade_classification', None)
+                    if classification:
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Class: {classification}{' ' * (banner_width - len(str(classification)) - 16)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    timeframe = trade_plan.get('timeframe', None)
+                    if timeframe:
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Timeframe: {timeframe}{' ' * (banner_width - len(str(timeframe)) - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    validity_period = trade_plan.get('validity_period', None)
+                    if validity_period:
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Valid Until: {validity_period}{' ' * (banner_width - len(str(validity_period)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                
+                # Close the box
+                print(f"{Fore.CYAN}╚{'═'*(banner_width-2)}╝{Style.RESET_ALL}")
+                print(f"{'='*banner_width}")
             
             # Format the final result with all data
             result = {
@@ -1349,94 +1467,173 @@ class AgentTestHarness:
         # Determine if this is a trade cycle test
         is_trade_cycle = "Full Trade Cycle" in result.get('agent', '') or 'trade_plan' in result
         
-        print(f"\n{Fore.CYAN}## FINAL DECISION ##")
-        print(f"Signal:     {signal_color}{signal}{Style.RESET_ALL}")
-        print(f"Confidence: {confidence_color}{confidence}%{Style.RESET_ALL}")
-        print(f"Reasoning:  {Fore.WHITE}{reasoning}{Style.RESET_ALL}")
-        print(f"{Fore.CYAN}####################{Style.RESET_ALL}")
+        # Create a visually appealing trade plan summary frame
+        banner_width = 80
+        print("\n" + "="*banner_width)
+        print(f"{Fore.CYAN}╔{'═'*(banner_width-2)}╗{Style.RESET_ALL}")
         
-        # If trade plan exists, display it
+        # Signal-based color coding
+        signal_color = Fore.YELLOW  # Default HOLD/NEUTRAL color
+        if signal == "BUY":
+            signal_color = Fore.GREEN
+        elif signal == "SELL":
+            signal_color = Fore.RED
+        elif signal == "CONFLICTED":
+            signal_color = Fore.MAGENTA
+        
+        # Center-aligned title with padding
+        title = f" TRADE PLAN SUMMARY: {signal_color}{signal}{Style.RESET_ALL} {self.symbol} "
+        padding = (banner_width - len(title) + len(signal_color) + len(Style.RESET_ALL)) // 2
+        print(f"{Fore.CYAN}║{' ' * padding}{Style.RESET_ALL}{title}{' ' * (banner_width - padding - len(title) - 2)}{Fore.CYAN}║{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+        
+        # Confidence bar visualization
+        confidence_bar_width = banner_width - 30
+        filled_blocks = int((confidence / 100) * confidence_bar_width)
+        confidence_bar = f"{Fore.GREEN}{'█' * filled_blocks}{Fore.WHITE}{'░' * (confidence_bar_width - filled_blocks)}{Style.RESET_ALL}"
+        print(f"{Fore.CYAN}║{Style.RESET_ALL} Confidence: {confidence_bar} {confidence:.1f}% {' ' * 5}{Fore.CYAN}║{Style.RESET_ALL}")
+        
+        # Decision details section
+        print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Decision Basis:{Style.RESET_ALL}{' ' * (banner_width - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+        
+        # Wrap reasoning to fit within the banner width
+        wrapped_reasoning = []
+        current_line = ""
+        for word in reasoning.split():
+            if len(current_line) + len(word) + 1 <= banner_width - 10:
+                current_line += word + " "
+            else:
+                wrapped_reasoning.append(current_line)
+                current_line = word + " "
+        if current_line:
+            wrapped_reasoning.append(current_line)
+        
+        # Print wrapped reasoning
+        for line in wrapped_reasoning:
+            print(f"{Fore.CYAN}║{Style.RESET_ALL} {line}{' ' * (banner_width - len(line) - 4)}{Fore.CYAN}║{Style.RESET_ALL}")
+        
+        # If trade plan exists, display it with enhanced formatting
         if is_trade_cycle and 'trade_plan' in result:
             trade_plan = result['trade_plan']
             
-            print(f"\n{Fore.CYAN}## TRADE PLAN ##")
-            
-            # Get signal and confidence from any of the possible field names
-            trade_signal = trade_plan.get('signal') or trade_plan.get('final_signal') or trade_plan.get('action') or trade_plan.get('pair') or 'UNKNOWN'
-            trade_confidence = trade_plan.get('confidence', 0)
-            
-            # Color-code the signal
-            if trade_signal == 'BUY':
-                trade_signal_color = Fore.GREEN
-            elif trade_signal == 'SELL':
-                trade_signal_color = Fore.RED
-            elif trade_signal in ['NEUTRAL', 'HOLD']:
-                trade_signal_color = Fore.YELLOW
-            else:
-                trade_signal_color = Fore.WHITE
-                
             # Check for error in trade plan
             if 'error' in trade_plan or trade_plan.get('status') == 'error':
+                print(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.RED}ERROR:{Style.RESET_ALL}{' ' * (banner_width - 12)}{Fore.CYAN}║{Style.RESET_ALL}")
+                
                 error_msg = trade_plan.get('error', trade_plan.get('reason_summary', 'Unknown error'))
-                print(f"{Fore.RED}Error generating trade plan: {error_msg}{Style.RESET_ALL}")
+                # Wrap error message
+                wrapped_error = []
+                current_line = ""
+                for word in error_msg.split():
+                    if len(current_line) + len(word) + 1 <= banner_width - 10:
+                        current_line += word + " "
+                    else:
+                        wrapped_error.append(current_line)
+                        current_line = word + " "
+                if current_line:
+                    wrapped_error.append(current_line)
+                
+                # Print wrapped error
+                for line in wrapped_error:
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.RED}{line}{Style.RESET_ALL}{' ' * (banner_width - len(line) - 4)}{Fore.CYAN}║{Style.RESET_ALL}")
             else:
-                # Print trade signal and confidence
-                print(f"Signal:      {trade_signal_color}{trade_signal}{Style.RESET_ALL}")
-                print(f"Confidence:  {confidence_color}{trade_confidence}%{Style.RESET_ALL}")
+                # Get signal and confidence from any of the possible field names
+                trade_signal = trade_plan.get('signal') or trade_plan.get('final_signal') or trade_plan.get('action') or trade_plan.get('pair') or 'UNKNOWN'
+                trade_confidence = trade_plan.get('confidence', 0)
                 
-                # Show reason summary
-                reason_summary = trade_plan.get('reason_summary', 'No reason provided')
-                print(f"Reason:      {Fore.WHITE}{reason_summary}{Style.RESET_ALL}")
-                
-                # Show entry details
-                entry_price = trade_plan.get('entry_price')
-                if entry_price is not None:
-                    print(f"Entry Price: ${float(entry_price):.2f}")
+                # Only show trade details for actionable signals
+                if trade_signal in ['BUY', 'SELL'] and trade_plan.get('position_size', 0) > 0:
+                    print(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Trade Details:{Style.RESET_ALL}{' ' * (banner_width - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
                     
-                # Show stop loss and take profit
-                stop_loss = trade_plan.get('stop_loss')
-                take_profit = trade_plan.get('take_profit')
-                if stop_loss is not None:
-                    print(f"Stop Loss:   ${float(stop_loss):.2f}")
-                if take_profit is not None:
-                    print(f"Take Profit: ${float(take_profit):.2f}")
+                    # Entry, Stop-Loss, Take-Profit with better formatting
+                    entry_price = trade_plan.get('entry_price', 'N/A')
+                    stop_loss = trade_plan.get('stop_loss', 'N/A')
+                    take_profit = trade_plan.get('take_profit', 'N/A')
                     
-                # Show risk metrics
-                risk_reward = trade_plan.get('risk_reward_ratio')
-                if risk_reward is not None:
-                    print(f"Risk/Reward: {float(risk_reward):.2f}")
-                
-                # Show position sizing
-                position_size = trade_plan.get('position_size')
-                if position_size is not None:
-                    print(f"Position:    {position_size}%")
-                
-                # Show trade classification and timeframe
-                classification = trade_plan.get('trade_classification')
-                if classification:
-                    print(f"Class:       {classification}")
+                    if isinstance(entry_price, (int, float)):
+                        entry_price = f"${float(entry_price):.2f}"
+                    if isinstance(stop_loss, (int, float)):
+                        stop_loss = f"${float(stop_loss):.2f}"
+                    if isinstance(take_profit, (int, float)):
+                        take_profit = f"${float(take_profit):.2f}"
                     
-                timeframe = trade_plan.get('timeframe')
-                if timeframe:
-                    print(f"Timeframe:   {timeframe}")
+                    # Format prices with proper alignment
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Entry: {Fore.WHITE}{entry_price}{Style.RESET_ALL}{' ' * (banner_width - len(str(entry_price)) - 15)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Stop-Loss: {Fore.RED}{stop_loss}{Style.RESET_ALL}{' ' * (banner_width - len(str(stop_loss)) - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Take-Profit: {Fore.GREEN}{take_profit}{Style.RESET_ALL}{' ' * (banner_width - len(str(take_profit)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
                     
-                # Show validity period
-                validity_period = trade_plan.get('validity_period')
-                if validity_period:
-                    print(f"Valid Until: {validity_period}")
+                    # Position size and other metrics
+                    position_size = trade_plan.get('position_size', 'N/A')
+                    if isinstance(position_size, (int, float)):
+                        position_size = f"{position_size}%"
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} Position Size: {position_size}{' ' * (banner_width - len(str(position_size)) - 25)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Risk metrics if available
+                    risk_reward = trade_plan.get('risk_reward_ratio', None)
+                    if risk_reward is not None:
+                        if isinstance(risk_reward, (int, float)):
+                            risk_reward = f"{float(risk_reward):.2f}"
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Risk/Reward: {risk_reward}{' ' * (banner_width - len(str(risk_reward)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                    # Trade classification and timeframe
+                    classification = trade_plan.get('trade_classification', None)
+                    if classification:
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Class: {classification}{' ' * (banner_width - len(str(classification)) - 16)}{Fore.CYAN}║{Style.RESET_ALL}")
+                        
+                    timeframe = trade_plan.get('timeframe', None)
+                    if timeframe:
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Timeframe: {timeframe}{' ' * (banner_width - len(str(timeframe)) - 20)}{Fore.CYAN}║{Style.RESET_ALL}")
+                        
+                    # Validity period
+                    validity_period = trade_plan.get('validity_period', None)
+                    if validity_period:
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} Valid Until: {validity_period}{' ' * (banner_width - len(str(validity_period)) - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
+                # For HOLD/NEUTRAL/CONFLICTED signals, show reason summary
+                elif trade_signal in ['HOLD', 'NEUTRAL', 'CONFLICTED']:
+                    reason_summary = trade_plan.get('reason_summary', 'No reason provided')
+                    if reason_summary and reason_summary != 'No reason provided':
+                        print(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Reason Summary:{Style.RESET_ALL}{' ' * (banner_width - 22)}{Fore.CYAN}║{Style.RESET_ALL}")
+                        
+                        # Wrap reason summary
+                        wrapped_summary = []
+                        current_line = ""
+                        for word in reason_summary.split():
+                            if len(current_line) + len(word) + 1 <= banner_width - 10:
+                                current_line += word + " "
+                            else:
+                                wrapped_summary.append(current_line)
+                                current_line = word + " "
+                        if current_line:
+                            wrapped_summary.append(current_line)
+                        
+                        # Print wrapped summary
+                        for line in wrapped_summary:
+                            print(f"{Fore.CYAN}║{Style.RESET_ALL} {line}{' ' * (banner_width - len(line) - 4)}{Fore.CYAN}║{Style.RESET_ALL}")
                 
                 # Show market mood if available
                 market_mood = trade_plan.get('market_mood')
                 if market_mood:
-                    print(f"\n{Fore.CYAN}Market Mood:{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}╠{'═'*(banner_width-2)}╣{Style.RESET_ALL}")
+                    print(f"{Fore.CYAN}║{Style.RESET_ALL} {Fore.YELLOW}Market Mood:{Style.RESET_ALL}{' ' * (banner_width - 18)}{Fore.CYAN}║{Style.RESET_ALL}")
+                    
                     for mood, value in market_mood.items():
                         # Format as percentage
+                        mood_text = mood
                         if isinstance(value, (int, float)):
-                            print(f"  {mood}: {value:.1f}%")
+                            value_text = f"{value:.1f}%"
                         else:
-                            print(f"  {mood}: {value}")
-            
-            print(f"{Fore.CYAN}####################{Style.RESET_ALL}")
+                            value_text = str(value)
+                        
+                        mood_line = f"{mood_text}: {value_text}"
+                        print(f"{Fore.CYAN}║{Style.RESET_ALL} {mood_line}{' ' * (banner_width - len(mood_line) - 4)}{Fore.CYAN}║{Style.RESET_ALL}")
+        
+        # Close the box
+        print(f"{Fore.CYAN}╚{'═'*(banner_width-2)}╝{Style.RESET_ALL}")
+        print("="*banner_width)
         
         # Display individual agent results
         print(f"\n{Fore.CYAN}## Individual Agent Results ##")

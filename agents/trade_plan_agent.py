@@ -298,6 +298,26 @@ class TradePlanAgent(BaseDecisionAgent):
             # Create minimal plan with additional conflict information if needed
             # Extract symbol from market_data or decision for better reliability
             minimal_symbol = market_data.get('symbol') or decision.get('pair') or decision.get('symbol') or 'UNKNOWN'
+
+            # Calculate summary confidence metrics for minimal plan
+            weighted_confidence = decision.get('weighted_confidence', confidence)
+            
+            # Get directional confidence with proper fallbacks
+            directional_confidence_from_decision = decision.get('directional_confidence', 0)
+            # Ensure we use the _directional_confidence attribute if it was set earlier in the method
+            if hasattr(self, '_directional_confidence') and self._directional_confidence is not None:
+                directional_confidence = self._directional_confidence
+            else:
+                directional_confidence = directional_confidence_from_decision
+            
+            # Store it for consistent access throughout the class
+            self._directional_confidence = directional_confidence
+                
+            summary_confidence = {
+                "average": confidence,
+                "weighted": weighted_confidence,
+                "directional": directional_confidence
+            }
             
             minimal_plan = {
                 "signal": signal,
@@ -311,25 +331,34 @@ class TradePlanAgent(BaseDecisionAgent):
                 "timestamp": datetime.now().isoformat(),
                 "execution_time_seconds": time.time() - start_time,
                 "symbol": minimal_symbol,
-                "interval": interval
+                "interval": interval,
+                "summary_confidence": summary_confidence  # Add summary confidence
             }
             
             # Add conflict flag and fallback information for CONFLICTED signals
             if is_conflicted:
                 minimal_plan["conflict_flag"] = True
+                
+                # For explicit CONFLICTED signals, add directional confidence information
+                directional_confidence_value = getattr(self, '_directional_confidence', 0)
+                directional_confidence_info = f" (directional confidence: {directional_confidence_value}%)"
+                
                 minimal_plan["fallback_plan"] = {
                     "conflict": {
                         "detected": True,
-                        "reason": "⚠️ Conflicted signal detected - applying reduced position sizing and increased caution",
+                        "type": "explicit_conflict",
+                        "reason": f"⚠️ EXPLICIT CONFLICT DETECTED - applying aggressive 70% position reduction{directional_confidence_info}",
                         "original_signal": original_signal,
                         "applied_signal": signal,
-                        "confidence_reduction": "15%"
+                        "position_reduction": "70%",
+                        "confidence_reduction": "15%",
+                        "directional_confidence": getattr(self, '_directional_confidence', None)
                     }
                 }
-                minimal_plan["tags"] = ["conflicted"]
+                minimal_plan["tags"] = ["conflicted", "position_reduced_70pct"]
                 
                 # Add warning to plan digest for conflicted signals
-                warning_message = "⚠️ CONFLICT DETECTED: Signal conflict among analyst agents. Using reduced position sizing (50%). Exercise caution."
+                warning_message = f"⚠️ EXPLICIT CONFLICT DETECTED: Strong disagreement among analyst agents. Using aggressive position reduction (70%). EXTREME CAUTION required{directional_confidence_info}."
                 minimal_plan["plan_digest"] = warning_message
             
             return minimal_plan
@@ -387,6 +416,13 @@ class TradePlanAgent(BaseDecisionAgent):
         
         if conflict_score is not None and conflict_score > 0:
             logger.info(f"Using conflict score: {conflict_score}%")
+        
+        # Extract directional confidence from decision for position size calculation
+        directional_confidence = decision.get('directional_confidence')
+        if directional_confidence is not None:
+            # Store directional confidence as instance attribute for use in _calculate_position_size
+            self._directional_confidence = directional_confidence
+            logger.info(f"Using directional confidence: {directional_confidence}%")
                 
         # Auto-tagging based on logic
         auto_tags = []
@@ -489,15 +525,20 @@ class TradePlanAgent(BaseDecisionAgent):
                     "conflict_score": conflict_score
                 }
         elif is_conflicted:
-            # Legacy conflict handling for backwards compatibility
+            # Enhanced conflict handling for explicit CONFLICTED signals
+            directional_confidence_value = getattr(self, '_directional_confidence', 0)
+            directional_confidence_info = f" (directional confidence: {directional_confidence_value}%)"
+            
             fallback_plan["conflict"] = {
                 "detected": True,
-                "type": "legacy_conflict",
-                "reason": "⚠️ Conflicted signal detected - applying reduced position sizing and increased caution",
+                "type": "explicit_conflict",
+                "reason": f"⚠️ EXPLICIT CONFLICT DETECTED - applying aggressive 70% position reduction{directional_confidence_info}",
                 "original_signal": original_signal,
                 "applied_signal": signal,
-                "confidence_reduction": "15%",
-                "conflict_score": conflict_score
+                "position_reduction": "70%",
+                "confidence_reduction": "20%",
+                "conflict_score": conflict_score,
+                "directional_confidence": getattr(self, '_directional_confidence', None)
             }
         
         # Check if liquidity data was used
@@ -622,6 +663,7 @@ class TradePlanAgent(BaseDecisionAgent):
         elif is_conflicted:
             # Legacy conflict handling
             auto_tags.append("conflicted")
+            auto_tags.append("position_reduced_70pct")  # Add tag for aggressive 70% reduction
         
         # Check for high conflict tag
         agent_signals = {}
@@ -664,7 +706,10 @@ class TradePlanAgent(BaseDecisionAgent):
         # Calculate summary confidence metrics
         weighted_confidence = decision.get('weighted_confidence', confidence)
         directional_confidence = decision.get('directional_confidence', 0)
-        
+        # Ensure we use the _directional_confidence attribute if it was set earlier in the method
+        if hasattr(self, '_directional_confidence') and self._directional_confidence is not None:
+            directional_confidence = self._directional_confidence
+            
         summary_confidence = {
             "average": confidence,
             "weighted": weighted_confidence,
@@ -1146,13 +1191,22 @@ class TradePlanAgent(BaseDecisionAgent):
         conflict_type = ""
         conflict_handling_applied = False
         
-        # Apply stronger conflict reduction for explicit CONFLICTED signals
+        # Apply enhanced stricter conflict reduction for explicit CONFLICTED signals
         if is_conflicted:
-            # For explicit CONFLICTED signals, apply a fixed 50% reduction
-            position_size = position_size * 0.5  # 50% reduction
-            logger.warning(f"Applying 50% position reduction for CONFLICTED signal: {original_size:.2f} → {position_size:.2f}")
+            # For explicit CONFLICTED signals, apply a more aggressive 70% reduction (only 30% of normal size)
+            position_size = position_size * 0.3  # 70% reduction
+            logger.warning(f"⚠️ Applying 70% position reduction for CONFLICTED signal: {original_size:.2f} → {position_size:.2f}")
             conflict_type = "conflicted"
             conflict_handling_applied = True
+            
+            # Apply directional confidence reduction if available
+            directional_confidence = getattr(self, '_directional_confidence', None)
+            if directional_confidence is not None and directional_confidence < 60:
+                # Further reduce position for low directional confidence
+                directional_factor = max(0.5, directional_confidence / 60.0)
+                prev_size = position_size
+                position_size = position_size * directional_factor
+                logger.warning(f"🔻 Further reducing position due to low directional confidence ({directional_confidence}%): {prev_size:.2f} → {position_size:.2f}")
         
         # Apply conflict risk reduction based on conflict score thresholds
         elif conflict_score is not None and conflict_score > 0:
@@ -1625,10 +1679,16 @@ class TradePlanAgent(BaseDecisionAgent):
                 conflict_prefix = f"⚠️ MINOR CONFLICT DETECTED ({score_text}): Position size proportionally reduced due to minor signal disagreement. "
                 confidence = max(0, confidence - 5)
         
-        # Legacy conflict handling for backwards compatibility
+        # Enhanced conflict handling for explicit CONFLICTED signals
         elif is_conflicted:
-            conflict_prefix = "⚠️ CONFLICTED SIGNAL: Trading with reduced position size and increased caution. "
-            confidence = max(0, confidence - 15)
+            # Format directional confidence if available for more detailed warnings
+            directional_conf_str = ""
+            directional_confidence = getattr(self, '_directional_confidence', None)
+            if directional_confidence is not None:
+                directional_conf_str = f", directional confidence: {directional_confidence}%"
+                
+            conflict_prefix = f"⚠️ EXPLICIT CONFLICT DETECTED: Trading with 70% reduced position size{directional_conf_str}. EXERCISE EXTREME CAUTION. "
+            confidence = max(0, confidence - 20)  # Higher confidence reduction
         
         # Check for 'conflicted' in tags as a fallback
         elif not is_conflicted and tags and 'conflicted' in tags:
@@ -1830,10 +1890,14 @@ class TradePlanAgent(BaseDecisionAgent):
         interval = trade_plan.get('interval', '1h')
         symbol_display = f"{symbol} ({interval})" if interval else symbol
         
-        # Get signal and confidence
+        # Get signal and confidence metrics
         signal = trade_plan.get('signal', 'UNKNOWN')
         confidence = trade_plan.get('confidence', 0)
         normalized_confidence = trade_plan.get('normalized_confidence', confidence)
+        
+        # Get directional confidence if available
+        directional_confidence = trade_plan.get('directional_confidence')
+        summary_confidence = trade_plan.get('summary_confidence', {})
         
         # Calculate price distances if possible
         entry_price = trade_plan.get('entry_price')
@@ -1901,8 +1965,14 @@ class TradePlanAgent(BaseDecisionAgent):
         logger.info(f"✅ Trade Plan Summary — {symbol_display}")
         logger.info("")
         
-        # Core trade details
-        logger.info(f"- Signal:        {signal} (Confidence: {normalized_confidence}%)")
+        # Core trade details with enhanced confidence metrics
+        confidence_display = f"{normalized_confidence}%"
+        if directional_confidence is not None:
+            confidence_display += f", Directional: {directional_confidence}%"
+        elif isinstance(summary_confidence, dict) and 'directional' in summary_confidence:
+            confidence_display += f", Directional: {summary_confidence['directional']}%"
+            
+        logger.info(f"- Signal:        {signal} (Confidence: {confidence_display})")
         
         # Price levels
         if entry_price:
@@ -1961,7 +2031,19 @@ class TradePlanAgent(BaseDecisionAgent):
             # New enhanced conflict handling with graduated thresholds
             if conflict_type == "conflicted":
                 logger.info(f"⚠️ HIGH CONFLICT DETECTED: {conflict_score}% (Significant signal disagreement)")
-                logger.info(f"  Position size reduced by 50% for risk management")
+                
+                # Check if this is an explicit CONFLICTED signal with directional confidence
+                if trade_plan.get('is_conflicted', False):
+                    # Get directional confidence if available
+                    dir_conf = ""
+                    if directional_confidence is not None:
+                        dir_conf = f", Directional confidence: {directional_confidence}%"
+                    if hasattr(self, '_directional_confidence') and self._directional_confidence is not None:
+                        dir_conf = f", Directional confidence: {self._directional_confidence}%"
+                        
+                    logger.info(f"🔴 EXPLICIT CONFLICT OVERRIDE: Position size reduced by 70% for risk management{dir_conf}")
+                else:
+                    logger.info(f"  Position size reduced by 50% for risk management (derived from conflict score)")
             elif conflict_type == "soft_conflict":
                 logger.info(f"⚠️ SOFT CONFLICT DETECTED: {conflict_score}% (Moderate signal disagreement)")
                 logger.info(f"  Position size reduced by 20% for risk management")
@@ -2120,8 +2202,18 @@ class TradePlanAgent(BaseDecisionAgent):
             conflict_score = trade_plan.get('conflict_score')
             
             if conflict_handling_applied:
-                if conflict_type == "conflicted":
-                    # Hard conflict (50% reduction)
+                # Check if this is an explicit CONFLICTED signal with enhanced reduction
+                if trade_plan.get('is_conflicted', False):
+                    # Explicit CONFLICTED with 70% reduction (only 30% of normal size)
+                    estimated_original = position_size / 0.3  # Reverse the 70% reduction
+                    dir_conf = ""
+                    if directional_confidence := trade_plan.get('directional_confidence'):
+                        dir_conf = f", directional confidence: {directional_confidence}%"
+                        
+                    logger.info(f"  → 🔴 EXPLICIT CONFLICT HANDLING: Aggressive 70% position reduction applied{dir_conf}")
+                    logger.info(f"  → Pre-conflict position: {estimated_original:.4f} → Post-conflict: {position_size:.4f}")
+                elif conflict_type == "conflicted":
+                    # Hard conflict (50% reduction from high conflict score)
                     estimated_original = position_size * 2
                     logger.info(f"  → HIGH CONFLICT HANDLING: {conflict_score}% conflict score triggered 50% position reduction")
                     logger.info(f"  → Pre-conflict position: {estimated_original:.4f} → Post-conflict: {position_size:.4f}")
@@ -2178,8 +2270,24 @@ class TradePlanAgent(BaseDecisionAgent):
                 # Use the same format as terminal output but write to file
                 f.write(f"Trade Plan Summary — {symbol}\n\n")
                 
-                # Core trade details
-                f.write(f"Signal: {trade_plan.get('signal')} (Confidence: {trade_plan.get('normalized_confidence', 0)}%)\n")
+                # Core trade details with enhanced confidence display
+                confidence_display = f"{trade_plan.get('normalized_confidence', 0)}%"
+                directional_confidence = trade_plan.get('directional_confidence')
+                
+                if directional_confidence is not None:
+                    confidence_display += f", Directional: {directional_confidence}%"
+                    
+                # Add conflict information 
+                conflict_info = ""
+                if trade_plan.get('is_conflicted', False):
+                    conflict_info = " [EXPLICIT CONFLICT - 70% POSITION REDUCTION]"
+                elif conflict_type := trade_plan.get('conflict_type'):
+                    if conflict_type == "conflicted":
+                        conflict_info = " [HIGH CONFLICT - 50% POSITION REDUCTION]"
+                    elif conflict_type == "soft_conflict":
+                        conflict_info = " [SOFT CONFLICT - 20% POSITION REDUCTION]"
+                        
+                f.write(f"Signal: {trade_plan.get('signal')}{conflict_info} (Confidence: {confidence_display})\n")
                 f.write(f"Entry: {trade_plan.get('entry_price')}\n")
                 f.write(f"Stop-Loss: {trade_plan.get('stop_loss')}\n")
                 f.write(f"Take-Profit: {trade_plan.get('take_profit')}\n")

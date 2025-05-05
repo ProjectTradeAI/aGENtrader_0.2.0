@@ -319,6 +319,13 @@ class TradePlanAgent(BaseDecisionAgent):
                 "directional": directional_confidence
             }
             
+            # Set enhanced reasoning for CONFLICTED signals
+            reasoning = "No actionable signal generated"
+            if is_conflicted:
+                # Adding clearer explanation for CONFLICTED signals that default to HOLD
+                reasoning = "Final action is HOLD due to a CONFLICTED signal. Position size set to 0 to mitigate indecision risk."
+                logger.info(reasoning)
+            
             minimal_plan = {
                 "signal": signal,
                 "original_signal": original_signal,  # Preserve the original signal
@@ -327,7 +334,7 @@ class TradePlanAgent(BaseDecisionAgent):
                 "stop_loss": None,
                 "take_profit": None,
                 "position_size": 0,
-                "reasoning": "No actionable signal generated",
+                "reasoning": reasoning,
                 "timestamp": datetime.now().isoformat(),
                 "execution_time_seconds": time.time() - start_time,
                 "symbol": minimal_symbol,
@@ -342,6 +349,34 @@ class TradePlanAgent(BaseDecisionAgent):
                 # For explicit CONFLICTED signals, add directional confidence information
                 directional_confidence_value = getattr(self, '_directional_confidence', 0)
                 directional_confidence_info = f" (directional confidence: {directional_confidence_value}%)"
+                
+                # Extract conflicting agents if available in the decision
+                conflicting_agents = {}
+                if isinstance(decision.get('agent_contributions'), dict):
+                    for agent_name, data in decision.get('agent_contributions', {}).items():
+                        if isinstance(data, dict) and 'signal' in data and 'confidence' in data:
+                            # Only consider signals with confidence >= 70
+                            if data['confidence'] >= 70:
+                                signal_type = data['signal']
+                                if signal_type in ["BUY", "SELL"]:  # Only focus on actionable signals
+                                    if signal_type not in conflicting_agents:
+                                        conflicting_agents[signal_type] = {}
+                                    conflicting_agents[signal_type][agent_name] = data['confidence']
+                
+                # Add conflicting agents information if we have it
+                if conflicting_agents and len(conflicting_agents) >= 2:
+                    minimal_plan["conflicting_agents"] = conflicting_agents
+                
+                # Adding risk warning field
+                risk_warning = "No position opened due to high-confidence conflict between "
+                
+                if "BUY" in conflicting_agents and "SELL" in conflicting_agents:
+                    risk_warning += "BUY and SELL signals. Market is indecisive."
+                else:
+                    # Generic fallback if we don't have clear BUY/SELL conflict
+                    risk_warning = "No position opened due to high-confidence conflict between analyst agents. Market is indecisive."
+                
+                minimal_plan["risk_warning"] = risk_warning
                 
                 minimal_plan["fallback_plan"] = {
                     "conflict": {
@@ -655,6 +690,7 @@ class TradePlanAgent(BaseDecisionAgent):
         # Add appropriate conflict tags
         if conflict_handling_applied:
             if conflict_type == "conflicted":
+                auto_tags.append("conflicted")  # Ensure the conflicted tag is always added
                 auto_tags.append("high_conflict")
                 auto_tags.append("position_reduced_50pct")
             elif conflict_type == "soft_conflict":
@@ -817,6 +853,12 @@ class TradePlanAgent(BaseDecisionAgent):
             "reasoning": decision.get('reasoning', 'No reasoning provided'),
             "reason_summary": structured_reason_summary,  # Now using structured format
             "contributing_agents": contributing_agents,
+            
+            # Add conflicting agents information if available
+            "conflicting_agents": self._extract_conflicting_agents(decision) if is_conflicted or conflict_type in ["conflicted", "soft_conflict"] else {},
+            
+            # Add risk warning for conflicted scenarios
+            "risk_warning": self._generate_risk_warning(is_conflicted, conflict_type, decision) if is_conflicted or conflict_type in ["conflicted", "soft_conflict"] else None,
             
             # Trade context and classification
             "valid_until": valid_until,
@@ -2313,6 +2355,71 @@ class TradePlanAgent(BaseDecisionAgent):
         except Exception as e:
             logger.warning(f"Failed to write trade plan log: {str(e)}")
             
+    def _extract_conflicting_agents(self, decision: Dict[str, Any]) -> Dict[str, Dict[str, int]]:
+        """
+        Extract conflicting agents from decision data.
+        
+        Args:
+            decision: Decision dictionary containing agent_contributions
+            
+        Returns:
+            Dictionary mapping signal types to agent names and their confidence scores
+        """
+        conflicting_agents = {}
+        
+        if isinstance(decision.get('agent_contributions'), dict):
+            for agent_name, data in decision.get('agent_contributions', {}).items():
+                if isinstance(data, dict) and 'signal' in data and 'confidence' in data:
+                    # Only consider signals with confidence >= 70
+                    if data['confidence'] >= 70:
+                        signal_type = data['signal']
+                        if signal_type in ["BUY", "SELL"]:  # Only focus on actionable signals
+                            if signal_type not in conflicting_agents:
+                                conflicting_agents[signal_type] = {}
+                            conflicting_agents[signal_type][agent_name] = data['confidence']
+        
+        # Only return if we have at least two different signal types
+        if len(conflicting_agents) >= 2:
+            return conflicting_agents
+        return {}
+    
+    def _generate_risk_warning(self, is_conflicted: bool, conflict_type: Optional[str], decision: Dict[str, Any]) -> Optional[str]:
+        """
+        Generate a risk warning message for conflicted signals.
+        
+        Args:
+            is_conflicted: Whether this is an explicit CONFLICTED signal
+            conflict_type: Type of conflict (soft_conflict, conflicted, etc.)
+            decision: Decision dictionary with agent contributions
+            
+        Returns:
+            Risk warning message or None if no conflict
+        """
+        if not is_conflicted and not conflict_type:
+            return None
+            
+        # Extract conflicting agents to identify which signals are in conflict
+        conflicting_agents = self._extract_conflicting_agents(decision)
+        
+        if is_conflicted:
+            # For explicit CONFLICTED signals
+            base_warning = "No position opened due to high-confidence conflict between "
+            
+            if "BUY" in conflicting_agents and "SELL" in conflicting_agents:
+                return f"{base_warning}BUY and SELL signals. Market is indecisive."
+            else:
+                return f"{base_warning}analyst agents. Market is indecisive."
+        elif conflict_type == "conflicted":
+            # For high conflict (position reduced 50%)
+            conflict_score = decision.get('conflict_score', 0)
+            return f"Position size reduced by 50% due to high conflict ({conflict_score}% conflict score) between BUY and SELL signals."
+        elif conflict_type == "soft_conflict":
+            # For soft conflict (position reduced 20%)
+            conflict_score = decision.get('conflict_score', 0)
+            return f"Position size reduced by 20% due to moderate conflict ({conflict_score}% conflict score) between analyst signals."
+            
+        return None
+        
     def build_error_response(self, error_type: str, message: str, symbol: str = "UNKNOWN", interval: str = "1h") -> Dict[str, Any]:
         """
         Build a standardized error response.

@@ -355,13 +355,34 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                     self.logger.info(f"Generated sentiment reasoning (full): {signal_result['reasoning']}")
                     
                     return signal_result
+                except ValueError as e:
+                    # More detailed error handling for ValueError (includes JSON parsing issues)
+                    error_msg = str(e)
+                    self.logger.error(f"Error during sentiment analysis: {error_msg}")
+                    
+                    # Detect rate limit issues
+                    if "rate limit" in error_msg.lower() or "429" in error_msg:
+                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API rate limit detected: {error_msg}")
+                        return self._api_error_response(symbol, error_type="rate_limit")
+                    # Detect authentication issues
+                    elif "auth" in error_msg.lower() or "key" in error_msg.lower() or "401" in error_msg:
+                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API authentication error: {error_msg}")
+                        return self._api_error_response(symbol, error_type="auth_error")
+                    # Handle JSON parsing errors specifically
+                    elif "json" in error_msg.lower() or "parse" in error_msg.lower() or "expecting value" in error_msg.lower():
+                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API returned invalid JSON: {error_msg}")
+                        return self._api_error_response(symbol, error_type="parsing_error")
+                    else:
+                        self.logger.error(f"Error analyzing general sentiment: {error_msg}")
+                        return self._api_error_response(symbol, error_type="api_error")
                 except Exception as e:
-                    # Handle API errors with specific checks for rate limits (429)
-                    if "429" in str(e) or "rate limit" in str(e).lower():
-                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429): {str(e)}")
+                    # Handle generic API errors with specific checks for rate limits
+                    error_msg = str(e)
+                    if "429" in error_msg or "rate limit" in error_msg.lower():
+                        self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429): {error_msg}")
                         return self._api_error_response(symbol, error_type="rate_limit")
                     else:
-                        self.logger.error(f"Error analyzing general sentiment: {str(e)}")
+                        self.logger.error(f"Error analyzing general sentiment: {error_msg}")
                         return self._api_error_response(symbol, error_type="api_error")
                 
             # Aggregate sentiments from different sources
@@ -393,7 +414,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         
         Args:
             symbol: Trading symbol (string, dict, or None)
-            error_type: Type of error ("rate_limit", "api_error", etc.)
+            error_type: Type of error ("rate_limit", "api_error", "auth_error", "parsing_error", etc.)
             
         Returns:
             Dictionary with standardized error response that won't reduce system confidence
@@ -413,22 +434,44 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         request_id = f"{hash(timestamp.isoformat() + symbol_str) % 10000:04d}"
         
         # Create an error response that won't reduce system confidence
-        # Per requirements, set confidence=0, signal="UNKNOWN" when API fails
+        # Per requirements, set confidence=0, signal="NEUTRAL" when API fails
+        
+        # Custom responses based on error type
         if error_type == "rate_limit":
-            reason = "Sentiment data unavailable (API limit)"
-            self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429)")
+            reason = "Sentiment data unavailable (API rate limit exceeded)"
+            signal = "NEUTRAL"  
+            confidence = 30  # Low confidence but not zero
+            self.logger.warning(f"[WARNING] SentimentAnalystAgent API unavailable (429 rate limit)")
+        elif error_type == "auth_error":
+            reason = "Sentiment data unavailable (API authentication error)"
+            signal = "NEUTRAL"
+            confidence = 30
+            self.logger.warning(f"[WARNING] SentimentAnalystAgent API authentication error")
+        elif error_type == "parsing_error":
+            reason = "Sentiment data unavailable (API response parsing error)"
+            signal = "NEUTRAL"
+            confidence = 30
+            self.logger.warning(f"[WARNING] SentimentAnalystAgent API response parsing error")
         else:
             reason = "Sentiment API error, data unavailable"
+            signal = "NEUTRAL"
+            confidence = 30
             self.logger.warning(f"[WARNING] SentimentAnalystAgent API error: {error_type}")
             
         return {
-            "signal": "UNKNOWN",  # Using UNKNOWN for API errors
-            "confidence": 0,      # Zero confidence to prevent affecting system
+            "signal": signal,  
+            "confidence": confidence,
             "reasoning": reason,
             "timestamp": timestamp.isoformat(),
             "request_id": request_id,
             "error": error_type,
-            "full_sentiment_data": {}  # Empty data as it's unavailable
+            "error_details": {
+                "type": error_type,
+                "timestamp": timestamp.isoformat(),
+                "symbol": symbol_str
+            },
+            "full_sentiment_data": {},  # Empty data as it's unavailable
+            "key_insight": "API error prevented sentiment analysis"
         }
             
     def _fallback_analysis(self, symbol=None) -> Dict[str, Any]:
@@ -542,7 +585,10 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             "confidence": confidence,
             "reasoning": reasoning,
             "timestamp": timestamp.isoformat(),
-            "request_id": request_id
+            "request_id": request_id,
+            "key_insight": f"Market sentiment appears {sentiment_desc} with {confidence}% confidence",
+            "contributing_sources": ["price_action", "technical_indicators", "market_conditions"],
+            "error_details": None
         }
         
     def to_dict(self) -> Dict[str, Any]:

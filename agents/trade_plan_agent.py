@@ -146,6 +146,8 @@ class TradePlanAgent(BaseDecisionAgent):
         self.detailed_logging = self.config.get("detailed_logging", False)
         self.test_mode = self.config.get("test_mode", False)
         
+        # Decision consistency configuration
+        self.allow_fallback_on_hold = self.config.get("allow_fallback_on_hold", False)
         # Create logs directory for trade plans if it doesn't exist
         self.log_dir = os.path.join("logs", "trade_plans")
         if not os.path.exists(self.log_dir):
@@ -200,6 +202,54 @@ class TradePlanAgent(BaseDecisionAgent):
         signal = decision.get('signal', 'NEUTRAL')
         original_signal = signal  # Keep the original signal for reference
         confidence = decision.get('confidence', 0)
+        
+        # Track decision consistency
+        final_decision_signal = decision.get('final_signal', signal)
+        decision_consistency = True  # Default to true, will set to false if we override
+        
+        # Check for HOLD signal explicitly coming from final_signal (strict HOLD policy)
+        if final_decision_signal == "HOLD":
+            if not self.allow_fallback_on_hold:
+                logger.info(f"DecisionAgent returned explicit HOLD. Respecting this decision and not generating a trade plan.")
+                signal = "HOLD"  # Enforce HOLD signal
+                # Will later generate a minimal plan with position_size = 0
+            else:
+                # Allow fallback when configured to do so
+                logger.info(f"DecisionAgent returned HOLD but allow_fallback_on_hold=True. Will attempt to extract actionable signal.")
+                
+                # Look for directional bias from decision
+                if decision.get('directional_bias') in ["BUY", "SELL"]:
+                    logger.info(f"Found directional bias: {decision.get('directional_bias')}")
+                    signal = decision.get('directional_bias')
+                    decision_consistency = False
+                    logger.warning(f"Decision consistency: FALSE - TradePlanAgent overrode DecisionAgent HOLD with {signal}")
+                # Otherwise check agent contributions for strong signals
+                elif isinstance(decision.get('agent_contributions'), dict):
+                    # Collect strong BUY or SELL signals
+                    strong_signals = {}
+                    for agent, data in decision.get('agent_contributions', {}).items():
+                        if isinstance(data, dict) and data.get('signal') in ["BUY", "SELL"] and data.get('confidence', 0) >= 75:
+                            signal_type = data.get('signal')
+                            if signal_type not in strong_signals:
+                                strong_signals[signal_type] = []
+                            strong_signals[signal_type].append((agent, data.get('confidence', 0)))
+                    
+                    # If we have some strong signals
+                    if strong_signals:
+                        # Find the signal with the most support
+                        if len(strong_signals.get("BUY", [])) > len(strong_signals.get("SELL", [])):
+                            signal = "BUY"
+                        elif len(strong_signals.get("SELL", [])) > len(strong_signals.get("BUY", [])):
+                            signal = "SELL"
+                        # If tied, use highest confidence
+                        elif strong_signals.get("BUY") and strong_signals.get("SELL"):
+                            max_buy = max(strong_signals["BUY"], key=lambda x: x[1])
+                            max_sell = max(strong_signals["SELL"], key=lambda x: x[1])
+                            signal = "BUY" if max_buy[1] > max_sell[1] else "SELL"
+                            
+                        logger.info(f"Strong {signal} signals found despite HOLD. Using {signal} as fallback signal.")
+                        decision_consistency = False
+                        logger.warning(f"Decision consistency: FALSE - TradePlanAgent overrode DecisionAgent HOLD with {signal}")
         
         # Check for CONFLICTED status (either in signal or final_signal)
         is_conflicted = signal == "CONFLICTED" or decision.get('final_signal') == "CONFLICTED"
@@ -274,11 +324,16 @@ class TradePlanAgent(BaseDecisionAgent):
                                           f"({dominant_count}/{total_agents} agents, avg conf: {avg_confidence:.1f}%) "
                                           f"despite conflict.")
             
-            # Apply override if determined
-            if override_signal and override_signal in ["BUY", "SELL"]:
+            # Apply override if determined AND we're not enforcing a HOLD from final decision
+            if override_signal and override_signal in ["BUY", "SELL"] and signal != "HOLD":
                 logger.warning(f"Overriding CONFLICTED signal to {override_signal}")
                 logger.info(f"Override reason: {override_reason}")
                 signal = override_signal
+                
+                # Mark decision consistency as false if we're overriding DecisionAgent's final signal
+                if signal != final_decision_signal:
+                    decision_consistency = False
+                    logger.warning(f"Decision consistency mismatch: TradePlanAgent {signal} vs DecisionAgent {final_decision_signal}")
             
             # Reduce confidence for conflicted signals
             original_confidence = confidence
@@ -319,11 +374,16 @@ class TradePlanAgent(BaseDecisionAgent):
                 "directional": directional_confidence
             }
             
-            # Set enhanced reasoning for CONFLICTED signals
+            # Set enhanced reasoning for CONFLICTED signals or HOLD signals
             reasoning = "No actionable signal generated"
+            
             if is_conflicted:
                 # Adding clearer explanation for CONFLICTED signals that default to HOLD
                 reasoning = "Final action is HOLD due to a CONFLICTED signal. Position size set to 0 to mitigate indecision risk."
+                logger.info(reasoning)
+            elif signal == "HOLD" and final_decision_signal == "HOLD":
+                # Explicit HOLD explanation for respecting DecisionAgent's HOLD signal
+                reasoning = "DecisionAgent returned HOLD due to low directional confidence. No trade plan generated."
                 logger.info(reasoning)
             
             minimal_plan = {
@@ -339,11 +399,12 @@ class TradePlanAgent(BaseDecisionAgent):
                 "execution_time_seconds": time.time() - start_time,
                 "symbol": minimal_symbol,
                 "interval": interval,
-                "summary_confidence": summary_confidence  # Add summary confidence
+                "summary_confidence": summary_confidence,  # Add summary confidence
+                "decision_consistency": decision_consistency  # Track decision consistency
             }
             
             # Add conflict flag and fallback information for CONFLICTED signals
-            if is_conflicted:
+            if is_conflicted or original_signal == "CONFLICTED":
                 minimal_plan["conflict_flag"] = True
                 
                 # For explicit CONFLICTED signals, add directional confidence information
@@ -366,8 +427,10 @@ class TradePlanAgent(BaseDecisionAgent):
                 # Add conflicting agents information if we have it
                 if conflicting_agents and len(conflicting_agents) >= 2:
                     minimal_plan["conflicting_agents"] = conflicting_agents
+                elif conflicting_agents:  # Add even with just one direction if it's CONFLICTED
+                    minimal_plan["conflicting_agents"] = conflicting_agents
                 
-                # Adding risk warning field
+                # Always add risk_warning for CONFLICTED signals, even without BUY vs SELL conflict
                 risk_warning = "No position opened due to high-confidence conflict between "
                 
                 if "BUY" in conflicting_agents and "SELL" in conflicting_agents:
@@ -843,6 +906,7 @@ class TradePlanAgent(BaseDecisionAgent):
             "conflict_score": conflict_score,
             "conflict_flag": is_conflicted,  # Explicit flag for conflict detection
             "conflict_type": conflict_type,  # Type of conflict (soft_conflict, conflicted, etc.)
+            "decision_consistency": decision_consistency,  # Track if we're consistent with DecisionAgent
             "entry_price": entry_price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,
@@ -883,6 +947,9 @@ class TradePlanAgent(BaseDecisionAgent):
         if override_decision:
             trade_plan["override_decision"] = True
             trade_plan["override_reason"] = override_reason
+            # Also update decision_consistency since we're overriding the DecisionAgent
+            trade_plan["decision_consistency"] = False
+            logger.warning(f"Decision consistency: FALSE - TradePlanAgent overrode DecisionAgent signal")
         
         logger.info(f"Trade plan generated for {signal} {symbol} with position size {position_size_value}")
         
@@ -1991,6 +2058,9 @@ class TradePlanAgent(BaseDecisionAgent):
         # Get contributing agents
         contributing_agents = trade_plan.get('contributing_agents', [])
         
+        # Get decision consistency info
+        decision_consistency = trade_plan.get('decision_consistency', True)
+        
         # Get reason summary
         reason_summary = trade_plan.get('reason_summary', [])
         
@@ -2140,6 +2210,11 @@ class TradePlanAgent(BaseDecisionAgent):
         logger.info(f"  Execution Time: {trade_plan.get('execution_time_seconds', 0):.4f} seconds")
         logger.info(f"  Plan Version: {trade_plan.get('version', '1.0.0')}")
         logger.info(f"  Agent Version: {self.__class__.__name__} v{trade_plan.get('agent_version', '0.2.0')}")
+        
+        # Display decision consistency info
+        consistency_status = "✅ Consistent" if decision_consistency else "❌ Inconsistent"
+        if not decision_consistency:
+            logger.info(f"  Decision Consistency: {consistency_status} (TradePlanAgent signal differs from DecisionAgent)")
         
         # Trade type rationale
         trade_type = trade_plan.get('trade_type')
@@ -2350,6 +2425,12 @@ class TradePlanAgent(BaseDecisionAgent):
                     f.write(f"\n\nExecution Time: {execution_time:.4f} seconds")
                     f.write(f"\nPlan Version: {trade_plan.get('version', '1.0.0')}")
                     f.write(f"\nAgent Version: {self.__class__.__name__} v{trade_plan.get('agent_version', '0.2.0')}")
+                    
+                    # Include decision consistency info
+                    decision_consistency = trade_plan.get('decision_consistency', True)
+                    consistency_status = "Consistent" if decision_consistency else "Inconsistent"
+                    if not decision_consistency:
+                        f.write(f"\nDecision Consistency: {consistency_status} (TradePlanAgent signal differs from DecisionAgent)")
                 
             logger.debug(f"Trade plan log written to {log_path}")
         except Exception as e:

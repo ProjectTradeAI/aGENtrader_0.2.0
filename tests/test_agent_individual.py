@@ -129,6 +129,11 @@ try:
     except ImportError:
         TradePlanAgent = None
         create_trade_plan_agent = None
+        
+    try:
+        from agents.portfolio_manager_agent import PortfolioManagerAgent
+    except ImportError:
+        PortfolioManagerAgent = None
     
     # Import data providers
     try:
@@ -222,7 +227,8 @@ AVAILABLE_AGENTS = {
     'FundingRateAnalystAgent': FundingRateAnalystAgent if IMPORTED_SUCCESSFULLY else None,
     'OpenInterestAnalystAgent': OpenInterestAnalystAgent if IMPORTED_SUCCESSFULLY else None,
     'DecisionAgent': DecisionAgent if IMPORTED_SUCCESSFULLY else None,
-    'TradePlanAgent': TradePlanAgent if IMPORTED_SUCCESSFULLY else None
+    'TradePlanAgent': TradePlanAgent if IMPORTED_SUCCESSFULLY else None,
+    'PortfolioManagerAgent': PortfolioManagerAgent if IMPORTED_SUCCESSFULLY else None
 }
 
 class AgentTestHarness:
@@ -660,7 +666,8 @@ class AgentTestHarness:
             'SentimentAggregatorAgent',
             'LiquidityAnalystAgent', 
             'OpenInterestAnalystAgent',
-            'FundingRateAnalystAgent'
+            'FundingRateAnalystAgent',
+            'PortfolioManagerAgent'  # Added for portfolio tracking
         ]
         
         # Check which agents are available
@@ -778,7 +785,8 @@ class AgentTestHarness:
                     'SentimentAggregatorAgent': 'sentiment_aggregator_analysis',
                     'LiquidityAnalystAgent': 'liquidity_analysis',
                     'OpenInterestAnalystAgent': 'open_interest_analysis',
-                    'FundingRateAnalystAgent': 'funding_rate_analysis'
+                    'FundingRateAnalystAgent': 'funding_rate_analysis',
+                    'PortfolioManagerAgent': 'portfolio_analysis'
                 }
                 
                 # Store the result
@@ -936,6 +944,42 @@ class AgentTestHarness:
                         # Display details
                         logger.info(f"{Fore.GREEN}Trade plan generated successfully{Style.RESET_ALL}")
                         
+                        # Initialize and update portfolio manager with the trade plan if available
+                        try:
+                            portfolio_manager_class = AVAILABLE_AGENTS.get('PortfolioManagerAgent')
+                            if portfolio_manager_class is not None:
+                                # Create portfolio manager instance
+                                logger.info(f"{Fore.CYAN}Running PortfolioManagerAgent to update portfolio state...{Style.RESET_ALL}")
+                                portfolio_manager = portfolio_manager_class()
+                                
+                                # Record the trade plan
+                                portfolio_result = portfolio_manager.record_trade_plan(
+                                    trade_plan=trade_plan,
+                                    market_data=market_data
+                                )
+                                
+                                # Check for stop-loss/take-profit conditions
+                                closed_positions = portfolio_manager.check_stop_loss_take_profit(
+                                    data_provider=self.data_provider
+                                )
+                                
+                                if closed_positions:
+                                    logger.info(f"{Fore.YELLOW}PortfolioManagerAgent closed {len(closed_positions)} position(s) due to SL/TP conditions{Style.RESET_ALL}")
+                                    for pos in closed_positions:
+                                        logger.info(f"  - Closed {pos.get('symbol')} position with P&L: {pos.get('realized_pnl', 0)}")
+                                
+                                # Take a portfolio snapshot
+                                portfolio_snapshot = portfolio_manager.take_portfolio_snapshot()
+                                
+                                logger.info(f"{Fore.GREEN}Portfolio Manager updated successfully with trade plan{Style.RESET_ALL}")
+                                logger.info(f"Current portfolio value: {portfolio_snapshot.get('total_value', 0)}")
+                                logger.info(f"Exposure: {portfolio_snapshot.get('total_exposure_pct', 0) * 100:.2f}%")
+                                logger.info(f"Open positions: {len(portfolio_snapshot.get('open_positions', []))}")
+                            else:
+                                logger.warning(f"{Fore.YELLOW}PortfolioManagerAgent not available, skipping portfolio updates{Style.RESET_ALL}")
+                        except Exception as e:
+                            logger.error(f"{Fore.RED}Error updating portfolio state: {str(e)}{Style.RESET_ALL}")
+                        
                         # Log trade plan to file if requested
                         if hasattr(self, 'trade_log') and self.trade_log:
                             try:
@@ -978,6 +1022,21 @@ class AgentTestHarness:
                                     "interval": self.interval,
                                     "timestamp": timestamp
                                 }
+                                
+                                # Try to get portfolio data if portfolio manager was used
+                                try:
+                                    portfolio_manager_class = AVAILABLE_AGENTS.get('PortfolioManagerAgent')
+                                    if portfolio_manager_class is not None:
+                                        # Create a new instance to get the current portfolio state
+                                        portfolio_manager = portfolio_manager_class()
+                                        portfolio_state = portfolio_manager.get_portfolio_summary()
+                                        
+                                        # Sanitize and add to log
+                                        if portfolio_state:
+                                            sanitized_portfolio = sanitize_for_json(portfolio_state)
+                                            full_data["portfolio_state"] = sanitized_portfolio
+                                except Exception as e:
+                                    logger.warning(f"{Fore.YELLOW}Could not include portfolio state in log: {str(e)}{Style.RESET_ALL}")
                                 
                                 with open(log_file, 'w') as f:
                                     json.dump(full_data, f, indent=2)
@@ -1143,6 +1202,26 @@ class AgentTestHarness:
                     "risk_reward_ratio": trade_plan.get("risk_reward_ratio", None),
                     "timeframe": trade_plan.get("timeframe", None)
                 }
+                
+            # Try to add portfolio summary if PortfolioManagerAgent is available
+            try:
+                portfolio_manager_class = AVAILABLE_AGENTS.get('PortfolioManagerAgent')
+                if portfolio_manager_class is not None:
+                    # Create a new instance to get the current portfolio state
+                    portfolio_manager = portfolio_manager_class()
+                    portfolio_summary = portfolio_manager.get_portfolio_summary()
+                    
+                    if portfolio_summary:
+                        # Add simplified portfolio summary to result for display
+                        result["portfolio_summary"] = {
+                            "total_value": portfolio_summary.get("total_value", 0),
+                            "total_exposure_pct": portfolio_summary.get("total_exposure_pct", 0),
+                            "open_positions_count": len(portfolio_summary.get("open_positions", [])),
+                            "unrealized_pnl": portfolio_summary.get("unrealized_pnl", 0),
+                            "realized_pnl": portfolio_summary.get("realized_pnl", 0),
+                        }
+            except Exception as e:
+                logger.warning(f"{Fore.YELLOW}Could not include portfolio summary in result: {str(e)}{Style.RESET_ALL}")
             
             # Store for possible trace saving
             self.test_results.append(result)
@@ -1690,6 +1769,47 @@ class AgentTestHarness:
             else:
                 print(f"  Reasoning:  {agent_reasoning}")
                 
+        # Display portfolio summary if available
+        if 'portfolio_summary' in result:
+            print("\n" + "="*80)
+            print(f"{Fore.CYAN}## Portfolio Manager Summary ##")
+            
+            portfolio_summary = result['portfolio_summary']
+            
+            # Format portfolio metrics with colors
+            total_value = portfolio_summary.get('total_value', 0)
+            if isinstance(total_value, (int, float)):
+                total_value = f"{Fore.GREEN}${float(total_value):.2f}{Style.RESET_ALL}"
+            print(f"Portfolio Value:   {total_value}")
+            
+            exposure = portfolio_summary.get('total_exposure_pct', 0)
+            if isinstance(exposure, (int, float)):
+                if exposure > 0.5:  # High exposure
+                    exposure = f"{Fore.RED}{float(exposure) * 100:.2f}%{Style.RESET_ALL}"
+                else:
+                    exposure = f"{Fore.GREEN}{float(exposure) * 100:.2f}%{Style.RESET_ALL}"
+            print(f"Total Exposure:    {exposure}")
+            
+            positions_count = portfolio_summary.get('open_positions_count', 0)
+            print(f"Open Positions:    {positions_count}")
+            
+            # Show P&L with colors
+            unrealized_pnl = portfolio_summary.get('unrealized_pnl', 0)
+            if isinstance(unrealized_pnl, (int, float)):
+                if unrealized_pnl > 0:
+                    unrealized_pnl = f"{Fore.GREEN}${float(unrealized_pnl):.2f}{Style.RESET_ALL}"
+                else:
+                    unrealized_pnl = f"{Fore.RED}${float(unrealized_pnl):.2f}{Style.RESET_ALL}"
+            print(f"Unrealized P&L:    {unrealized_pnl}")
+            
+            realized_pnl = portfolio_summary.get('realized_pnl', 0)
+            if isinstance(realized_pnl, (int, float)):
+                if realized_pnl > 0:
+                    realized_pnl = f"{Fore.GREEN}${float(realized_pnl):.2f}{Style.RESET_ALL}"
+                else:
+                    realized_pnl = f"{Fore.RED}${float(realized_pnl):.2f}{Style.RESET_ALL}"
+            print(f"Realized P&L:      {realized_pnl}")
+            
         print("\n" + "="*80 + "\n")
         
     def cleanup(self):

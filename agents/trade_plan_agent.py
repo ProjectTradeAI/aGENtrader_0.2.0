@@ -96,6 +96,9 @@ class TradePlanAgent(BaseDecisionAgent):
         self._description = "Generates detailed trade execution plans"
         self.agent_name = "trade_plan_agent"
         
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
+        
         # Load configuration or use defaults
         self.config = config or {}
         
@@ -104,6 +107,10 @@ class TradePlanAgent(BaseDecisionAgent):
         self.max_position_size = self.config.get("max_position_size", 1.0)
         self.min_position_size = self.config.get("min_position_size", 0.1)
         self.portfolio_risk_per_trade = self.config.get("portfolio_risk_per_trade", 0.02)  # 2% risk per trade
+        
+        # Portfolio Manager integration
+        self.portfolio_manager = None
+        self.use_portfolio_manager = self.config.get("use_portfolio_manager", True)
         
         # Default validity durations in minutes by timeframe
         self.validity_durations = self.config.get("validity_durations", {
@@ -176,7 +183,23 @@ class TradePlanAgent(BaseDecisionAgent):
         if not os.path.exists(self.log_dir):
             os.makedirs(self.log_dir, exist_ok=True)
         
+        # Initialize portfolio manager if enabled
+        if self.use_portfolio_manager:
+            self._init_portfolio_manager()
+        
         logger.info(f"Trade plan agent initialized with risk:reward ratio {self.risk_reward_ratio}")
+        
+    def _init_portfolio_manager(self):
+        """
+        Initialize the portfolio manager agent for portfolio-aware trade planning.
+        """
+        try:
+            from agents.portfolio_manager_agent import PortfolioManagerAgent
+            self.portfolio_manager = PortfolioManagerAgent()
+            self.logger.info("Portfolio manager initialized successfully for trade planning")
+        except Exception as e:
+            self.logger.warning(f"Could not initialize portfolio manager: {str(e)}")
+            self.portfolio_manager = None
     
     def generate_trade_plan(
         self, 
@@ -1481,6 +1504,40 @@ class TradePlanAgent(BaseDecisionAgent):
                     "before": prev_size,
                     "after": position_size
                 }
+        
+        # Apply portfolio-based adjustments if portfolio manager is available
+        portfolio_adjustment_applied = False
+        if self.portfolio_manager is not None:
+            try:
+                # Get portfolio summary 
+                portfolio_summary = self._get_portfolio_state()
+                
+                if portfolio_summary:
+                    prev_size = position_size
+                    
+                    # Check total exposure limit
+                    total_exposure = portfolio_summary.get("total_exposure_pct", 0)
+                    max_exposure = self.portfolio_manager.max_total_exposure_pct
+                    available_exposure = max_exposure - total_exposure
+                    
+                    # Check asset-specific exposure
+                    symbol_parts = symbol.replace("/", "").split(self.portfolio_manager.base_currency)
+                    if len(symbol_parts) > 0:
+                        asset = symbol_parts[0]
+                        asset_exposure = portfolio_summary.get("asset_exposures", {}).get(asset, 0)
+                        asset_max_exposure = self.portfolio_manager.max_per_asset_exposure_pct
+                        available_asset_exposure = asset_max_exposure - asset_exposure
+                        
+                        # Choose the more restrictive limit
+                        portfolio_max_size = min(available_exposure, available_asset_exposure) / 100
+                        
+                        # Apply portfolio limit if needed
+                        if portfolio_max_size < position_size and portfolio_max_size > 0:
+                            position_size = min(position_size, portfolio_max_size)
+                            portfolio_adjustment_applied = True
+                            confidence_adjustment_reason["adjustment_factors"]["portfolio_limit"] = f"Portfolio exposure limit ({available_exposure:.1f}% total, {available_asset_exposure:.1f}% {asset})"
+            except Exception as e:
+                self.logger.warning(f"Error applying portfolio adjustments: {str(e)}")
         
         # Ensure position size is within limits
         prev_size = position_size

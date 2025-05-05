@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import time
+import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple, Set
 from enum import Enum
@@ -23,6 +24,9 @@ sys.path.append(parent_dir)
 
 # Import the base agent class
 from agents.base_agent import BaseAnalystAgent
+
+# Configure logger
+logger = logging.getLogger(__name__)
 
 class TradeValidationStatus(Enum):
     """Enum for trade validation status"""
@@ -44,6 +48,9 @@ class PortfolioManagerAgent(BaseAnalystAgent):
     def __init__(self):
         """Initialize the Portfolio Manager Agent."""
         super().__init__(agent_name="portfolio_manager")
+        
+        # Initialize logger
+        self.logger = logging.getLogger(__name__)
         
         # Get portfolio manager specific configuration
         self.portfolio_config = self.get_agent_config()
@@ -86,6 +93,9 @@ class PortfolioManagerAgent(BaseAnalystAgent):
         # File paths
         self.trade_log_file = os.path.join(parent_dir, "trades", "trade_log.jsonl")
         self.snapshot_file = os.path.join(self.portfolio_dir, "portfolio_snapshot.jsonl")
+        
+        # Create trades directory if it doesn't exist
+        os.makedirs(os.path.dirname(self.trade_log_file), exist_ok=True)
         
         # Load existing trades to initialize the portfolio state
         self._load_existing_trades()
@@ -462,22 +472,125 @@ class PortfolioManagerAgent(BaseAnalystAgent):
             }
         }
     
-    def update_position_prices(self) -> None:
+    def check_stop_loss_take_profit(self, data_provider=None) -> List[Dict[str, Any]]:
+        """
+        Check all open positions for stop-loss or take-profit hits.
+        
+        Args:
+            data_provider: Optional data provider to use for getting current prices
+            
+        Returns:
+            List of trades that were closed due to SL/TP hits
+        """
+        self.logger.info("Checking open positions for SL/TP hits")
+        
+        # Update position prices first
+        self.update_position_prices(data_provider)
+        
+        # Track closed trades
+        closed_trades = []
+        positions_to_close = []
+        
+        # Check each position
+        for trade_id, position in self.open_positions.items():
+            current_price = position.get('current_price', 0)
+            if not current_price:
+                self.logger.warning(f"Position {trade_id} has no current price, skipping SL/TP check")
+                continue
+                
+            # Get SL/TP levels (if they exist)
+            stop_loss = position.get('stop_loss')
+            take_profit = position.get('take_profit')
+            action = position.get('action')
+            
+            if not stop_loss or not take_profit:
+                # No SL/TP levels defined for this position
+                continue
+                
+            # Check for SL/TP hits
+            sl_hit = False
+            tp_hit = False
+            
+            if action == "BUY":  # Long position
+                if current_price <= stop_loss:
+                    sl_hit = True
+                    exit_reason = "STOP_LOSS"
+                elif current_price >= take_profit:
+                    tp_hit = True
+                    exit_reason = "TAKE_PROFIT"
+            elif action == "SELL":  # Short position
+                if current_price >= stop_loss:
+                    sl_hit = True
+                    exit_reason = "STOP_LOSS"
+                elif current_price <= take_profit:
+                    tp_hit = True
+                    exit_reason = "TAKE_PROFIT"
+                    
+            # Process trade if SL or TP hit
+            if sl_hit or tp_hit:
+                positions_to_close.append((trade_id, exit_reason, current_price))
+        
+        # Close positions that hit SL/TP (in a separate loop to avoid modifying during iteration)
+        for trade_id, exit_reason, exit_price in positions_to_close:
+            position = self.open_positions.get(trade_id)
+            if not position:
+                continue
+                
+            # Create a copy of the position for closing
+            closed_trade = position.copy()
+            closed_trade['status'] = 'closed'
+            closed_trade['exit_price'] = exit_price
+            closed_trade['exit_time'] = datetime.now().isoformat()
+            closed_trade['exit_reason'] = exit_reason
+            
+            # Calculate PnL
+            entry_price = closed_trade.get('entry_price', 0)
+            action = closed_trade.get('action')
+            
+            if action == "BUY":  # Long position
+                pnl_pct = ((exit_price - entry_price) / entry_price) * 100
+            elif action == "SELL":  # Short position
+                pnl_pct = ((entry_price - exit_price) / entry_price) * 100
+            else:
+                pnl_pct = 0
+                
+            closed_trade['pnl_percentage'] = pnl_pct
+            
+            # Process the closed trade
+            self._process_closed_trade(closed_trade)
+            
+            # Record the trade
+            self.logger.info(f"🔔 Trade {trade_id} closed due to {exit_reason} at {exit_price} ({pnl_pct:.2f}%)")
+            closed_trades.append(closed_trade)
+            
+        return closed_trades
+        
+    def update_position_prices(self, data_provider=None) -> None:
         """
         Update the prices of all open positions and calculate unrealized PnL.
+        
+        Args:
+            data_provider: Optional data provider to use for getting current prices
         """
-        # This would normally fetch current market prices
-        # For now, we'll use a simplified approach
-        # In a full implementation, this would connect to the market data fetcher
         self.logger.debug("Updating position prices")
         
-        # For simplicity, we'll use a dummy approach to get market prices
-        # In a real implementation, this would use the proper MarketDataFetcher methods
+        # Create a price map using the data provider if available
+        price_map = {}
+        if data_provider:
+            for pair in set([pos.get('pair') for pos in self.open_positions.values()]):
+                try:
+                    # Handle both formats (BTC/USDT and BTCUSDT)
+                    symbol = pair.replace('/', '') if '/' in pair else pair
+                    price_map[pair] = data_provider.get_current_price(symbol)
+                except Exception as e:
+                    self.logger.warning(f"Could not get current price for {pair}: {e}")
+        
+        # Fallback to default prices if needed
         default_prices = {
-            "BTC/USDT": 85000.0,
-            "ETH/USDT": 3500.0,
-            "BNB/USDT": 600.0,
-            "SOL/USDT": 160.0,
+            "BTC/USDT": 50000.0,
+            "ETH/USDT": 3000.0,
+            "BNB/USDT": 500.0,
+            "SOL/USDT": 150.0,
             "DOGE/USDT": 0.1,
             "XRP/USDT": 0.5
         }
@@ -673,6 +786,134 @@ class PortfolioManagerAgent(BaseAnalystAgent):
         
         return analysis_result
     
+    def record_trade_plan(self, trade_plan: Dict[str, Any], market_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Record a trade plan generated by TradePlanAgent and update portfolio state.
+        
+        Args:
+            trade_plan: Trade plan dictionary from TradePlanAgent
+            market_data: Market data dictionary
+            
+        Returns:
+            Dictionary with processing result
+        """
+        try:
+            # Skip HOLD signals or invalid trade plans
+            if not trade_plan or trade_plan.get('signal') == 'HOLD' or not trade_plan.get('entry_price'):
+                self.logger.info("Trade plan is HOLD or invalid, skipping portfolio update")
+                return {
+                    "status": TradeValidationStatus.APPROVED.value,
+                    "reason": "No action required for HOLD signal",
+                    "portfolio_update": "No change"
+                }
+                
+            # Create trade record from trade plan
+            trade = {
+                'trade_id': trade_plan.get('trade_id', f"TP-{int(time.time())}"),
+                'pair': trade_plan.get('symbol', market_data.get('symbol')),
+                'action': trade_plan.get('signal'),
+                'entry_price': trade_plan.get('entry_price'),
+                'position_size': trade_plan.get('position_size'),
+                'position_value': trade_plan.get('position_size') * trade_plan.get('entry_price'),
+                'stop_loss': trade_plan.get('stop_loss'),
+                'take_profit': trade_plan.get('take_profit'),
+                'timestamp': datetime.now().isoformat(),
+                'status': 'open',
+                'tags': trade_plan.get('tags', []),
+                'confidence': trade_plan.get('confidence', 0),
+                'risk_reward_ratio': trade_plan.get('risk_reward_ratio', 0)
+            }
+            
+            # Process the trade
+            return self.process_trade(trade)
+            
+        except Exception as e:
+            self.logger.error(f"Error recording trade plan: {e}")
+            return {
+                "status": TradeValidationStatus.REJECTED.value,
+                "reason": f"Error recording trade plan: {str(e)}"
+            }
+    
+    def save_portfolio_state(self, file_path: Optional[str] = None) -> bool:
+        """
+        Save the current portfolio state to a file.
+        
+        Args:
+            file_path: Path to save the file (defaults to logs/portfolio_state.json)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if file_path is None:
+                file_path = os.path.join(self.portfolio_dir, "portfolio_state.json")
+                
+            # Update position prices
+            self.update_position_prices()
+            
+            # Take a snapshot
+            snapshot = self.take_portfolio_snapshot()
+            
+            # Add additional metadata
+            state_data = {
+                "portfolio": snapshot,
+                "version": "0.2.0",
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
+            # Save to file
+            with open(file_path, 'w') as f:
+                json.dump(state_data, f, indent=2)
+                
+            self.logger.info(f"Portfolio state saved to {file_path}")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error saving portfolio state: {e}")
+            return False
+            
+    def load_portfolio_state(self, file_path: Optional[str] = None) -> bool:
+        """
+        Load portfolio state from a file.
+        
+        Args:
+            file_path: Path to load the file from (defaults to logs/portfolio_state.json)
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            if file_path is None:
+                file_path = os.path.join(self.portfolio_dir, "portfolio_state.json")
+                
+            if not os.path.exists(file_path):
+                self.logger.warning(f"Portfolio state file {file_path} does not exist")
+                return False
+                
+            # Load from file
+            with open(file_path, 'r') as f:
+                state_data = json.load(f)
+                
+            # Restore portfolio data
+            portfolio_data = state_data.get('portfolio', {})
+            
+            # Restore positions
+            if 'open_positions' in portfolio_data:
+                for position in portfolio_data['open_positions']:
+                    # Ensure it has the appropriate keys
+                    if 'trade_id' in position:
+                        self.open_positions[position['trade_id']] = position
+            
+            self.logger.info(f"Portfolio state loaded from {file_path} with {len(self.open_positions)} positions")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error loading portfolio state: {e}")
+            return False
+
     def process_trade(self, trade: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process a trade and update portfolio state.

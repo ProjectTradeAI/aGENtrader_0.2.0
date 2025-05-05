@@ -569,8 +569,29 @@ def save_results(results, filename=None):
         filename = f"logs/agentrader_results_{timestamp}.json"
     
     try:
+        # Function to recursively sanitize dictionaries for JSON serialization
+        def sanitize_for_json(obj):
+            if isinstance(obj, dict):
+                return {k: sanitize_for_json(v) for k, v in obj.items() 
+                        if not k == "data_provider" and not callable(v)}
+            elif isinstance(obj, list):
+                return [sanitize_for_json(item) for item in obj]
+            elif hasattr(obj, '__dict__'):
+                # Convert objects to string representation
+                return str(obj)
+            else:
+                # Keep basic types and return None for unparseable objects
+                try:
+                    json.dumps(obj)
+                    return obj
+                except (TypeError, OverflowError):
+                    return str(obj)
+        
+        # Sanitize the results for JSON serialization
+        sanitized_results = sanitize_for_json(results)
+        
         with open(filename, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(sanitized_results, f, indent=2)
         logger.info(f"Results saved to {filename}")
         return True
     except Exception as e:

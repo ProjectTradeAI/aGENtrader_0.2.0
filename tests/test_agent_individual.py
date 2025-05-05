@@ -932,12 +932,36 @@ class AgentTestHarness:
                                 os.makedirs(log_dir, exist_ok=True)
                                 log_file = f"{log_dir}/trade_plan_{self.symbol.replace('/', '')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
                                 
+                                # Function to recursively sanitize dictionaries for JSON serialization
+                                def sanitize_for_json(obj):
+                                    if isinstance(obj, dict):
+                                        return {k: sanitize_for_json(v) for k, v in obj.items() 
+                                                if not k == "data_provider" and not callable(v)}
+                                    elif isinstance(obj, list):
+                                        return [sanitize_for_json(item) for item in obj]
+                                    elif hasattr(obj, '__dict__'):
+                                        # Convert objects to string representation
+                                        return str(obj)
+                                    else:
+                                        # Keep basic types and return None for unparseable objects
+                                        try:
+                                            json.dumps(obj)
+                                            return obj
+                                        except (TypeError, OverflowError):
+                                            return str(obj)
+                                
+                                # Create sanitized versions of all data for JSON serialization
+                                sanitized_market_data = sanitize_for_json(market_data)
+                                sanitized_trade_plan = sanitize_for_json(trade_plan)
+                                sanitized_decision = sanitize_for_json(decision)
+                                sanitized_analyses = sanitize_for_json(analyses)
+                                
                                 # Create complete log with all data
                                 full_data = {
-                                    "trade_plan": trade_plan,
-                                    "decision": decision,
-                                    "analyses": analyses,
-                                    "market_data": market_data,
+                                    "trade_plan": sanitized_trade_plan,
+                                    "decision": sanitized_decision,
+                                    "analyses": sanitized_analyses,
+                                    "market_data": sanitized_market_data,
                                     "symbol": self.symbol,
                                     "interval": self.interval,
                                     "timestamp": timestamp

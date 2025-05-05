@@ -1,0 +1,47 @@
+# ⏱️ PRIORITY TASK: STABILITY, POLISH, AND CONSENSUS ROBUSTNESS
+
+# 📍 GOAL:
+# Improve robustness and expressiveness of the TradePlanAgent pipeline.
+# Enhance handling of sentiment edge cases, portfolio display logic, and conflict-aware tagging.
+# Implement graceful fallbacks to maintain confidence consistency and log clarity.
+
+# ✅ TASK LIST:
+
+# 2. 📊 SentimentAggregatorAgent - Confidence Floor & Fallback Summary
+#    - If confidence < 40%:
+#       → Enforce minimum summary, e.g., `reason = "Insufficient sentiment clarity to form confident outlook"`
+#       → Consider fallback to social media + price velocity for a short-term sentiment indicator.
+#    - Ensure every result includes: `reason`, `key_insight`, and `contributing_sources`.
+
+# 3. 🏷️ Market Mood Tag Clarification
+#    - Detect tag conflicts (e.g., `favorable_funding` + `strong_bearish`).
+#    - Add a new field: `mood_clarification` with short commentary to resolve these.
+#      Example: `"Short-term funding tilt is bullish, but technicals dominate with a bearish tone."`
+
+# 4. 💼 PortfolioManagerAgent - Portfolio Value Fix
+#    - If no open positions, total value should reflect available cash (e.g., $10,000).
+#    - Ensure displayed value = `cash_balance + unrealized_PnL` (0 if flat).
+#    - Fix logs that currently show `Portfolio value: $0.00` even with cash.
+
+# 5. 📉 Risk Snapshot Expansion
+#    - Enhance `risk_snapshot` with:
+#        → `max_risk_per_trade`: from config or 2% default
+#        → `total_value`: match PortfolioManagerAgent true value
+#        → Optional (if time): placeholder `projected_drawdown_pct` (set to 0.0 for now)
+
+# 6. 🛠️ Testing
+#    - Run full trade cycle test (All Agents + TradePlanAgent + PortfolioManagerAgent).
+#    - Confirm:
+#        → Sentiment fallback triggers correctly
+#        → Mood tags + clarification visible in trade plan JSON
+#        → Portfolio value displays true balance even when flat
+
+# 💬 Logging Tips:
+# - Log API failure gracefully: `[WARNING] SentimentAnalystAgent API unavailable (429)`
+# - Log tag clarifications: `[INFO] Mood clarification added due to conflicting tags`
+# - Log true portfolio value: `[INFO] Portfolio value: $10,000.00 (no open trades)`
+
+# 🔁 Re-run after fixes and report: 
+#    - Trade plan JSON
+#    - Portfolio snapshot
+#    - Full system log trace

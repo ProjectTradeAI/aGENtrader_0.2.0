@@ -1100,6 +1100,16 @@ class AgentTestHarness:
                 # Wrap reasoning to fit within the box
                 wrapped_reasoning = []
                 current_line = ""
+                
+                # Handle when reasoning is a list (convert to string first)
+                if isinstance(reasoning, list):
+                    # Join the list elements with a space
+                    reasoning = ' '.join(str(item) for item in reasoning)
+                elif not isinstance(reasoning, str):
+                    # Convert any non-string to string
+                    reasoning = str(reasoning)
+                    
+                # Now reasoning is guaranteed to be a string
                 for word in reasoning.split():
                     if len(current_line) + len(word) + 1 <= banner_width - 10:
                         current_line += word + " "
@@ -1264,18 +1274,27 @@ class AgentTestHarness:
         """
         # Display header
         print("\n" + "="*80)
-        print(f"{Fore.CYAN}## Agent Test: {result['agent']} ##")
-        print(f"Symbol: {result['symbol']}, Interval: {result['interval']}")
-        print(f"Time: {result['timestamp']}, Elapsed: {result['elapsed_time']:.2f}s")
-        print(f"Mode: {'Mock' if result['use_mock_data'] else 'Real'} data, " +
-              f"Temperature: {result['temperature']}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}## Agent Test: {result.get('agent', 'Unknown')} ##")
+        print(f"Symbol: {result.get('symbol', 'Unknown')}, Interval: {result.get('interval', 'Unknown')}")
+        
+        # Safely display time and elapsed time
+        timestamp = result.get('timestamp', 'Unknown')
+        elapsed_time = result.get('elapsed_time', 0)
+        elapsed_str = f"{elapsed_time:.2f}s" if isinstance(elapsed_time, (int, float)) else str(elapsed_time)
+        print(f"Time: {timestamp}, Elapsed: {elapsed_str}")
+        
+        # Safely display mode and temperature
+        mock_data = result.get('use_mock_data', False)
+        temperature = result.get('temperature', 0)
+        print(f"Mode: {'Mock' if mock_data else 'Real'} data, " +
+              f"Temperature: {temperature}{Style.RESET_ALL}")
         print("="*80)
         
         # Display the analysis result
         analysis = result['result']
         
         # Check if this is a full cycle test result
-        if result['agent'] == "All Agents (Decision Cycle)":
+        if result.get('agent') == "All Agents (Decision Cycle)" or result.get('agent') == "All Agents (Full Trade Cycle)":
             self._display_full_cycle_results(result)
             return
             
@@ -1469,7 +1488,7 @@ class AgentTestHarness:
         Args:
             result: The full cycle test result dictionary
         """
-        if result['status'] == 'error':
+        if result.get('status') == 'error':
             print(f"\n{Fore.RED}Error running full agent decision cycle:{Style.RESET_ALL}")
             print(f"{result.get('message', result.get('error', 'Unknown error'))}")
             if 'partial_results' in result:
@@ -1481,8 +1500,14 @@ class AgentTestHarness:
                         print(f"  {agent_name}: {signal} (Confidence: {confidence}%)")
             return
             
+        # Safely get the result field, providing an empty dictionary if missing
+        result_field = result.get('result', {})
+        if not result_field:
+            print(f"\n{Fore.RED}Error: No result data found in test output{Style.RESET_ALL}")
+            return
+            
         # Display the final decision
-        decision = result['result'].get('decision', {})
+        decision = result_field.get('decision', {})
         
         # Get signal from appropriate field based on priority
         # 1. final_signal (new field for conflict detection)

@@ -201,10 +201,13 @@ class TradePlanAgent(BaseDecisionAgent):
         # Extract the trading signal and confidence
         signal = decision.get('signal', 'NEUTRAL')
         original_signal = signal  # Keep the original signal for reference
+        # Always prioritize final_signal if it exists
+        final_decision_signal = decision.get('final_signal', signal)
+        # Use final_decision_signal as the primary signal
+        signal = final_decision_signal
         confidence = decision.get('confidence', 0)
         
         # Track decision consistency
-        final_decision_signal = decision.get('final_signal', signal)
         decision_consistency = True  # Default to true, will set to false if we override
         
         # Check for HOLD signal explicitly coming from final_signal (strict HOLD policy)
@@ -337,6 +340,8 @@ class TradePlanAgent(BaseDecisionAgent):
                 
                 # Special check: if DecisionAgent returned CONFLICTED and we kept that signal,
                 # ensure decision_consistency is True to reflect that we respected the decision
+                # Initialize plan_signal to avoid "unbound" error
+                plan_signal = signal
                 if final_decision_signal == "CONFLICTED" and plan_signal == "CONFLICTED":
                     decision_consistency = True
                     logger.info("Decision consistency TRUE - TradePlanAgent respecting DecisionAgent's CONFLICTED signal")
@@ -351,6 +356,9 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Get the interval from market data or use default
         interval = market_data.get('interval', '1h')
+        
+        # Initialize plan_signal at the beginning of the method to avoid unbound variable issues
+        plan_signal = signal
         
         # If no actionable signal, return a minimal plan
         if not is_actionable:
@@ -384,20 +392,45 @@ class TradePlanAgent(BaseDecisionAgent):
             reasoning = "No actionable signal generated"
             
             if is_conflicted:
-                # Adding clearer explanation for CONFLICTED signals that default to HOLD
-                reasoning = "Final action is HOLD due to a CONFLICTED signal. Position size set to 0 to mitigate indecision risk."
-                logger.info(reasoning)
+                if not self.allow_fallback_on_hold:
+                    # Clear explanation for CONFLICTED signals converted to HOLD
+                    reasoning = "Final action is HOLD due to a CONFLICTED signal. Position size set to 0 to mitigate indecision risk."
+                    logger.info(reasoning)
+                else:
+                    # Explanation for preserved CONFLICTED signals
+                    reasoning = "CONFLICTED signal detected. No actionable trade plan generated. Position size set to 0 to mitigate indecision risk."
+                    logger.info(reasoning)
             elif signal == "HOLD" and final_decision_signal == "HOLD":
                 # Explicit HOLD explanation for respecting DecisionAgent's HOLD signal
                 reasoning = "DecisionAgent returned HOLD due to low directional confidence. No trade plan generated."
                 logger.info(reasoning)
             
-            # For CONFLICTED signals, we should preserve the original CONFLICTED signal
-            # instead of using the potentially modified signal value
+            # For CONFLICTED signals, we need to handle them based on the test expectations
+            # If enforcing HOLD for CONFLICTED signals, convert to HOLD; otherwise, preserve CONFLICTED
             if original_signal == "CONFLICTED" or decision.get('final_signal') == "CONFLICTED":
-                plan_signal = "CONFLICTED"
+                if not self.allow_fallback_on_hold:
+                    # When we're enforcing strict HOLD policy, CONFLICTED should become HOLD
+                    plan_signal = "HOLD"
+                    logger.info("Converting CONFLICTED signal to HOLD (strict HOLD policy)")
+                else:
+                    # When allowing fallbacks, preserve CONFLICTED signal
+                    plan_signal = "CONFLICTED"
+                    logger.info("Preserving CONFLICTED signal (allow_fallback_on_hold=True)")
             else:
                 plan_signal = signal
+            
+            # Extract liquidity information if available
+            liquidity_info = None
+            if analyst_outputs and "liquidity_analysis" in analyst_outputs:
+                liquidity_data = analyst_outputs["liquidity_analysis"]
+                if isinstance(liquidity_data, dict):
+                    liquidity_info = {
+                        "supports": liquidity_data.get("supports"),
+                        "resistances": liquidity_data.get("resistances"),
+                        "liquidity_zones": liquidity_data.get("liquidity_zones"),
+                        "current_zone": liquidity_data.get("current_zone"),
+                        "analysis": liquidity_data.get("analysis_summary")
+                    }
                 
             minimal_plan = {
                 "signal": plan_signal,
@@ -415,6 +448,10 @@ class TradePlanAgent(BaseDecisionAgent):
                 "summary_confidence": summary_confidence,  # Add summary confidence
                 "decision_consistency": decision_consistency  # Track decision consistency
             }
+            
+            # Add liquidity information if available
+            if liquidity_info:
+                minimal_plan["liquidity_info"] = liquidity_info
             
             # Add conflict flag and fallback information for CONFLICTED signals
             if is_conflicted or original_signal == "CONFLICTED":
@@ -496,8 +533,9 @@ class TradePlanAgent(BaseDecisionAgent):
             liquidity_analysis = analyst_outputs["liquidity_analysis"]
         
         # Determine entry, stop-loss, and take-profit levels with volatility awareness
+        # Cast signal to ensure it's a string for type checking
         entry_price, stop_loss, take_profit, used_fallback = self._determine_trade_levels(
-            signal=signal, 
+            signal=str(signal), 
             current_price=current_price,
             liquidity_analysis=liquidity_analysis,
             historical_data=historical_data,
@@ -553,7 +591,7 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Classify trade type
         trade_type = self._classify_trade_type(
-            signal, confidence, valid_until, historical_data, interval
+            str(signal), confidence, valid_until, historical_data, interval
         )
         
         # Position size is already a float value, not a tuple
@@ -561,7 +599,7 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Calculate risk metrics
         risk_snapshot = self._calculate_risk_snapshot(
-            signal, entry_price, stop_loss, take_profit, position_size_value, current_price
+            str(signal), entry_price, stop_loss, take_profit, position_size_value, current_price
         )
         
         # Get custom tags or use defaults
@@ -830,7 +868,7 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Generate a human-readable plan digest
         plan_digest = self._generate_plan_digest(
-            signal=signal,
+            signal=str(signal),  # Cast to string for type safety
             confidence=confidence,
             liquidity_used="liquidity_based_entry" in unique_tags,
             high_conflict="high_conflict" in unique_tags,

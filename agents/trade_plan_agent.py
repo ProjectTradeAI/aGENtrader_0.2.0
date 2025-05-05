@@ -110,7 +110,12 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Portfolio Manager integration
         self.portfolio_manager = None
+        self.portfolio_info = None  # Will store portfolio state when retrieved
         self.use_portfolio_manager = self.config.get("use_portfolio_manager", True)
+        
+        # Initialize portfolio manager if enabled
+        if self.use_portfolio_manager:
+            self._init_portfolio_manager()
         
         # Default validity durations in minutes by timeframe
         self.validity_durations = self.config.get("validity_durations", {
@@ -212,6 +217,9 @@ class TradePlanAgent(BaseDecisionAgent):
             - total_exposure_pct: Current portfolio exposure percentage
             - asset_exposures: Dictionary of asset-specific exposure percentages
             - open_positions: List of current open positions
+            - max_total_exposure_pct: Maximum allowed total exposure
+            - max_per_asset_exposure_pct: Maximum allowed exposure per asset
+            - position_limits: Position sizing limits
         """
         if self.portfolio_manager is None:
             return {}
@@ -226,8 +234,18 @@ class TradePlanAgent(BaseDecisionAgent):
                 "available_cash": portfolio_summary.get("available_cash", 0),
                 "total_exposure_pct": portfolio_summary.get("total_exposure_pct", 0),
                 "asset_exposures": {},
-                "open_positions": []
+                "open_positions": [],
+                "max_total_exposure_pct": getattr(self.portfolio_manager, "max_total_exposure_pct", 80),
+                "max_per_asset_exposure_pct": getattr(self.portfolio_manager, "max_per_asset_exposure_pct", 20),
+                "position_limits": {
+                    "max_concentration": getattr(self.portfolio_manager, "max_concentration", 0.3),
+                    "max_positions": getattr(self.portfolio_manager, "max_positions", 10),
+                    "active_positions": len(portfolio_summary.get("positions", [])),
+                }
             }
+            
+            # Calculated values for position sizing
+            summary["available_exposure_pct"] = summary["max_total_exposure_pct"] - summary["total_exposure_pct"]
             
             # Extract asset exposures
             positions = portfolio_summary.get("positions", [])
@@ -239,6 +257,22 @@ class TradePlanAgent(BaseDecisionAgent):
                     if asset:
                         summary["asset_exposures"][asset] = exposure_pct
                         summary["open_positions"].append(position)
+            
+            # Add allocation statistics
+            summary["allocation_stats"] = {
+                "total_positions": len(summary["open_positions"]),
+                "exposure_distribution": {
+                    "high": sum(1 for pct in summary["asset_exposures"].values() if pct > 10),
+                    "medium": sum(1 for pct in summary["asset_exposures"].values() if 5 <= pct <= 10),
+                    "low": sum(1 for pct in summary["asset_exposures"].values() if pct < 5)
+                }
+            }
+            
+            # Log summary for debugging
+            self.logger.info(f"Portfolio summary: total value={summary['total_value']:.2f}, " +
+                           f"exposure={summary['total_exposure_pct']:.2f}%, " +
+                           f"available={summary['available_exposure_pct']:.2f}%, " +
+                           f"positions={len(summary['open_positions'])}")
             
             return summary
         except Exception as e:
@@ -646,6 +680,13 @@ class TradePlanAgent(BaseDecisionAgent):
         # Extract symbol from market data for portfolio-aware position sizing
         symbol = market_data.get('symbol', '')
         
+        # Retrieve portfolio state if portfolio manager is enabled
+        if self.use_portfolio_manager and self.portfolio_manager is not None:
+            self.portfolio_info = self._get_portfolio_state()
+            logger.info(f"Retrieved portfolio state for position sizing: {len(self.portfolio_info)} data points")
+        else:
+            self.portfolio_info = {}
+        
         # Calculate position size based on confidence, conflict score, conflict flag, and symbol
         position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason = self._calculate_position_size(
             confidence=confidence, 
@@ -918,6 +959,10 @@ class TradePlanAgent(BaseDecisionAgent):
         # Check for ATR-based stop loss or take profit
         if atr_used:
             auto_tags.append("ATR_SL")
+            
+        # Add trade strategy tags based on market conditions (from analyst outputs)
+        trade_strategy_tags = self._generate_strategy_tags(signal, analyst_outputs, historical_data)
+        auto_tags.extend(trade_strategy_tags)
         
         # Combine with existing tags
         tags.extend(auto_tags)
@@ -1839,8 +1884,27 @@ class TradePlanAgent(BaseDecisionAgent):
                     continue
                     
                 if isinstance(contribution, dict):
-                    # Extract core data
-                    signal = contribution.get('signal', 'UNKNOWN')
+                    # Extract core data with proper signal normalization
+                    signal = contribution.get('signal', None)
+                    
+                    # Replace UNKNOWN with actual agent signal if possible
+                    if signal is None or signal == 'UNKNOWN':
+                        if 'action' in contribution:
+                            signal = contribution.get('action')
+                        elif agent_name in analyst_outputs and isinstance(analyst_outputs[agent_name], dict):
+                            signal = analyst_outputs[agent_name].get('signal')
+                    
+                    # If still none/unknown, use a meaningful default based on agent type
+                    if signal is None or signal == 'UNKNOWN':
+                        if 'Technical' in agent_name:
+                            signal = 'NEUTRAL'  # Default for technical analysis
+                        elif 'Sentiment' in agent_name:
+                            signal = 'NEUTRAL'  # Default for sentiment analysis
+                        elif 'Liquidity' in agent_name:
+                            signal = 'NEUTRAL'  # Default for liquidity analysis
+                        else:
+                            signal = 'NEUTRAL'  # General default
+                    
                     confidence = contribution.get('confidence', 0)
                     
                     # Create agent contribution item
@@ -1861,9 +1925,10 @@ class TradePlanAgent(BaseDecisionAgent):
                     analyst_data = None
                     
                     if analyst_outputs and isinstance(analyst_outputs, dict):
-                        if agent_name in analyst_outputs:
+                        # Safe dictionary access
+                        if agent_name in analyst_outputs and analyst_outputs[agent_name] is not None:
                             analyst_data = analyst_outputs[agent_name]
-                        elif analyst_output_key in analyst_outputs:
+                        elif analyst_output_key in analyst_outputs and analyst_outputs[analyst_output_key] is not None:
                             analyst_data = analyst_outputs[analyst_output_key]
                     
                     if isinstance(analyst_data, dict):
@@ -1954,7 +2019,18 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # If nothing else, try to extract from contributing_agents
         elif contributing_agents:
-            signal = decision.get('signal', 'UNKNOWN')
+            signal = decision.get('signal', None)
+            # Handle signal normalization
+            if signal is None or signal == 'UNKNOWN':
+                # Try to get signal from final_signal or action
+                if 'final_signal' in decision:
+                    signal = decision.get('final_signal')
+                elif 'action' in decision:
+                    signal = decision.get('action')
+                else:
+                    # Default to NEUTRAL if nothing else found
+                    signal = 'NEUTRAL'
+                    
             confidence = decision.get('confidence', 0)
             reasoning = decision.get('reasoning', '')
             
@@ -2024,6 +2100,204 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return structured_contributions
     
+    def _generate_strategy_tags(self, signal: str, analyst_outputs: Optional[Dict[str, Any]] = None, 
+                             historical_data: Optional[List[Dict[str, Any]]] = None) -> List[str]:
+        """
+        Generate specific trading strategy tags based on market conditions.
+        
+        This method analyzes the analyst outputs and historical data to identify
+        specific trading strategies like oversold_bounce, bullish_breakout, etc.
+        
+        Args:
+            signal: The trading signal (BUY/SELL/HOLD)
+            analyst_outputs: Dictionary of analyst outputs with technical, sentiment, etc.
+            historical_data: Optional historical price data
+            
+        Returns:
+            List of strategy tags
+        """
+        strategy_tags = []
+        
+        # Skip strategy tagging for non-actionable signals
+        if signal not in ["BUY", "SELL"]:
+            return strategy_tags
+            
+        # Initialize technical indicators
+        rsi_value = None
+        in_uptrend = False
+        in_downtrend = False
+        near_support = False
+        near_resistance = False
+        high_volume = False
+        strong_momentum = False
+        
+        # Extract technical analysis data if available
+        technical_data = None
+        if analyst_outputs and isinstance(analyst_outputs, dict):
+            if "technical_analysis" in analyst_outputs:
+                technical_data = analyst_outputs["technical_analysis"]
+            elif "TechnicalAnalystAgent" in analyst_outputs:
+                technical_data = analyst_outputs["TechnicalAnalystAgent"]
+        
+        # Extract key technical indicators if available
+        if isinstance(technical_data, dict):
+            # Try to extract RSI
+            if "indicators" in technical_data and isinstance(technical_data["indicators"], dict):
+                rsi_value = technical_data["indicators"].get("rsi")
+            elif "rsi" in technical_data:
+                rsi_value = technical_data.get("rsi")
+                
+            # Extract trend information from reasoning or explanation
+            reasoning = technical_data.get("reasoning", "")
+            if not reasoning:
+                reasoning = technical_data.get("reason", "")
+                
+            if reasoning:
+                # Check for trend mentions
+                if any(term in reasoning.lower() for term in ["uptrend", "bullish trend", "higher highs"]):
+                    in_uptrend = True
+                if any(term in reasoning.lower() for term in ["downtrend", "bearish trend", "lower lows"]):
+                    in_downtrend = True
+                    
+                # Check for support/resistance mentions
+                if any(term in reasoning.lower() for term in ["support", "bounce", "floor"]):
+                    near_support = True
+                if any(term in reasoning.lower() for term in ["resistance", "ceiling", "top"]):
+                    near_resistance = True
+                    
+                # Check for volume mentions
+                if any(term in reasoning.lower() for term in ["high volume", "increased volume", "volume surge"]):
+                    high_volume = True
+                    
+                # Check for momentum mentions
+                if any(term in reasoning.lower() for term in ["strong momentum", "gaining momentum", "momentum shift"]):
+                    strong_momentum = True
+        
+        # Extract liquidity analysis data if available
+        liquidity_data = None
+        if analyst_outputs and isinstance(analyst_outputs, dict):
+            if "liquidity_analysis" in analyst_outputs:
+                liquidity_data = analyst_outputs["liquidity_analysis"]
+            elif "LiquidityAnalystAgent" in analyst_outputs:
+                liquidity_data = analyst_outputs["LiquidityAnalystAgent"]
+                
+        # Check for liquidity walls
+        has_buy_wall = False
+        has_sell_wall = False
+        
+        if isinstance(liquidity_data, dict):
+            # Check for explicit liquidity data
+            if "support_clusters" in liquidity_data and liquidity_data["support_clusters"]:
+                near_support = True
+            if "resistance_clusters" in liquidity_data and liquidity_data["resistance_clusters"]:
+                near_resistance = True
+                
+            # Look for liquidity walls in reasoning
+            reasoning = liquidity_data.get("reasoning", "")
+            if not reasoning:
+                reasoning = liquidity_data.get("reason", "")
+                
+            if reasoning:
+                if any(term in reasoning.lower() for term in ["buy wall", "buying pressure", "accumulation"]):
+                    has_buy_wall = True
+                if any(term in reasoning.lower() for term in ["sell wall", "selling pressure", "distribution"]):
+                    has_sell_wall = True
+        
+        # Extract sentiment data if available
+        sentiment_data = None
+        if analyst_outputs and isinstance(analyst_outputs, dict):
+            if "sentiment_analysis" in analyst_outputs:
+                sentiment_data = analyst_outputs["sentiment_analysis"]
+            elif "SentimentAnalystAgent" in analyst_outputs:
+                sentiment_data = analyst_outputs["SentimentAnalystAgent"]
+            elif "sentiment_aggregator" in analyst_outputs:
+                sentiment_data = analyst_outputs["sentiment_aggregator"]
+            elif "SentimentAggregatorAgent" in analyst_outputs:
+                sentiment_data = analyst_outputs["SentimentAggregatorAgent"]
+                
+        # Extract sentiment insights
+        sentiment_bullish = False
+        sentiment_bearish = False
+        sentiment_extreme = False
+        sentiment_divergence = False
+        
+        if isinstance(sentiment_data, dict):
+            sentiment_signal = sentiment_data.get("signal", "")
+            sentiment_confidence = sentiment_data.get("confidence", 0)
+            
+            # Check for strong sentiment
+            if sentiment_signal == "BUY" and sentiment_confidence >= 70:
+                sentiment_bullish = True
+            elif sentiment_signal == "SELL" and sentiment_confidence >= 70:
+                sentiment_bearish = True
+                
+            # Check for extreme sentiment (possible contrarian indicator)
+            if sentiment_confidence >= 90:
+                sentiment_extreme = True
+                
+            # Check for sentiment divergence in reasoning
+            reasoning = sentiment_data.get("reasoning", "")
+            if not reasoning:
+                reasoning = sentiment_data.get("reason", "")
+                
+            if reasoning and any(term in reasoning.lower() for term in ["diverge", "contrary", "opposite", "differ"]):
+                sentiment_divergence = True
+                
+        # Now determine strategy tags
+        # BUY signal strategies
+        if signal == "BUY":
+            # Oversold bounce strategy
+            if rsi_value is not None and rsi_value < 35:
+                strategy_tags.append("oversold_bounce")
+            elif near_support and (in_downtrend or has_buy_wall):
+                strategy_tags.append("support_bounce")
+                
+            # Bullish breakout strategy
+            if near_resistance and high_volume and strong_momentum:
+                strategy_tags.append("bullish_breakout")
+                
+            # Trend following strategy
+            if in_uptrend and strong_momentum:
+                strategy_tags.append("momentum_surge")
+                
+            # Sentiment-based strategies
+            if sentiment_bullish and near_support:
+                strategy_tags.append("sentiment_support_buy")
+            elif sentiment_bearish and sentiment_extreme:
+                strategy_tags.append("contrarian_buy")  # Contrarian strategy
+                
+            # Divergence strategies
+            if sentiment_divergence and technical_data and isinstance(technical_data, dict) and technical_data.get("signal") == "BUY":
+                strategy_tags.append("technical_sentiment_divergence")
+                
+        # SELL signal strategies
+        elif signal == "SELL":
+            # Overbought reversal strategy
+            if rsi_value is not None and rsi_value > 65:
+                strategy_tags.append("overbought_reversal")
+            elif near_resistance and (in_uptrend or has_sell_wall):
+                strategy_tags.append("resistance_reversal")
+                
+            # Bearish breakdown strategy
+            if near_support and high_volume and strong_momentum:
+                strategy_tags.append("bearish_breakdown")
+                
+            # Trend following strategy
+            if in_downtrend and strong_momentum:
+                strategy_tags.append("momentum_drop")
+                
+            # Sentiment-based strategies
+            if sentiment_bearish and near_resistance:
+                strategy_tags.append("sentiment_resistance_sell")
+            elif sentiment_bullish and sentiment_extreme:
+                strategy_tags.append("contrarian_sell")  # Contrarian strategy
+                
+            # Divergence strategies
+            if sentiment_divergence and technical_data and isinstance(technical_data, dict) and technical_data.get("signal") == "SELL":
+                strategy_tags.append("technical_sentiment_divergence")
+        
+        return strategy_tags
+        
     def _generate_disagreement_summary(self, signals_by_type: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
         """
         Generate a summary of agent disagreements.

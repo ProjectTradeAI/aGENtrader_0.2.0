@@ -4,13 +4,14 @@ An advanced multi-agent AI trading platform with sophisticated deployment and wo
 
 ## Recent Updates
 
+- **2025-04-30**: Implemented unified agent architecture with standardized interfaces and improved testability (branch: v2.2.1)
+- **2025-04-30**: Created comprehensive agent testing framework with isolated testing capabilities
 - **2025-04-29**: Implemented automatic Ollama health check system with environment-specific startup procedures
 - **2025-04-29**: Enhanced LLM client with improved error diagnostics and environment detection
 - **2025-04-29**: Implemented agent-specific LLM routing - Sentiment agents now use Grok, others use Mistral
 - **2025-04-29**: Fixed validation script to properly detect Binance API initialization by matching the correct log pattern
 - **2025-04-28**: Upgraded from Mixtral to Mistral as the default LLM due to EC2 memory constraints
 - **2025-04-27**: Enhanced error handling in all market data providers
-- **2025-04-26**: Improved deployment validation with automatic container detection and fallback to local process checks
 
 ## Repository Structure
 
@@ -48,6 +49,31 @@ The system is built around a multi-agent architecture where specialist agents co
 - **Funding Rate Analyst Agent**: Analyzes futures market funding rates (Uses Mistral)
 - **Open Interest Analyst Agent**: Evaluates open interest trends (Uses Mistral)
 - **Decision Agent**: Weighs all analyses and makes final decisions (Uses Mistral)
+
+#### Agent Architecture (v2.2.1)
+
+The agent system follows a standardized architecture with interfaces and base classes:
+
+- **Interfaces**:
+  - `AgentInterface`: Core interface for all agents
+  - `AnalystAgentInterface`: For market analysis agents
+  - `DecisionAgentInterface`: For trading decision agents
+  - `ExecutionAgentInterface`: For trade execution agents
+
+- **Base Classes**:
+  - `BaseAgent`: Provides core agent functionality
+  - `BaseAnalystAgent`: For market analysis agents
+  - `BaseDecisionAgent`: For trading decision agents
+
+- **Testing Framework**:
+  - Individual agent testing with `tests/test_agent_individual.py`
+  - Support for real or mock data sources
+  - Detailed logging of agent reasoning
+
+For details on using or implementing agents, see:
+- [Agent Migration Guide](docs/AGENT_MIGRATION_GUIDE.md)
+- [Development Notes](docs/DEV_NOTES.md)
+- [Test Suite Documentation](tests/README.md)
 
 #### LLM Model Selection Strategy
 

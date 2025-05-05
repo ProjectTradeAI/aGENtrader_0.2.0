@@ -135,6 +135,7 @@ agent_weights:
   LiquidityAnalystAgent: 1.0
   TechnicalAnalystAgent: 1.2
   SentimentAnalystAgent: 0.8
+  SentimentAggregatorAgent: 0.8  # Added missing agent weight
   FundingRateAnalystAgent: 0.8
   OpenInterestAnalystAgent: 1.0
   # FundamentalAnalystAgent: 1.1  # Uncomment when implemented

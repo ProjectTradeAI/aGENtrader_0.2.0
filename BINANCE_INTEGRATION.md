@@ -1,139 +1,87 @@
-# Binance API Integration in aGENtrader v2
-
-This document describes the Binance API integration in aGENtrader v2, including the environment-based API selection mechanism.
+# Binance API Integration Guide
 
 ## Overview
 
-The aGENtrader v2 system uses Binance as its primary market data provider with the following features:
+This document outlines the Binance API integration for the aGENtrader v2 trading system. The system uses Binance as its primary market data provider with fallbacks to ensure reliable data access regardless of geographic location.
 
-1. Environment-aware endpoint selection (testnet vs mainnet)
-2. Robust error handling and rate limiting
-3. Full support for authenticated endpoints
-4. Comprehensive market data retrieval
-5. Fallback to alternative data sources when necessary
+## Setup Requirements
 
-## Environment-Based API Selection
+1. **API Keys**: You need Binance API keys to access market data
+   - BINANCE_API_KEY - Your Binance API key
+   - BINANCE_API_SECRET - Your Binance API secret
 
-The system intelligently selects between Binance's testnet and mainnet APIs based on the deployment environment:
+2. **Environment Variables**: Add these to your `.env` file:
+   ```
+   BINANCE_API_KEY=your_api_key_here
+   BINANCE_API_SECRET=your_api_secret_here
+   DEPLOY_ENV=dev  # Use 'prod' for production deployments
+   ```
 
-| Environment | Default API Endpoint | Purpose |
-|-------------|---------------------|---------|
-| `dev`       | Testnet             | Local development to avoid hitting real API limits |
-| `replit`    | Testnet             | Development in Replit environment |
-| `ec2`       | Mainnet             | Production deployment on EC2 |
+## Handling Geographic Restrictions
 
-## Configuration
+Binance blocks API access from certain regions (Error 451). Our system handles this in multiple ways:
 
-The API selection is configured through environment variables in the `.env` file:
+1. **Testnet Fallback**: When geographic restrictions are detected, the system automatically falls back to the Binance testnet.
+   - In development mode (`DEPLOY_ENV=dev`), testnet is used by default
+   - In production mode (`DEPLOY_ENV=prod`), the system attempts mainnet first, then falls back
 
-```
-# Deployment Environment (dev, replit, ec2)
-DEPLOY_ENV=dev
+2. **VPN Recommendation**: For production systems in restricted regions, consider:
+   - Deploying to EC2 instances in non-restricted regions
+   - Using a proxy service (ensure compliance with Binance ToS)
 
-# Binance API Configuration
-BINANCE_API_KEY=your_api_key
-BINANCE_API_SECRET=your_api_secret
-BINANCE_USE_TESTNET=true  # Can override environment-based selection
-```
+## Testing API Access
 
-## Implementation Details
-
-The BinanceDataProvider class in `agents/data_providers/binance_data_provider.py` implements the environment-based selection logic:
-
-```python
-def __init__(
-    self, 
-    api_key: Optional[str] = None, 
-    api_secret: Optional[str] = None,
-    use_testnet: Optional[bool] = None
-):
-    """
-    Initialize the Binance API provider.
-    
-    Args:
-        api_key: Binance API key
-        api_secret: Binance API secret
-        use_testnet: Override environment setting for testnet (if provided)
-    """
-    # Load environment variables if keys not provided
-    self.api_key = api_key or os.environ.get("BINANCE_API_KEY")
-    self.api_secret = api_secret or os.environ.get("BINANCE_API_SECRET")
-    
-    # Determine whether to use testnet based on environment
-    deploy_env = os.environ.get("DEPLOY_ENV", "dev").lower()
-    
-    # Default to testnet for development and replit, mainnet for EC2
-    # Unless explicitly overridden by BINANCE_USE_TESTNET or constructor argument
-    if use_testnet is not None:
-        # Constructor argument takes highest precedence
-        self.use_testnet = use_testnet
-    elif os.environ.get("BINANCE_USE_TESTNET") is not None:
-        # Environment variable takes second precedence
-        self.use_testnet = os.environ.get("BINANCE_USE_TESTNET").lower() in ["true", "1", "yes"]
-    else:
-        # Default based on deployment environment
-        self.use_testnet = deploy_env in ["dev", "replit"]
-    
-    # Set the base URL based on testnet or mainnet
-    if self.use_testnet:
-        self.base_url = self.TESTNET_URL
-        self.logger.info(f"Initialized Binance Data Provider using testnet ({self.base_url})")
-    else:
-        self.base_url = self.BASE_URL
-        if deploy_env == "ec2":
-            self.logger.info("Using real Binance API for EC2 deployment")
-        self.logger.info(f"Initialized Binance Data Provider using mainnet ({self.base_url})")
-```
-
-## Available Endpoints
-
-The BinanceDataProvider implements these primary methods:
-
-- `fetch_ohlcv`: Retrieve OHLCV (candlestick) data
-- `get_ticker`: Get current ticker information
-- `get_current_price`: Get the current price of a symbol
-- `get_account_info`: Get account balance information (authenticated)
-- `fetch_market_depth`: Get order book data
-- `get_exchange_info`: Get exchange information and trading rules
-
-## Error Handling
-
-The provider implements robust error handling for various failure scenarios:
-
-1. Rate limiting with automatic retry
-2. Network error handling with exponential backoff
-3. API error parsing and appropriate responses
-4. Logging of errors for debugging purposes
-
-## Testing Environment Selection
-
-A test script (`test_binance_endpoint.py`) is provided to verify the environment-based API selection mechanism:
+Use the provided test script to verify connectivity:
 
 ```bash
-# Run the test script to verify environment-based selection
-python test_binance_endpoint.py
+python test_binance_api.py
 ```
 
-## Using with the Market Data Provider Factory
+The script tests both testnet and mainnet connections and reports detailed results.
 
-The BinanceDataProvider is integrated with the MarketDataProviderFactory to provide fallback capability:
+## Integration Components
+
+The Binance integration consists of:
+
+1. **BinanceDataProvider**: Direct interface to Binance API with robust error handling
+   - Located in `binance_data_provider.py`
+   
+2. **MarketDataProviderFactory**: Manages data provider selection and fallbacks
+   - Located in `market_data_provider_factory.py`
+   
+3. **Test script**: Verifies connectivity to Binance APIs
+   - Located in `test_binance_api.py`
+
+## Using in the Trading System
+
+The MarketDataProviderFactory abstracts away the complexity:
 
 ```python
 from market_data_provider_factory import MarketDataProviderFactory
 
-# Create the factory
+# Create factory
 factory = MarketDataProviderFactory()
 
-# Get the appropriate provider (defaults to Binance)
-provider = factory.get_provider()
+# Get current price
+price = factory.get_current_price("BTC/USDT")
 
-# Or explicitly request Binance
-provider = factory.get_provider("binance")
+# Get OHLCV data
+candles = factory.fetch_ohlcv("BTC/USDT", interval="4h", limit=50)
 
-# Fetch data using the factory (with automatic fallback)
-ohlcv_data = factory.fetch_ohlcv("BTC/USDT", interval="1h", limit=100)
+# Get market depth
+depth = factory.fetch_market_depth("BTC/USDT")
 ```
 
-## Adding New Endpoints
+## Troubleshooting
 
-To add support for additional Binance API endpoints, extend the BinanceDataProvider class with new methods following the established pattern of making authenticated or unauthenticated requests.
+1. **451 Geographic Restriction Errors**:
+   - Verify your EC2 region and consider alternatives
+   - The system will log clear error messages when these occur
+   
+2. **API Key Issues**:
+   - Ensure keys have proper permissions (read-only is sufficient for data access)
+   - Verify keys are correctly stored in environment variables
+
+3. **Testing**:
+   - Run the test script regularly to verify API connectivity
+   - The system will default to testnet in development environments

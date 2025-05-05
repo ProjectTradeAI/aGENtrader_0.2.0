@@ -10,7 +10,38 @@ import json
 import logging
 import requests
 import time
+import re
 from typing import Dict, Any, List, Optional, Union, Tuple
+
+# Add dotenv support for loading environment variables
+try:
+    from dotenv import load_dotenv
+    # Load environment variables from .env file
+    load_dotenv()
+    logging.info("Loaded environment variables from .env file")
+except ImportError:
+    logging.warning("python-dotenv not installed, will attempt manual .env loading")
+    # Manual .env loading as fallback
+    try:
+        if os.path.exists('.env'):
+            with open('.env', 'r') as env_file:
+                for line in env_file:
+                    line = line.strip()
+                    if line and not line.startswith('#'):
+                        key_value = line.split('=', 1)
+                        if len(key_value) == 2:
+                            key, value = key_value
+                            # Handle variables like ${VARIABLE}
+                            if value.startswith('${') and value.endswith('}'):
+                                var_name = value[2:-1]
+                                value = os.environ.get(var_name, '')
+                            # Only set if not already in environment
+                            if key not in os.environ:
+                                os.environ[key] = value
+                                logging.info(f"Manually loaded {key} from .env file")
+            logging.info("Manually loaded environment variables from .env file")
+    except Exception as e:
+        logging.error(f"Failed to manually load .env file: {str(e)}")
 
 # Configure logging
 logging.basicConfig(
@@ -32,12 +63,12 @@ class LLMClient:
     """
     
     # Default providers and endpoints from environment or config
-    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'local')  # Default to local (Ollama) with fallback
-    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'mistral')  # Using mistral for lower resource requirements
+    DEFAULT_PROVIDER = os.environ.get('LLM_PROVIDER_DEFAULT', 'grok')  # Default to Grok for testing reliability
+    DEFAULT_MODEL = os.environ.get('LLM_MODEL_DEFAULT', 'grok-2-1212')  # Using Grok for testing
     
     # Agent-specific model configuration
     AGENT_SPECIFIC_MODELS = {
-        # Sentiment agents use Grok by default for better sentiment analysis
+        # All agents now use Grok as the primary provider for testing reliability
         'sentiment_analyst': {
             'provider': 'grok',
             'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
@@ -47,28 +78,28 @@ class LLMClient:
             'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         
-        # Technical and market structure agents use Mistral by default
+        # Technical and market structure agents now use Grok directly for testing
         'technical_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         'liquidity_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         'funding_rate_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         'open_interest_analyst': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         },
         
-        # Decision agent uses Mistral by default for consistent and logical decisions
+        # Decision agent also uses Grok directly for testing
         'decision_agent': {
-            'provider': 'local',  # Will fallback to grok if local is unavailable
-            'model': 'mistral'
+            'provider': 'grok',  # Using Grok directly instead of local Ollama
+            'model': os.environ.get('LLM_MODEL_SENTIMENT', 'grok-2-1212')
         }
     }
     
@@ -78,10 +109,11 @@ class LLMClient:
     # Define environment-specific endpoints
     if DEPLOY_ENV == 'ec2':
         # When running on EC2, try connections within the instance first, then other known locations
+        # Prioritize 127.0.0.1 since that's where Ollama is currently listening
         DEFAULT_ENDPOINTS = [
+            'http://127.0.0.1:11434',  # This is the address Ollama is actually using
             os.environ.get('LLM_ENDPOINT_DEFAULT', 'http://localhost:11434'),
             'http://localhost:11434',
-            'http://127.0.0.1:11434',
             'http://0.0.0.0:11434',
             'http://172.31.16.22:11434'  # EC2 internal IP (might vary)
         ]
@@ -153,11 +185,72 @@ class LLMClient:
                 # Fallback to Grok if Ollama is not available
                 self.provider = 'grok'
         
-        # Configure API keys
+        # Configure API keys with direct file reading fallback
+        xai_api_key = os.environ.get('XAI_API_KEY')
+        openai_api_key = os.environ.get('OPENAI_API_KEY')
+        
+        # If XAI_API_KEY is not in environment, try to read it directly from .env file
+        if not xai_api_key and os.path.exists('.env'):
+            try:
+                with open('.env', 'r') as f:
+                    for line in f:
+                        if line.strip().startswith('XAI_API_KEY='):
+                            key_value = line.strip().split('=', 1)
+                            if len(key_value) == 2:
+                                extracted_key = key_value[1]
+                                # Remove quotes if present
+                                if (extracted_key.startswith('"') and extracted_key.endswith('"')) or \
+                                   (extracted_key.startswith("'") and extracted_key.endswith("'")):
+                                    extracted_key = extracted_key[1:-1]
+                                # Handle variables like ${VAR_NAME}
+                                if extracted_key.startswith('${') and extracted_key.endswith('}'):
+                                    var_name = extracted_key[2:-1]
+                                    extracted_key = os.environ.get(var_name, '')
+                                if extracted_key:
+                                    xai_api_key = extracted_key
+                                    logger.info("Loaded XAI_API_KEY directly from .env file")
+                                    break
+            except Exception as e:
+                logger.error(f"Error reading XAI_API_KEY from .env file: {str(e)}")
+        
+        # Do the same for OpenAI if needed
+        if not openai_api_key and os.path.exists('.env'):
+            try:
+                with open('.env', 'r') as f:
+                    for line in f:
+                        if line.strip().startswith('OPENAI_API_KEY='):
+                            key_value = line.strip().split('=', 1)
+                            if len(key_value) == 2:
+                                extracted_key = key_value[1]
+                                # Remove quotes if present
+                                if (extracted_key.startswith('"') and extracted_key.endswith('"')) or \
+                                   (extracted_key.startswith("'") and extracted_key.endswith("'")):
+                                    extracted_key = extracted_key[1:-1]
+                                # Handle variables like ${VAR_NAME}
+                                if extracted_key.startswith('${') and extracted_key.endswith('}'):
+                                    var_name = extracted_key[2:-1]
+                                    extracted_key = os.environ.get(var_name, '')
+                                if extracted_key:
+                                    openai_api_key = extracted_key
+                                    logger.info("Loaded OPENAI_API_KEY directly from .env file")
+                                    break
+            except Exception as e:
+                logger.error(f"Error reading OPENAI_API_KEY from .env file: {str(e)}")
+                
+        # Log API key status (without revealing the keys)
+        if xai_api_key:
+            logger.info("XAI_API_KEY is available")
+        else:
+            logger.warning("XAI_API_KEY is not set - Grok API will not be available")
+            
+        if openai_api_key:
+            logger.info("OPENAI_API_KEY is available")
+            
+        # Set the API keys
         self.api_keys = {
             'local': None,  # Local Ollama doesn't need an API key
-            'grok': os.environ.get('XAI_API_KEY'),
-            'openai': os.environ.get('OPENAI_API_KEY')
+            'grok': xai_api_key,
+            'openai': openai_api_key
         }
         
         # Configure API endpoints
@@ -222,9 +315,14 @@ class LLMClient:
             
             Possible causes and solutions:
             1. Ollama service is not running - Run 'sudo systemctl start ollama' on the EC2 instance
-            2. Ollama is running but not on port 11434 - Check 'sudo netstat -tulpn | grep ollama'
+            2. Ollama is running but only on localhost (127.0.0.1) - Run the following commands:
+               sudo systemctl stop ollama
+               sudo mkdir -p /etc/ollama
+               sudo bash -c 'echo "host = \\"0.0.0.0\\"" > /etc/ollama/config'
+               sudo systemctl start ollama
+               sudo netstat -tulpn | grep ollama  # Should show 0.0.0.0:11434
             3. Firewall blocking connections - Check EC2 security group settings
-            4. Mistral model is installed but service is stopped - Run 'ollama serve' on the EC2 instance
+            4. Mistral model is installed but service is stopped - Run 'sudo systemctl status ollama'
             
             Will fallback to using Grok API instead.
             ==========================================

@@ -1,228 +1,497 @@
 """
-Base Agent Module for aGENtrader v2
+aGENtrader v2 Base Agent
 
-This module provides the base agent classes that other agents inherit from.
+This module provides base classes for the agent architecture in aGENtrader v2.
+These classes define the standard interfaces and common functionality for all agents.
 """
 
 import os
 import json
 import logging
-from typing import Dict, Any, Optional
+import time
+from typing import Dict, Any, List, Optional, Union, Tuple
+from datetime import datetime
+from abc import ABC, abstractmethod
 
-# Set up logger
-logger = logging.getLogger("aGENtrader.agents.base")
+# Configure logging
+logger = logging.getLogger(__name__)
 
-class BaseAnalystAgent:
+class AgentInterface(ABC):
     """
-    Base class for all analyst agents.
+    Base interface for all agents in the system.
     
-    This class provides common functionality for all analyst agents including:
-    - Configuration loading
-    - Error handling
-    - Standard analysis result structure
+    This abstract base class defines the methods that all agents must implement.
     """
     
-    def __init__(self, agent_name=None):
-        """Initialize the base analyst agent.
+    @abstractmethod
+    def get_agent_config(self) -> Dict[str, Any]:
+        """
+        Get the agent's configuration.
+        
+        Returns:
+            Dictionary containing agent configuration
+        """
+        pass
+    
+    @abstractmethod
+    def run(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        Run the agent's main functionality.
+        
+        Returns:
+            Result dictionary
+        """
+        pass
+
+class BaseAgent(AgentInterface):
+    """
+    Base class for all agents in the system.
+    
+    This class provides common functionality like configuration loading,
+    error handling, and performance tracking.
+    """
+    
+    def __init__(self, agent_name: str = "base_agent"):
+        """
+        Initialize a base agent.
         
         Args:
-            agent_name: Optional name for the agent (used for agent-specific configurations)
+            agent_name: Name of the agent
         """
-        # Set up logger
-        self.logger = logging.getLogger(f"aGENtrader.agents.{self.__class__.__name__}")
-        
-        # Save agent name for agent-specific configurations
-        self.agent_name = agent_name or self.__class__.__name__.lower()
-        
-        # Load default configs
-        self.config_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config")
+        self.name = agent_name
+        self.description = "Base agent implementation"
+        self.last_run_time = None
+        self.last_run_duration = None
         
     def get_agent_config(self) -> Dict[str, Any]:
         """
-        Load agent configuration from config file.
+        Get the agent's configuration from the default config file.
         
         Returns:
-            Dictionary with agent configuration
+            Dictionary containing agent configuration
         """
+        config_file = os.environ.get("AGENT_CONFIG_PATH", "config/agent_config.json")
+        
         try:
-            # First try to load from settings.yaml which is our new config format
-            yaml_config_path = os.path.join(self.config_dir, "settings.yaml")
-            if os.path.exists(yaml_config_path):
-                try:
-                    import yaml
-                    with open(yaml_config_path, "r") as f:
-                        config = yaml.safe_load(f)
-                    # Get the 'agents' section from settings.yaml
-                    return config.get("agents", {})
-                except ImportError:
-                    self.logger.warning("PyYAML not installed, falling back to JSON config")
-                    
-            # Fall back to agents.json if settings.yaml isn't available
-            json_config_path = os.path.join(self.config_dir, "agents.json")
-            if os.path.exists(json_config_path):
-                with open(json_config_path, "r") as f:
-                    config = json.load(f)
-                return config.get(self.__class__.__name__, {})
-                
-            return {}
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
+                    return json.load(f)
+            else:
+                logger.warning(f"Config file {config_file} not found, using default configuration")
+                return {}
         except Exception as e:
-            self.logger.warning(f"Error loading agent config: {str(e)}")
+            logger.error(f"Error loading agent config: {str(e)}")
             return {}
             
     def get_trading_config(self) -> Dict[str, Any]:
         """
-        Load trading configuration from config file.
+        Get the trading configuration from the default config file.
         
         Returns:
-            Dictionary with trading configuration
+            Dictionary containing trading configuration
         """
+        config_file = os.environ.get("TRADING_CONFIG_PATH", "config/trading_config.json")
+        
         try:
-            # First try to load from settings.yaml which is our new config format
-            yaml_config_path = os.path.join(self.config_dir, "settings.yaml")
-            if os.path.exists(yaml_config_path):
-                try:
-                    import yaml
-                    with open(yaml_config_path, "r") as f:
-                        config = yaml.safe_load(f)
-                    # Get the 'trading' section from settings.yaml
-                    return config.get("trading", {})
-                except ImportError:
-                    self.logger.warning("PyYAML not installed, falling back to JSON config")
-            
-            # Fall back to trading.json if settings.yaml isn't available
-            json_config_path = os.path.join(self.config_dir, "trading.json")
-            if os.path.exists(json_config_path):
-                with open(json_config_path, "r") as f:
+            if os.path.exists(config_file):
+                with open(config_file, 'r') as f:
                     return json.load(f)
-            return {}
+            else:
+                logger.warning(f"Trading config file {config_file} not found, using default configuration")
+                return {
+                    "default_symbol": "BTC/USDT",
+                    "default_interval": "1h",
+                    "default_market": "binance",
+                    "confidence_threshold": 70
+                }
         except Exception as e:
-            self.logger.warning(f"Error loading trading config: {str(e)}")
-            return {}
+            logger.error(f"Error loading trading config: {str(e)}")
+            return {
+                "default_symbol": "BTC/USDT",
+                "default_interval": "1h",
+                "default_market": "binance",
+                "confidence_threshold": 70
+            }
+            
+    def run(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        Run the agent's main functionality with timing and error handling.
+        
+        Returns:
+            Result dictionary
+        """
+        start_time = time.time()
+        self.last_run_time = datetime.now().isoformat()
+        
+        try:
+            result = self._run(*args, **kwargs)
+            
+            # Add metadata to result
+            if isinstance(result, dict):
+                result.update({
+                    "agent": self.name,
+                    "timestamp": self.last_run_time,
+                    "elapsed_time": time.time() - start_time
+                })
+            
+            self.last_run_duration = time.time() - start_time
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error running agent {self.name}: {str(e)}", exc_info=True)
+            self.last_run_duration = time.time() - start_time
+            
+            return {
+                "status": "error",
+                "error_type": type(e).__name__,
+                "error_message": str(e),
+                "agent": self.name,
+                "timestamp": self.last_run_time,
+                "elapsed_time": self.last_run_duration
+            }
     
-    def create_standard_result(self, 
-                              signal: str, 
-                              confidence: int, 
-                              reason: str,
-                              data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _run(self, *args, **kwargs) -> Dict[str, Any]:
         """
-        Create a standardized result dictionary.
+        Placeholder for the agent's main functionality.
         
-        Args:
-            signal: Trading signal (BUY, SELL, HOLD)
-            confidence: Confidence level (0-100)
-            reason: Reason for the signal
-            data: Additional data to include
-            
+        Should be overridden by subclasses.
+        
         Returns:
-            Standardized result dictionary
+            Result dictionary
         """
-        result = {
-            "signal": signal,
-            "confidence": confidence,
-            "reason": reason,
-            "timestamp": None,  # Will be filled by the agent
-            "data": data or {}
-        }
-        return result
-        
-    def handle_analysis_error(self, error: Exception, agent_type: str) -> Dict[str, Any]:
-        """
-        Create standardized error result.
-        
-        Args:
-            error: Exception that occurred
-            agent_type: Type of analysis that failed
-            
-        Returns:
-            Error result dictionary
-        """
-        error_name = f"{agent_type.upper()}_ERROR"
-        error_msg = f"Error performing {agent_type}: {str(error)}"
-        
-        self.logger.error(f"{error_name}: {error_msg}")
-        
         return {
-            "error": error_name,
-            "error_message": error_msg,
-            "signal": "HOLD",  # Default to HOLD on error
-            "confidence": 0,
-            "reason": f"Analysis failed: {str(error)}"
+            "status": "warning",
+            "message": f"Agent {self.name} does not implement _run()",
+            "data": {}
+        }
+        
+    def build_error_response(self, error_type: str, message: str) -> Dict[str, Any]:
+        """
+        Build a standardized error response.
+        
+        Args:
+            error_type: Type of error
+            message: Error message
+            
+        Returns:
+            Error response dictionary
+        """
+        return {
+            "status": "error",
+            "error": True,  # Explicit error flag for the DecisionAgent
+            "error_type": error_type,
+            "message": message,
+            "error_message": message,  # Add duplicate field for compatibility
+            "agent": self.name,
+            "timestamp": datetime.now().isoformat(),
+            # Add fields required by DecisionAgent to avoid "Couldn't extract valid action" warnings
+            "signal": "UNKNOWN" if error_type == "INSUFFICIENT_DATA" else "HOLD",  # Use UNKNOWN for insufficient data
+            "action": "HOLD",  # Default to HOLD on error
+            "confidence": 0    # Zero confidence since this is an error
         }
         
     def validate_input(self, symbol: Optional[str], interval: Optional[str]) -> bool:
         """
-        Validate input parameters for analysis.
+        Validate basic input parameters.
         
         Args:
             symbol: Trading symbol
             interval: Time interval
             
         Returns:
-            True if input is valid, False otherwise
+            True if inputs are valid, False otherwise
         """
         if not symbol:
-            self.logger.error("Symbol is required for analysis")
+            logger.warning("Missing symbol parameter")
             return False
-        
+            
         if not interval:
-            self.logger.error("Interval is required for analysis")
+            logger.warning("Missing interval parameter")
             return False
             
         return True
-        
-    def build_error_response(self, error_code: str, error_message: str) -> Dict[str, Any]:
+
+class AnalystAgentInterface(AgentInterface):
+    """
+    Interface for analyst agents that provide market insights.
+    
+    These agents analyze market data and provide trading signals.
+    """
+    
+    @abstractmethod
+    def analyze(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """
-        Build standardized error response.
+        Analyze market data and generate insights.
         
         Args:
-            error_code: Error code
-            error_message: Error message
+            symbol: Trading symbol
+            interval: Time interval
+            **kwargs: Additional parameters
             
         Returns:
-            Error response dictionary
+            Analysis results
         """
-        self.logger.error(f"{error_code}: {error_message}")
-        
-        return {
-            "error": error_code,
-            "error_message": error_message,
-            "signal": "HOLD",  # Default to HOLD on error
-            "confidence": 0,
-            "reason": f"Analysis failed: {error_message}",
-            "status": "error"
-        }
-        
-    def validate_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        pass
+    
+    @abstractmethod
+    def _fetch_market_data(self, symbol: str, **kwargs) -> Dict[str, Any]:
         """
-        Validate analysis result and ensure it has required fields.
+        Fetch market data for analysis.
         
         Args:
-            result: Analysis result dictionary
+            symbol: Trading symbol
+            **kwargs: Additional parameters
             
         Returns:
-            Validated result dictionary
+            Market data
         """
-        required_fields = ["signal", "confidence", "reason"]
+        pass
+
+class BaseAnalystAgent(BaseAgent, AnalystAgentInterface):
+    """
+    Base class for analyst agents that provide market insights.
+    
+    These agents analyze market data and provide trading signals.
+    """
+    
+    def __init__(self, agent_name: str = "base_analyst"):
+        """
+        Initialize a base analyst agent.
         
-        # Check for error
-        if "error" in result:
-            return result
+        Args:
+            agent_name: Name of the agent
+        """
+        super().__init__(agent_name=agent_name)
+        self.description = "Base analyst agent implementation"
+        
+    def run(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Run the analyst agent with the specified parameters.
+        
+        This method serves as a wrapper for the analyze method.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            **kwargs: Additional parameters
             
-        # Check for required fields
-        for field in required_fields:
-            if field not in result:
-                return self.build_error_response(
-                    "INVALID_RESULT", 
-                    f"Analysis result missing required field: {field}"
-                )
-                
-        # Ensure signal is valid
-        valid_signals = ["BUY", "SELL", "HOLD", "NEUTRAL"]
-        if result["signal"] not in valid_signals:
-            result["signal"] = "HOLD"
+        Returns:
+            Analysis results
+        """
+        if not symbol:
+            trading_config = self.get_trading_config()
+            symbol = trading_config.get("default_symbol", "BTC/USDT")
             
-        # Ensure confidence is within range
-        if not isinstance(result["confidence"], (int, float)) or result["confidence"] < 0 or result["confidence"] > 100:
-            result["confidence"] = 50
+        if not interval:
+            trading_config = self.get_trading_config()
+            interval = trading_config.get("default_interval", "1h")
             
-        return result
+        return super().run(symbol=symbol, interval=interval, **kwargs)
+        
+    def _run(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Run the analyst agent's analyze method.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            **kwargs: Additional parameters
+            
+        Returns:
+            Analysis results
+        """
+        return self.analyze(symbol=symbol, interval=interval, **kwargs)
+    
+    def analyze(self, symbol: Optional[str] = None, market_data: Optional[Dict[str, Any]] = None, 
+                interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Analyze market data and generate insights.
+        
+        This method should be overridden by subclasses.
+        
+        Args:
+            symbol: Trading symbol
+            market_data: Pre-fetched market data (optional)
+            interval: Time interval
+            **kwargs: Additional parameters
+            
+        Returns:
+            Analysis results
+        """
+        return self.build_error_response(
+            "NOT_IMPLEMENTED",
+            f"Agent {self.name} does not implement analyze()"
+        )
+        
+    def _fetch_market_data(self, symbol: str, **kwargs) -> Dict[str, Any]:
+        """
+        Fetch market data for analysis.
+        
+        This method should be overridden by subclasses.
+        
+        Args:
+            symbol: Trading symbol
+            **kwargs: Additional parameters
+            
+        Returns:
+            Market data
+        """
+        return {}
+
+class DecisionAgentInterface(AgentInterface):
+    """
+    Interface for decision-making agents that determine trading actions.
+    
+    These agents combine multiple analysis results to make trading decisions.
+    """
+    
+    @abstractmethod
+    def make_decision(self, symbol: str, interval: str, analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Make a trading decision based on multiple analyses.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            analyses: List of analysis results from different agents
+            
+        Returns:
+            Decision result
+        """
+        pass
+
+class BaseDecisionAgent(BaseAgent, DecisionAgentInterface):
+    """
+    Base class for decision-making agents that determine trading actions.
+    
+    These agents combine multiple analysis results to make trading decisions.
+    """
+    
+    def __init__(self, agent_name: str = "base_decision"):
+        """
+        Initialize a base decision agent.
+        
+        Args:
+            agent_name: Name of the agent
+        """
+        super().__init__(agent_name=agent_name)
+        self.description = "Base decision agent implementation"
+        
+        # Load agent weights from config
+        config = self.get_agent_config()
+        self.confidence_threshold = config.get("confidence_threshold", 70)
+        
+    def run(self, symbol: str, interval: str, analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Run the decision agent with the specified parameters.
+        
+        This method serves as a wrapper for the make_decision method.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            analyses: List of analysis results from different agents
+            
+        Returns:
+            Decision results
+        """
+        return super().run(symbol=symbol, interval=interval, analyses=analyses)
+        
+    def _run(self, symbol: str, interval: str, analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Run the decision agent's make_decision method.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            analyses: List of analysis results from different agents
+            
+        Returns:
+            Decision results
+        """
+        return self.make_decision(symbol=symbol, interval=interval, analyses=analyses)
+    
+    def make_decision(self, symbol: str, interval: str, analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Make a trading decision based on multiple analyses.
+        
+        This method should be overridden by subclasses.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            analyses: List of analysis results from different agents
+            
+        Returns:
+            Decision result
+        """
+        return self.build_error_response(
+            "NOT_IMPLEMENTED", 
+            f"Agent {self.name} does not implement make_decision()"
+        )
+
+class ExecutionAgentInterface(AgentInterface):
+    """
+    Interface for execution agents that execute trading actions.
+    
+    These agents interact with exchange APIs to place and manage orders.
+    """
+    
+    @abstractmethod
+    def execute_trade(self, symbol: str, side: str, quantity: float, price: Optional[float] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Execute a trade on the exchange.
+        
+        Args:
+            symbol: Trading symbol
+            side: Trade side (buy or sell)
+            quantity: Quantity to trade
+            price: Price to trade at (optional for market orders)
+            **kwargs: Additional parameters
+            
+        Returns:
+            Execution result
+        """
+        pass
+    
+    @abstractmethod
+    def cancel_order(self, order_id: str, **kwargs) -> Dict[str, Any]:
+        """
+        Cancel an existing order.
+        
+        Args:
+            order_id: ID of the order to cancel
+            **kwargs: Additional parameters
+            
+        Returns:
+            Cancellation result
+        """
+        pass
+    
+    @abstractmethod
+    def get_open_orders(self, symbol: Optional[str] = None, **kwargs) -> List[Dict[str, Any]]:
+        """
+        Get a list of open orders.
+        
+        Args:
+            symbol: Trading symbol (optional)
+            **kwargs: Additional parameters
+            
+        Returns:
+            List of open orders
+        """
+        pass
+    
+    @abstractmethod
+    def get_position(self, symbol: str, **kwargs) -> Dict[str, Any]:
+        """
+        Get current position for a symbol.
+        
+        Args:
+            symbol: Trading symbol
+            **kwargs: Additional parameters
+            
+        Returns:
+            Position information
+        """
+        pass

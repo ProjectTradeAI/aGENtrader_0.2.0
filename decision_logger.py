@@ -146,6 +146,34 @@ class DecisionLogger:
         # If no sentence endings found, return the original text
         return text
     
+    def create_summary_from_result(
+        self,
+        agent_name: str,
+        result: Dict[str, Any],
+        symbol: Optional[str] = None,
+        price: Optional[float] = None
+    ) -> Optional[str]:
+        """
+        Instance method version of create_summary_from_result.
+        
+        This is a convenience method that calls the class method version.
+        
+        Args:
+            agent_name: Name of the agent
+            result: The result dictionary from an agent
+            symbol: Trading symbol
+            price: Current price
+            
+        Returns:
+            The summary string or None if creation failed
+        """
+        return self.__class__.create_summary_from_result(
+            agent_name,
+            result,
+            symbol,
+            price
+        )
+    
     @classmethod
     def create_summary_from_result(
         cls,
@@ -197,14 +225,17 @@ class DecisionLogger:
             if price is None and 'current_price' in result:
                 price = result['current_price']
             
-            # Create logger instance
-            logger = cls()
-            
             # Get interval from result if available
             interval = result.get('interval')
             
+            # Create logger instance only if not called from an instance
+            if isinstance(cls, type):
+                logger_instance = cls()
+            else:
+                logger_instance = cls
+            
             # Log the decision
-            return logger.log_decision(
+            return logger_instance.log_decision(
                 agent_name=agent_name,
                 signal=signal,
                 confidence=confidence,

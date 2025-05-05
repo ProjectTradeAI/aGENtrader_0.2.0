@@ -1,0 +1,43 @@
+{
+  "risk_tolerance": "moderate",
+  "max_position_size_pct": 10.0,
+  "stop_loss_pct": 5.0,
+  "take_profit_pct": 10.0,
+  "trade_execution": {
+    "max_slippage_pct": 0.5,
+    "always_use_limit_orders": true,
+    "retry_attempts": 3,
+    "retry_delay_seconds": 5
+  },
+  "default_interval": "1h",
+  "max_trades_per_day": 5,
+  "max_concurrent_positions": 3,
+  "position_sizing": {
+    "strategy": "fixed_pct",
+    "value": 5.0,
+    "max_position_pct": 20.0
+  },
+  "confidence_thresholds": {
+    "min_entry": 70,
+    "min_exit": 65
+  },
+  "session_limits": {
+    "max_loss_pct": 5.0,
+    "take_break_minutes": 60
+  },
+  "default_symbols": ["BTC/USDT", "ETH/USDT", "SOL/USDT"],
+  "trade_only_in_trend_direction": true,
+  "allow_counter_trend_exits": true,
+  "logging": {
+    "log_all_signals": true,
+    "log_trade_details": true,
+    "performance_tracking": true
+  },
+  "analysis": {
+    "lookback_periods": {
+      "short": 20,
+      "medium": 50,
+      "long": 200
+    }
+  }
+}

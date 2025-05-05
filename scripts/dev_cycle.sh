@@ -2,7 +2,7 @@
 # aGENtrader Dev Cycle Automation Script
 # 
 # This script automates the development cycle for aGENtrader:
-# 1. Pulls latest code changes
+# 1. Pulls latest code changes from selected branch
 # 2. Rebuilds Docker image
 # 3. Redeploys containers
 # 4. Validates deployment
@@ -10,6 +10,12 @@
 #
 # Author: AI Engineer Team
 # Created: 2025-04-29
+# Updated: 2025-04-30 - Added branch selection feature
+#
+# USAGE:
+#   ./scripts/dev_cycle.sh             # Use default branch (main)
+#   ./scripts/dev_cycle.sh -b v2.2.1   # Use branch v2.2.1
+#   ./scripts/dev_cycle.sh --branch develop  # Use branch develop
 
 # Get version from the centralized version file
 VERSION=$(python3 -c 'from core.version import VERSION; print(VERSION)')
@@ -21,6 +27,15 @@ IMAGE_TAG="latest"
 LOG_FILE="dev_cycle_$(date +%Y%m%d_%H%M%S).log"
 GITHUB_REPO="origin"
 GITHUB_BRANCH="main"
+
+# Parse command line arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        -b|--branch) GITHUB_BRANCH="$2"; shift ;;
+        *) echo "Unknown parameter: $1"; exit 1 ;;
+    esac
+    shift
+done
 
 # ANSI color codes
 GREEN="\033[0;32m"
@@ -382,6 +397,49 @@ fi
 # --- Main Dev Cycle Steps ---
 
 section "1. GIT PULL - Updating from repository"
+
+# Get current branch for info
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "Detached HEAD")
+log "INFO" "Current branch: $CURRENT_BRANCH"
+log "INFO" "Target branch for pull: $GITHUB_BRANCH"
+
+# Show available branches
+log "INFO" "Available branches:"
+git branch -r | grep -v '\->' | grep "origin/" | sed 's/origin\//  /' | while read -r branch; do
+    if [[ "$branch" == "  $GITHUB_BRANCH" ]]; then
+        log "INFO" "  > $branch (selected)"
+    else
+        log "INFO" "  > $branch"
+    fi
+done
+
+# Check if the branch exists
+if ! git ls-remote --heads $GITHUB_REPO $GITHUB_BRANCH | grep -q "$GITHUB_BRANCH"; then
+    log "ERROR" "Branch '$GITHUB_BRANCH' does not exist in '$GITHUB_REPO'. Available branches:"
+    git branch -r | grep -v '\->' | grep "origin/" | sed 's/origin\//  /' | while read -r branch; do
+        log "INFO" "  > $branch"
+    done
+    exit 1
+fi
+
+# Ask for confirmation if switching branches
+if [[ "$CURRENT_BRANCH" != "$GITHUB_BRANCH" ]]; then
+    log "WARNING" "You are about to switch from branch '$CURRENT_BRANCH' to '$GITHUB_BRANCH'"
+    read -p "Continue with branch switch? (y/n): " confirm_switch
+    
+    if [[ ! "$confirm_switch" =~ ^[Yy]$ ]]; then
+        log "INFO" "Branch switch cancelled. Exiting."
+        exit 0
+    fi
+    
+    # Checkout the new branch
+    if check_step "git checkout $GITHUB_BRANCH" "Switching to branch $GITHUB_BRANCH"; then
+        log "SUCCESS" "Switched to branch $GITHUB_BRANCH"
+    else
+        log "ERROR" "Failed to switch to branch $GITHUB_BRANCH. Aborting."
+        exit 1
+    fi
+fi
 
 # Fetch and pull the latest changes
 if check_step "git fetch $GITHUB_REPO $GITHUB_BRANCH" "Fetching latest changes from repository"; then

@@ -1,62 +1,51 @@
 """
-aGENtrader Version Information
+aGENtrader v2 Version Information
 
-This module provides centralized version information for the aGENtrader system.
-All components should import version information from here to ensure consistency.
+This module provides version information for the aGENtrader v2 system.
+All components should import VERSION from this module for consistency.
 """
 
-# Current version of the aGENtrader system
-VERSION = "v2.2.0"
+# Current version of aGENtrader
+VERSION = "0.2.0"
 
-# ASCII logo for branding (with ANSI color codes for terminal output)
+# ASCII art logo for display in console applications
 ASCII_LOGO = """
-\033[38;5;208m   █████╗  ██████╗ ███████╗███╗   ██╗████████╗██████╗  █████╗ ██████╗ ███████╗██████╗ 
-\033[38;5;214m  ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗
-\033[38;5;220m  ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ██████╔╝███████║██║  ██║█████╗  ██████╔╝
-\033[38;5;226m  ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗██╔══██║██║  ██║██╔══╝  ██╔══██╗
-\033[38;5;227m  ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ██║  ██║██║  ██║██████╔╝███████╗██║  ██║
-\033[38;5;228m  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝
-\033[0m                                                                                        
-"""
+   _____  _____ ______ _   _ _                    _           
+  / ____|/ ____|  ____| \ | | |                  | |          
+ | |  __| |  __| |__  |  \| | |_ _ __ __ _  __| | ___ _ __ 
+ | | |_ | | |_ |  __| | . ` | __| '__/ _` |/ _` |/ _ \ '__|
+ | |__| | |__| | |____| |\  | |_| | | (_| | (_| |  __/ |   
+  \_____|\_____\______|_| \_|\__|_|  \__,_|\__,_|\___|_|   
+                                                          v""" + VERSION
 
-# Plain ASCII logo (no color codes) for non-terminal environments
-PLAIN_ASCII_LOGO = """
-   █████╗  ██████╗ ███████╗███╗   ██╗████████╗██████╗  █████╗ ██████╗ ███████╗██████╗ 
-  ██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗██╔════╝██╔══██╗
-  ███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ██████╔╝███████║██║  ██║█████╗  ██████╔╝
-  ██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ██╔══██╗██╔══██║██║  ██║██╔══╝  ██╔══██╗
-  ██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ██║  ██║██║  ██║██████╔╝███████╗██║  ██║
-  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚══════╝╚═╝  ╚═╝
-                                                                                        
-"""
-
-# Bitcoin-themed mini logo for compact displays
-MINI_LOGO = """
-\033[38;5;208m  ₿₿₿   ₿₿₿₿₿  ₿₿₿₿₿  ₿   ₿  ₿₿₿₿₿₿  ₿₿₿₿   ₿₿₿₿   ₿₿₿₿₿  ₿₿₿₿₿  ₿₿₿₿  
-\033[38;5;214m ₿   ₿  ₿      ₿      ₿₿  ₿    ₿    ₿    ₿  ₿   ₿  ₿      ₿      ₿   ₿ 
-\033[38;5;220m ₿₿₿₿₿  ₿  ₿₿  ₿₿₿₿   ₿ ₿ ₿    ₿    ₿₿₿₿₿   ₿₿₿₿   ₿₿₿₿   ₿₿₿₿   ₿₿₿₿  
-\033[38;5;226m ₿   ₿  ₿   ₿  ₿      ₿  ₿₿    ₿    ₿    ₿  ₿   ₿  ₿      ₿      ₿ ₿   
-\033[38;5;227m ₿   ₿  ₿₿₿₿₿  ₿₿₿₿₿  ₿   ₿    ₿    ₿    ₿  ₿   ₿  ₿₿₿₿₿  ₿₿₿₿₿  ₿  ₿  
-\033[0m                                                                                
-"""
-
-# Version banner for logs
-VERSION_BANNER = f"aGENtrader {VERSION} - Multi-Agent AI Trading System"
-
-def get_version_banner(include_logo=False, mini=False):
+def get_version() -> str:
     """
-    Get a formatted version banner, optionally with a logo.
+    Get the current version of aGENtrader.
+    
+    Returns:
+        Version string
+    """
+    return VERSION
+    
+def get_version_banner(include_logo: bool = True, mini: bool = False) -> str:
+    """
+    Get a formatted version banner with ASCII art.
     
     Args:
         include_logo: Whether to include the ASCII logo
-        mini: Whether to use the mini logo (if including a logo)
+        mini: Whether to use a compact version
         
     Returns:
-        A formatted string with version information
+        Formatted version banner string
     """
-    if include_logo:
+    if not include_logo:
         if mini:
-            return f"{MINI_LOGO}\n{VERSION_BANNER}"
+            return f"aGENtrader v{VERSION}"
         else:
-            return f"{ASCII_LOGO}\n{VERSION_BANNER}"
-    return VERSION_BANNER
+            return f"aGENtrader version {VERSION}"
+    
+    if mini:
+        # Return a smaller version of the logo
+        return f"aGENtrader v{VERSION}"
+        
+    return ASCII_LOGO

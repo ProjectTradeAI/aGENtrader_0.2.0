@@ -7,7 +7,7 @@ It's used for testing and demonstration purposes only.
 import time
 import random
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from datetime import datetime, timedelta
 
 # Configure logging
@@ -223,6 +223,150 @@ class MockDataProvider:
                 }
             ]
         }
+    
+    def fetch_market_depth(self, symbol: str, limit: int = 100) -> Dict[str, Any]:
+        """
+        Fetch simulated market depth (order book) data.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT")
+            limit: Maximum number of price levels to return
+            
+        Returns:
+            Dictionary containing bids and asks arrays
+        """
+        current_price = self.get_current_price(symbol)
+        bid_price_base = current_price * 0.999  # Start slightly below current price
+        ask_price_base = current_price * 1.001  # Start slightly above current price
+        
+        bids = []
+        asks = []
+        
+        # Generate bids (buy orders) - decreasing prices
+        for i in range(limit):
+            price = bid_price_base * (1 - 0.0001 * i)  # Decrease by 0.01% per level
+            quantity = 1.0 + 4.0 * random.random()  # Random quantity between 1.0 and 5.0
+            
+            # Format as Binance would return: [price, quantity]
+            bids.append([price, quantity])
+        
+        # Generate asks (sell orders) - increasing prices
+        for i in range(limit):
+            price = ask_price_base * (1 + 0.0001 * i)  # Increase by 0.01% per level
+            quantity = 1.0 + 4.0 * random.random()  # Random quantity between 1.0 and 5.0
+            
+            # Format as Binance would return: [price, quantity]
+            asks.append([price, quantity])
+        
+        return {
+            "lastUpdateId": int(time.time() * 1000),
+            "bids": bids,
+            "asks": asks
+        }
+        
+    def fetch_futures_open_interest(self, symbol: str, interval: str = "4h", limit: int = 30) -> List[Dict[str, Any]]:
+        """
+        Fetch simulated futures open interest data.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT")
+            interval: Time interval (e.g., "4h", "1d")
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of simulated open interest records
+        """
+        now = datetime.now()
+        data = []
+        
+        # Convert interval to seconds (approximately)
+        if interval == "1h":
+            interval_seconds = 3600
+        elif interval == "4h":
+            interval_seconds = 14400
+        elif interval == "1d":
+            interval_seconds = 86400
+        else:
+            interval_seconds = 14400  # Default to 4h
+        
+        # Base values for simulation
+        base_price = self.get_current_price(symbol.replace("/", ""))
+        base_interest = base_price * 10000  # Simulate a reasonable open interest value
+        
+        # Generate data
+        for i in range(limit):
+            timestamp = int((now - timedelta(seconds=interval_seconds * (limit - i))).timestamp() * 1000)
+            
+            # Create realistic-looking open interest data with a slight trend
+            if i < limit / 3:
+                # Rising open interest
+                variation = 0.02 * i / (limit / 3)
+                open_interest = base_interest * (1 + variation)
+            elif i < 2 * limit / 3:
+                # Stable open interest
+                variation = 0.02 + 0.01 * random.random() - 0.005
+                open_interest = base_interest * (1 + variation)
+            else:
+                # Falling open interest
+                variation = 0.02 - 0.02 * (i - 2 * limit / 3) / (limit / 3)
+                open_interest = base_interest * (1 + max(0, variation))
+            
+            data.append({
+                "symbol": symbol.replace("/", ""),
+                "sumOpenInterest": open_interest,
+                "sumOpenInterestValue": open_interest * base_price,
+                "timestamp": timestamp
+            })
+        
+        return data
+    
+    def fetch_funding_rates(self, symbol: Union[str, Dict[str, Any], None] = None, limit: int = 30) -> List[Dict[str, Any]]:
+        """
+        Fetch simulated funding rates data.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT") or market data dictionary
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of simulated funding rate records
+        """
+        now = datetime.now()
+        data = []
+        
+        # Extract symbol string if market_data dictionary was passed
+        symbol_str = symbol
+        if isinstance(symbol, dict):
+            symbol_str = symbol.get('symbol', self.symbol)
+            
+        # Base values for simulation
+        symbol_str = symbol_str or self.symbol
+        if isinstance(symbol_str, str):
+            symbol_str = symbol_str.replace("/", "")
+        
+        # Generate data
+        for i in range(limit):
+            timestamp = int((now - timedelta(hours=8 * (limit - i))).timestamp() * 1000)
+            
+            # Create realistic-looking funding rate data with some patterns
+            if i < limit / 3:
+                # Positive funding rates (longs pay shorts)
+                rate = 0.0001 + 0.0002 * random.random()
+            elif i < 2 * limit / 3:
+                # Near-zero funding rates
+                rate = 0.00005 * (random.random() - 0.5)
+            else:
+                # Negative funding rates (shorts pay longs)
+                rate = -0.0001 - 0.0002 * random.random()
+            
+            data.append({
+                "symbol": symbol_str,
+                "fundingRate": rate,
+                "fundingTime": timestamp,
+                "time": timestamp
+            })
+        
+        return data
     
     # Below are methods to maintain compatibility with the BinanceDataProvider interface
     def _make_request(self, endpoint: str, method: str = "GET", 

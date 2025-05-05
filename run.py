@@ -47,7 +47,7 @@ from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
 from agents.decision_agent import DecisionAgent
 
 # Import the decision logger
-from core.logging.decision_logger import DecisionLogger, decision_logger
+from core.logging import DecisionLogger, decision_logger
 
 # Import the performance tracker
 from analytics.performance_tracker import PerformanceTracker
@@ -411,13 +411,27 @@ def run_sentiment_analysis(symbol, interval, data_provider=None):
 def run_liquidity_analysis(symbol, interval, data_provider):
     """Run liquidity analysis and log the results."""
     try:
-        # Initialize the liquidity analyst agent - note that it doesn't need a data_provider in constructor
-        liquidity_agent = LiquidityAnalystAgent()
+        # Initialize the liquidity analyst agent with data_provider
+        liquidity_agent = LiquidityAnalystAgent(data_fetcher=data_provider)
         
-        # Get agent's configured timeframe from its initialization
-        # We don't pass the system interval to respect the agent-specific timeframe
-        logging.info(f"Running liquidity analysis for {symbol} using agent's configured timeframe")
-        result = liquidity_agent.analyze(symbol=symbol)
+        # Create market_data dictionary with order book data
+        market_data = {
+            "symbol": symbol,
+            "interval": interval
+        }
+        
+        # Fetch order book data if data_provider is available
+        if data_provider:
+            try:
+                order_book = data_provider.fetch_market_depth(symbol)
+                market_data["order_book"] = order_book
+                logging.info(f"Fetched order book data for {symbol}")
+            except Exception as e:
+                logging.warning(f"Error fetching order book data: {str(e)}")
+        
+        # Run the analysis with market_data
+        logging.info(f"Running liquidity analysis for {symbol} at {interval} interval")
+        result = liquidity_agent.analyze(symbol=symbol, market_data=market_data, interval=interval)
         
         # Extract the actual interval used for logging purposes
         used_interval = result.get("interval", "unknown")
@@ -434,13 +448,13 @@ def run_liquidity_analysis(symbol, interval, data_provider):
 def run_funding_rate_analysis(symbol, interval, data_provider):
     """Run funding rate analysis and log the results."""
     try:
-        # Initialize the funding rate analyst agent
-        funding_agent = FundingRateAnalystAgent()
+        # Initialize the funding rate analyst agent with data_provider
+        funding_agent = FundingRateAnalystAgent(data_fetcher=data_provider)
         
         # Get agent's configured timeframe from its initialization
         # We don't pass the system interval to respect the agent-specific timeframe
-        logging.info(f"Running funding rate analysis for {symbol} using agent's configured timeframe")
-        result = funding_agent.analyze(symbol=symbol)
+        logging.info(f"Running funding rate analysis for {symbol} using {interval} timeframe")
+        result = funding_agent.analyze(symbol=symbol, interval=interval)
         
         # Extract the actual interval used for logging purposes
         used_interval = result.get("interval", "unknown")
@@ -457,13 +471,13 @@ def run_funding_rate_analysis(symbol, interval, data_provider):
 def run_open_interest_analysis(symbol, interval, data_provider):
     """Run open interest analysis and log the results."""
     try:
-        # Initialize the open interest analyst agent
-        oi_agent = OpenInterestAnalystAgent()
+        # Initialize the open interest analyst agent with data_provider
+        oi_agent = OpenInterestAnalystAgent(data_fetcher=data_provider)
         
         # Get agent's configured timeframe from its initialization
-        # We don't pass the system interval to respect the agent-specific timeframe
-        logging.info(f"Running open interest analysis for {symbol} using agent's configured timeframe")
-        result = oi_agent.analyze(symbol=symbol)
+        # We pass the system interval for better consistency
+        logging.info(f"Running open interest analysis for {symbol} using {interval} timeframe")
+        result = oi_agent.analyze(symbol=symbol, interval=interval)
         
         # Extract the actual interval used for logging purposes
         used_interval = result.get("interval", "unknown")
@@ -518,7 +532,21 @@ def process_trading_decision(symbol, interval, data_provider, trade_book_manager
         
         # Initialize the DecisionAgent and make a decision
         decision_agent = DecisionAgent()
-        decision = decision_agent.make_decision(agent_analyses, symbol=symbol, interval=interval)
+        
+        # Pass data provider to the decision agent for any follow-up analysis
+        # by wrapping symbol and interval in market_data format for compatibility
+        market_data = {
+            "symbol": symbol,
+            "interval": interval,
+            "data_provider": data_provider
+        }
+        
+        decision = decision_agent.make_decision(
+            agent_analyses=agent_analyses, 
+            symbol=symbol, 
+            interval=interval, 
+            market_data=market_data
+        )
         
         # Create trade proposal based on the integrated decision
         confidence = decision.get("confidence", 0)

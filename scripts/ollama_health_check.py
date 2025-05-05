@@ -145,6 +145,106 @@ def check_models_available(endpoint: Optional[str]) -> Dict[str, bool]:
     
     return model_status
 
+def check_ollama_listening_only_on_localhost() -> bool:
+    """
+    Check if Ollama is running but only listening on localhost/127.0.0.1.
+    This happens when Ollama is configured to only bind to localhost.
+    
+    Returns:
+        True if Ollama is running but only on localhost, False otherwise
+    """
+    try:
+        # First check if Ollama is running at localhost or 127.0.0.1
+        response_local = False
+        try:
+            response = requests.get('http://127.0.0.1:11434', timeout=2)
+            response_local = response.status_code == 200
+        except:
+            pass
+            
+        if not response_local:
+            try:
+                response = requests.get('http://localhost:11434', timeout=2)
+                response_local = response.status_code == 200
+            except:
+                pass
+        
+        # If it's running on localhost, check if it's NOT running on 0.0.0.0
+        if response_local:
+            try:
+                response = requests.get('http://0.0.0.0:11434', timeout=2)
+                # If we can access it on 0.0.0.0, it's not localhost-only
+                if response.status_code == 200:
+                    return False
+            except:
+                # If we can't access it on 0.0.0.0, check netstat to confirm
+                try:
+                    result = subprocess.run(['sudo', 'netstat', '-tulpn', '|', 'grep', 'ollama'],
+                                         shell=True, capture_output=True, text=True)
+                    if '127.0.0.1:11434' in result.stdout and '0.0.0.0:11434' not in result.stdout:
+                        logger.warning("Ollama detected as running but only on localhost (127.0.0.1)")
+                        return True
+                except:
+                    pass
+        
+        return False
+    except Exception as e:
+        logger.error(f"Error checking Ollama localhost binding: {e}")
+        return False
+
+def fix_ollama_config_for_all_interfaces(is_ec2: bool = False) -> bool:
+    """
+    Fix Ollama configuration to listen on all interfaces (0.0.0.0).
+    
+    Args:
+        is_ec2: Whether running in EC2 environment
+        
+    Returns:
+        True if successfully fixed, False otherwise
+    """
+    logger.info("Fixing Ollama configuration to listen on all interfaces...")
+    
+    if not is_ec2:
+        logger.warning("This fix should only be used in EC2 environment")
+        return False
+    
+    try:
+        # Stop Ollama service
+        logger.info("Stopping Ollama service...")
+        subprocess.run(['sudo', 'systemctl', 'stop', 'ollama'], check=True)
+        
+        # Create config directory if it doesn't exist
+        logger.info("Creating Ollama config directory...")
+        subprocess.run(['sudo', 'mkdir', '-p', '/etc/ollama'], check=True)
+        
+        # Create config file with proper binding
+        logger.info("Creating Ollama config to bind to all interfaces...")
+        cmd = ['sudo', 'bash', '-c', 'echo "host = \\"0.0.0.0\\"" > /etc/ollama/config']
+        subprocess.run(cmd, check=True)
+        
+        # Start Ollama service
+        logger.info("Starting Ollama service with new configuration...")
+        subprocess.run(['sudo', 'systemctl', 'start', 'ollama'], check=True)
+        
+        # Wait for service to start
+        time.sleep(5)
+        
+        # Verify it's running and listening on all interfaces
+        try:
+            response = requests.get('http://0.0.0.0:11434', timeout=5)
+            if response.status_code == 200:
+                logger.info("Ollama successfully reconfigured to listen on all interfaces")
+                return True
+            else:
+                logger.warning("Ollama started but not listening on all interfaces")
+                return False
+        except:
+            logger.warning("Could not connect to Ollama on all interfaces after reconfiguration")
+            return False
+    except Exception as e:
+        logger.error(f"Error fixing Ollama configuration: {e}")
+        return False
+
 def start_ollama(is_ec2: bool = False) -> bool:
     """
     Start the Ollama server.
@@ -156,6 +256,13 @@ def start_ollama(is_ec2: bool = False) -> bool:
         True if successfully started, False otherwise
     """
     logger.info("Attempting to start Ollama service...")
+    
+    # First check if Ollama is running but only on localhost
+    if is_ec2 and check_ollama_listening_only_on_localhost():
+        logger.warning("Ollama is running but only listening on localhost (127.0.0.1)")
+        logger.info("Will attempt to fix configuration and restart service")
+        if fix_ollama_config_for_all_interfaces(is_ec2=True):
+            return True
     
     if is_ec2:
         # Try to start with systemctl first

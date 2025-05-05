@@ -1,0 +1,1 @@
+{"agent": "SentimentAnalystAgent", "symbol": "BTC/USDT", "interval": "1h", "timestamp": "2025-05-01T15:49:18.135963", "result": {"signal": "HOLD", "confidence": 70, "reasoning": "Neutral market sentiment detected with moderate confidence. Insufficient data for thorough sentiment analysis."}, "elapsed_time": 0.01651310920715332, "use_mock_data": true, "temperature": 0.0}

@@ -1,10 +1,16 @@
 """
 aGENtrader v2 Models Package
 
-This package contains model-related modules such as LLM clients,
-ML models, and other AI-related functionality.
+This package contains model implementations and clients for aGENtrader v2.
 """
 
-from models.llm_client import LLMClient
+# Import model modules
+try:
+    from .llm_client import LLMClient
+except ImportError:
+    LLMClient = None
 
-__all__ = ['LLMClient']
+# Export available models
+__all__ = [
+    'LLMClient'
+]

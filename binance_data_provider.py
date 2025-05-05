@@ -206,6 +206,12 @@ class BinanceDataProvider:
                 except:
                     pass  # If we can't parse the error, continue with normal handling
             
+            # Handle 451 Geographic Restriction errors specially
+            elif e.response.status_code == 451:
+                logger.error(f"API access restricted due to geographic restrictions (451 error)")
+                # This is a case where we should try a different API or proxy
+                raise Exception("Geographic restriction (451) detected - Binance API not available in this region")
+            
             logger.error(f"API request failed: {str(e)}")
             raise Exception(f"Binance API request failed: {str(e)}")
             
@@ -299,6 +305,34 @@ class BinanceDataProvider:
         
         params = {"symbol": formatted_symbol}
         return self._make_request("/api/v3/ticker/24hr", params=params)
+        
+    def fetch_ticker(self, symbol: str) -> Dict[str, Any]:
+        """
+        Fetch ticker data for a symbol (alias for compatibility with other data providers).
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTC/USDT")
+            
+        Returns:
+            Dictionary with ticker data including 'last' price
+        """
+        ticker_data = self.get_ticker(symbol)
+        
+        # Format to ensure compatibility with the expected interface
+        formatted_ticker = {
+            "symbol": symbol,
+            "last": float(ticker_data.get("lastPrice", 0)),
+            "bid": float(ticker_data.get("bidPrice", 0)),
+            "ask": float(ticker_data.get("askPrice", 0)),
+            "high": float(ticker_data.get("highPrice", 0)),
+            "low": float(ticker_data.get("lowPrice", 0)),
+            "volume": float(ticker_data.get("volume", 0)),
+            "change": float(ticker_data.get("priceChange", 0)),
+            "percentage": float(ticker_data.get("priceChangePercent", 0)),
+            "timestamp": ticker_data.get("closeTime", int(time.time() * 1000))
+        }
+        
+        return formatted_ticker
     
     def get_current_price(self, symbol: str) -> float:
         """
@@ -414,6 +448,61 @@ class BinanceDataProvider:
                 "ask_total": 0.0
             }
             
+    def fetch_funding_rates(
+        self,
+        symbol: Union[str, Dict[str, Any], None] = None,
+        limit: int = 30
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch funding rates for a futures symbol.
+        
+        Args:
+            symbol: Trading symbol (e.g., "BTCUSDT") or market data dictionary
+            limit: Maximum number of records to return
+            
+        Returns:
+            List of funding rate records
+        """
+        # Extract symbol string if market_data dictionary was passed
+        if isinstance(symbol, dict):
+            symbol_str = symbol.get('symbol', 'BTCUSDT')
+        else:
+            symbol_str = symbol or 'BTCUSDT'
+        
+        # Format symbol correctly (remove "/" if present)
+        formatted_symbol = symbol_str.replace("/", "")
+        
+        try:
+            # Prepare parameters
+            params = {
+                "symbol": formatted_symbol,
+                "limit": limit
+            }
+            
+            # Make request to the funding rate endpoint (futures API)
+            funding_data = self._make_request(
+                "/fapi/v1/fundingRate", 
+                params=params,
+                use_futures_api=True
+            )
+            
+            # Format the response
+            formatted_funding_data = []
+            for item in funding_data:
+                formatted_funding_data.append({
+                    "symbol": formatted_symbol,
+                    "rate": float(item["fundingRate"]),
+                    "timestamp": int(item["fundingTime"]),
+                    "time": int(item["fundingTime"])
+                })
+                
+            return formatted_funding_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching funding rates: {str(e)}")
+            # Return empty list on error
+            return []
+    
     def fetch_futures_open_interest(
         self,
         symbol: str,
@@ -431,8 +520,21 @@ class BinanceDataProvider:
         Returns:
             List of open interest records
         """
-        # Format symbol correctly
+        # Format symbol correctly - ensure it's in the right format for futures API
         formatted_symbol = symbol.replace("/", "")
+        
+        # Some pairs may need to be formatted differently, ensure proper format for futures
+        if ":" not in formatted_symbol and "/" not in formatted_symbol:
+            # If not already in proper format, try to parse and convert
+            base_asset = formatted_symbol
+            if "USDT" in formatted_symbol:
+                base_asset = formatted_symbol.split("USDT")[0]
+            
+            # Ensure proper futures symbol format (usually just the base asset + USDT)
+            formatted_symbol = f"{base_asset}USDT"
+        
+        # Log the symbol we're requesting
+        logger.info(f"Requesting futures open interest for symbol: {formatted_symbol}")
         
         # Map interval to valid periods for openInterestHist endpoint
         period_map = {
@@ -447,6 +549,8 @@ class BinanceDataProvider:
             "period": period,
             "limit": limit
         }
+        
+        logger.info(f"Open interest params: {params}")
         
         # Try the appropriate endpoint with fallbacks to handle geographic restrictions
         futures_endpoints = []

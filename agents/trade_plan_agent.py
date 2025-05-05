@@ -577,7 +577,7 @@ class TradePlanAgent(BaseDecisionAgent):
         auto_tags = []
         
         # Calculate position size based on confidence, conflict score, and conflict flag
-        position_size, conflict_type, conflict_handling_applied = self._calculate_position_size(confidence, conflict_score, is_conflicted)
+        position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason = self._calculate_position_size(confidence, conflict_score, is_conflicted)
         
         # Add conflict tag if applicable
         if conflict_type:
@@ -880,7 +880,8 @@ class TradePlanAgent(BaseDecisionAgent):
             is_conflicted=is_conflicted,  # Pass the conflict flag
             conflict_type=conflict_type,  # Pass the conflict type (soft_conflict or conflicted)
             conflict_handling_applied=conflict_handling_applied,  # Whether position size was adjusted
-            conflict_score=conflict_score  # Pass the specific conflict score percentage
+            conflict_score=conflict_score,  # Pass the specific conflict score percentage
+            confidence_adjustment_reason=confidence_adjustment_reason  # New: Include confidence adjustment reasoning
         )
         
         # Prepare decision trace object for transparency and future learning
@@ -963,6 +964,9 @@ class TradePlanAgent(BaseDecisionAgent):
             "take_profit": take_profit,
             "position_size": position_size_value,
             "conflict_handling_applied": conflict_handling_applied,
+            
+            # Confidence adjustment reasoning (new)
+            "confidence_adjustment_reason": confidence_adjustment_reason,
             
             # Analysis and reasoning
             "reasoning": decision.get('reasoning', 'No reasoning provided'),
@@ -1319,7 +1323,7 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return entry_price, stop_loss, take_profit, used_fallback
     
-    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, is_conflicted: bool = False) -> Tuple[float, str, bool]:
+    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, is_conflicted: bool = False) -> Tuple[float, str, bool, Dict[str, Any]]:
         """
         Calculate position size based on confidence level and conflict score.
         
@@ -1333,7 +1337,22 @@ class TradePlanAgent(BaseDecisionAgent):
             - Position size multiplier (0.0 to 1.0)
             - Conflict type: None, "soft_conflict", or "conflicted"
             - Boolean indicating if conflict handling was applied
+            - Dictionary containing confidence adjustment reasoning
         """
+        # Initialize detailed reasoning dictionary
+        confidence_adjustment_reason = {
+            "base_position_tier": "",
+            "base_size": 0.0,
+            "original_position_size": 0.0,
+            "adjusted_position_size": 0.0,
+            "directional_adjustment": None,
+            "conflict_adjustment": None,
+            "final_size": 0.0,
+            "explanation": "",
+            "adjustment_factors": {},
+            "agent_disagreements": []
+        }
+        
         # Determine confidence tier
         if confidence >= self.confidence_tiers["high"]:
             tier = "high"
@@ -1343,7 +1362,10 @@ class TradePlanAgent(BaseDecisionAgent):
             tier = "low"
         else:
             # Below minimum confidence threshold
-            return 0.0, "", False
+            confidence_adjustment_reason.update({
+                "explanation": "Confidence below minimum threshold, position size set to 0"
+            })
+            return 0.0, "", False, confidence_adjustment_reason
         
         # Get position size multiplier for the tier
         position_size = self.position_size_multipliers[tier]
@@ -1351,13 +1373,34 @@ class TradePlanAgent(BaseDecisionAgent):
         conflict_type = ""
         conflict_handling_applied = False
         
+        # Record base position info
+        confidence_adjustment_reason.update({
+            "base_position_tier": tier,
+            "base_size": position_size,
+            "original_position_size": position_size,
+            "adjustment_factors": {
+                "base_confidence": f"Base confidence ({confidence:.1f}%) → {tier} tier: {position_size:.2f}"
+            }
+        })
+        
         # Apply enhanced stricter conflict reduction for explicit CONFLICTED signals
         if is_conflicted:
             # For explicit CONFLICTED signals, apply a more aggressive 70% reduction (only 30% of normal size)
+            prev_size = position_size
             position_size = position_size * 0.3  # 70% reduction
-            logger.warning(f"⚠️ Applying 70% position reduction for CONFLICTED signal: {original_size:.2f} → {position_size:.2f}")
+            logger.warning(f"⚠️ Applying 70% position reduction for CONFLICTED signal: {prev_size:.2f} → {position_size:.2f}")
             conflict_type = "conflicted"
             conflict_handling_applied = True
+            
+            # Record conflict adjustment
+            conflict_reason = f"CONFLICTED signal → 70% reduction"
+            confidence_adjustment_reason["adjustment_factors"]["conflict"] = conflict_reason
+            confidence_adjustment_reason["conflict_adjustment"] = {
+                "conflict_type": "explicit_conflicted",
+                "reduction_factor": 0.3,
+                "before": prev_size,
+                "after": position_size
+            }
             
             # Apply directional confidence reduction if available
             directional_confidence = getattr(self, '_directional_confidence', None)
@@ -1367,33 +1410,99 @@ class TradePlanAgent(BaseDecisionAgent):
                 prev_size = position_size
                 position_size = position_size * directional_factor
                 logger.warning(f"🔻 Further reducing position due to low directional confidence ({directional_confidence}%): {prev_size:.2f} → {position_size:.2f}")
+                
+                # Record directional adjustment
+                directional_reason = f"Low directional confidence ({directional_confidence:.1f}%) → additional {100 * (1-directional_factor):.1f}% reduction"
+                confidence_adjustment_reason["adjustment_factors"]["directional"] = directional_reason
+                confidence_adjustment_reason["directional_adjustment"] = {
+                    "directional_confidence": directional_confidence,
+                    "adjustment_factor": directional_factor,
+                    "before": prev_size,
+                    "after": position_size
+                }
         
         # Apply conflict risk reduction based on conflict score thresholds
         elif conflict_score is not None and conflict_score > 0:
             if conflict_score >= 70:
                 # Strong conflict: 50% reduction
+                prev_size = position_size
                 position_size = position_size * 0.5
-                logger.warning(f"Applying 50% position reduction for high conflict score ({conflict_score}%): {original_size:.2f} → {position_size:.2f}")
+                logger.warning(f"Applying 50% position reduction for high conflict score ({conflict_score}%): {prev_size:.2f} → {position_size:.2f}")
                 conflict_type = "conflicted"
                 conflict_handling_applied = True
+                
+                # Record conflict adjustment
+                conflict_reason = f"High conflict score ({conflict_score}%) → 50% reduction"
+                confidence_adjustment_reason["adjustment_factors"]["high_conflict"] = conflict_reason
+                confidence_adjustment_reason["conflict_adjustment"] = {
+                    "conflict_score": conflict_score,
+                    "conflict_type": "high_conflict",
+                    "reduction_factor": 0.5,
+                    "before": prev_size,
+                    "after": position_size
+                }
+                
             elif conflict_score >= 50:
                 # Soft conflict: 20% reduction
+                prev_size = position_size
                 position_size = position_size * 0.8
-                logger.info(f"Applying 20% position reduction for soft conflict score ({conflict_score}%): {original_size:.2f} → {position_size:.2f}")
+                logger.info(f"Applying 20% position reduction for soft conflict score ({conflict_score}%): {prev_size:.2f} → {position_size:.2f}")
                 conflict_type = "soft_conflict"
                 conflict_handling_applied = True
+                
+                # Record conflict adjustment
+                conflict_reason = f"Medium conflict score ({conflict_score}%) → 20% reduction"
+                confidence_adjustment_reason["adjustment_factors"]["soft_conflict"] = conflict_reason
+                confidence_adjustment_reason["conflict_adjustment"] = {
+                    "conflict_score": conflict_score,
+                    "conflict_type": "soft_conflict",
+                    "reduction_factor": 0.8,
+                    "before": prev_size,
+                    "after": position_size
+                }
+                
             else:
                 # Minor conflict: scaled reduction
                 max_conflict_reduction = 0.7
                 conflict_reduction = (conflict_score / 100) * max_conflict_reduction
-                position_size = position_size * (1 - conflict_reduction)
-                logger.info(f"Applying conflict-based position reduction: {conflict_score}% conflict score reduces position from {original_size:.2f} to {position_size:.2f}")
+                reduction_factor = 1 - conflict_reduction
+                prev_size = position_size
+                position_size = position_size * reduction_factor
+                logger.info(f"Applying conflict-based position reduction: {conflict_score}% conflict score reduces position from {prev_size:.2f} to {position_size:.2f}")
                 conflict_handling_applied = True
+                
+                # Record conflict adjustment
+                conflict_reason = f"Minor conflict score ({conflict_score}%) → {conflict_reduction*100:.1f}% reduction"
+                confidence_adjustment_reason["adjustment_factors"]["minor_conflict"] = conflict_reason
+                confidence_adjustment_reason["conflict_adjustment"] = {
+                    "conflict_score": conflict_score,
+                    "conflict_type": "minor_conflict",
+                    "reduction_factor": reduction_factor,
+                    "before": prev_size,
+                    "after": position_size
+                }
         
         # Ensure position size is within limits
+        prev_size = position_size
         position_size = max(min(position_size, self.max_position_size), self.min_position_size)
         
-        return position_size, conflict_type, conflict_handling_applied
+        # If position size was limited, record it
+        if position_size != prev_size:
+            if position_size == self.max_position_size:
+                limit_reason = f"Maximum position limit ({self.max_position_size})"
+                confidence_adjustment_reason["adjustment_factors"]["max_limit"] = limit_reason
+            else:
+                limit_reason = f"Minimum position limit ({self.min_position_size})"
+                confidence_adjustment_reason["adjustment_factors"]["min_limit"] = limit_reason
+        
+        # Set adjusted position size
+        confidence_adjustment_reason["adjusted_position_size"] = position_size
+        
+        # Final position size and explanation
+        confidence_adjustment_reason["final_size"] = position_size
+        confidence_adjustment_reason["explanation"] = " → ".join(confidence_adjustment_reason["adjustment_factors"].values())
+        
+        return position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason
 
     def _extract_historical_data(self, market_data: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
         """
@@ -1519,18 +1628,34 @@ class TradePlanAgent(BaseDecisionAgent):
         """
         Format agent contributions into a structured list for easy display.
         
+        Enhanced version that includes key insights and market mood tagging.
+        
         Args:
             decision: Decision dictionary from DecisionAgent
-            analyst_outputs: Optional dictionary of analyst agent outputs
+            analyst_outputs: Optional dictionary of analyst outputs
             
         Returns:
-            List of dictionaries containing structured agent contributions
+            List of dictionaries containing structured agent contributions with insights
         """
         structured_contributions = []
+        
+        # Track signals by type to identify disagreements and market mood
+        signals_by_type = {"BUY": [], "SELL": [], "NEUTRAL": [], "HOLD": []}
+        market_mood_tags = set()
         
         # First check if we have agent_contributions in the decision
         agent_contributions = decision.get('agent_contributions', {})
         contributing_agents = decision.get('contributing_agents', [])
+        
+        # Standard mapping for analyst outputs keys
+        analyst_key_map = {
+            "TechnicalAnalystAgent": "technical_analysis",
+            "SentimentAnalystAgent": "sentiment_analysis",
+            "SentimentAggregatorAgent": "sentiment_aggregator",
+            "LiquidityAnalystAgent": "liquidity_analysis",
+            "FundingRateAnalystAgent": "funding_rate_analysis",
+            "OpenInterestAnalystAgent": "open_interest_analysis"
+        }
         
         # Process agent_contributions if available
         if agent_contributions and isinstance(agent_contributions, dict):
@@ -1539,37 +1664,74 @@ class TradePlanAgent(BaseDecisionAgent):
                     continue
                     
                 if isinstance(contribution, dict):
+                    # Extract core data
+                    signal = contribution.get('signal', 'UNKNOWN')
+                    confidence = contribution.get('confidence', 0)
+                    
+                    # Create agent contribution item
                     agent_item = {
                         'agent': agent_name,
-                        'action': contribution.get('signal', 'UNKNOWN'),
-                        'confidence': contribution.get('confidence', 0),
-                        'reason': ''  # Default empty reason
+                        'action': signal,
+                        'confidence': confidence,
+                        'reason': '',  # Default empty reason
+                        'key_insight': ''  # New field for key insight
                     }
                     
                     # Get reasoning from contribution if available
                     if 'reasoning' in contribution:
                         agent_item['reason'] = contribution['reasoning']
                     
-                    # Try to get detailed reasoning from analyst_outputs
-                    if analyst_outputs and isinstance(analyst_outputs, dict) and agent_name in analyst_outputs:
-                        analyst_data = analyst_outputs[agent_name]
-                        if isinstance(analyst_data, dict):
-                            # Get the full reasoning and truncate if needed
-                            full_reason = analyst_data.get('reasoning', '')
-                            # Take first sentence or truncate to 100 chars
-                            if full_reason:
-                                short_reason = full_reason.split('.')[0]
-                                if len(short_reason) > 100:
-                                    short_reason = short_reason[:97] + "..."
-                                agent_item['reason'] = short_reason
+                    # Try to get more detailed data from analyst_outputs
+                    analyst_output_key = analyst_key_map.get(agent_name, agent_name.lower().replace('agent', '').strip())
+                    analyst_data = None
+                    
+                    if analyst_outputs and isinstance(analyst_outputs, dict):
+                        if agent_name in analyst_outputs:
+                            analyst_data = analyst_outputs[agent_name]
+                        elif analyst_output_key in analyst_outputs:
+                            analyst_data = analyst_outputs[analyst_output_key]
+                    
+                    if isinstance(analyst_data, dict):
+                        # Get the full reasoning and generate key insight
+                        full_reason = analyst_data.get('reasoning', '')
+                        if full_reason:
+                            # Set full reasoning if available
+                            agent_item['reason'] = full_reason
+                            
+                            # Extract key insight - first sentence or up to 100 chars
+                            insight = full_reason.split('.')[0].strip()
+                            if len(insight) > 100:
+                                insight = insight[:97] + "..."
+                            agent_item['key_insight'] = insight
+                    
+                    # Add to signal groups for disagreement analysis and market mood tagging
+                    if signal in signals_by_type:
+                        signals_by_type[signal].append({
+                            'agent': agent_name,
+                            'confidence': confidence,
+                            'key_insight': agent_item.get('key_insight', '')
+                        })
+                    
+                    # Generate agent-specific tags for market mood
+                    agent_tags = self._generate_agent_specific_tags(agent_name, signal, confidence, agent_item.get('key_insight', ''))
+                    if agent_tags:
+                        market_mood_tags.update(agent_tags)
+                        agent_item['tags'] = agent_tags
                     
                     structured_contributions.append(agent_item)
         
         # If no agent_contributions but we have analyst_outputs, extract from there
         elif analyst_outputs and isinstance(analyst_outputs, dict):
-            for agent_name, agent_data in analyst_outputs.items():
+            for agent_key, agent_data in analyst_outputs.items():
                 if not isinstance(agent_data, dict):
                     continue
+                
+                # Map back to agent name if possible
+                agent_name = agent_key
+                for full_name, short_key in analyst_key_map.items():
+                    if short_key == agent_key:
+                        agent_name = full_name
+                        break
                 
                 agent_signal = agent_data.get('signal', '')
                 agent_confidence = agent_data.get('confidence', 0)
@@ -1581,19 +1743,39 @@ class TradePlanAgent(BaseDecisionAgent):
                 elif 'reason' in agent_data:
                     agent_reason = agent_data['reason']
                 
-                # Truncate long reasons
-                if agent_reason and len(agent_reason) > 100:
-                    agent_reason = agent_reason.split('.')[0]
-                    if len(agent_reason) > 100:
-                        agent_reason = agent_reason[:97] + "..."
+                # Extract key insight
+                key_insight = ''
+                if agent_reason:
+                    key_insight = agent_reason.split('.')[0].strip()
+                    if len(key_insight) > 100:
+                        key_insight = key_insight[:97] + "..."
+                
+                # Generate agent-specific tags
+                agent_tags = self._generate_agent_specific_tags(agent_name, agent_signal, agent_confidence, key_insight)
+                if agent_tags:
+                    market_mood_tags.update(agent_tags)
+                
+                # Add to signal groups for disagreement analysis
+                if agent_signal in signals_by_type:
+                    signals_by_type[agent_signal].append({
+                        'agent': agent_name,
+                        'confidence': agent_confidence,
+                        'key_insight': key_insight
+                    })
                 
                 # Add to structured contributions
-                structured_contributions.append({
+                contribution = {
                     'agent': agent_name,
                     'action': agent_signal,
                     'confidence': agent_confidence,
-                    'reason': agent_reason
-                })
+                    'reason': agent_reason,
+                    'key_insight': key_insight
+                }
+                
+                if agent_tags:
+                    contribution['tags'] = agent_tags
+                    
+                structured_contributions.append(contribution)
         
         # If nothing else, try to extract from contributing_agents
         elif contributing_agents:
@@ -1601,18 +1783,232 @@ class TradePlanAgent(BaseDecisionAgent):
             confidence = decision.get('confidence', 0)
             reasoning = decision.get('reasoning', '')
             
+            # Extract key insight
+            key_insight = ''
+            if reasoning:
+                key_insight = reasoning.split('.')[0].strip()
+                if len(key_insight) > 100:
+                    key_insight = key_insight[:97] + "..."
+            
             for agent_name in contributing_agents:
-                structured_contributions.append({
+                if agent_name == "UnknownAgent":
+                    continue
+                
+                # Generate agent-specific tags
+                agent_tags = self._generate_agent_specific_tags(agent_name, signal, confidence, key_insight)
+                if agent_tags:
+                    market_mood_tags.update(agent_tags)
+                
+                # Add to signal groups for disagreement analysis
+                if signal in signals_by_type:
+                    signals_by_type[signal].append({
+                        'agent': agent_name,
+                        'confidence': confidence,
+                        'key_insight': key_insight
+                    })
+                
+                contribution = {
                     'agent': agent_name,
-                    'action': signal,  # Use decision signal as fallback
-                    'confidence': confidence,  # Use decision confidence as fallback
-                    'reason': reasoning if agent_name == contributing_agents[0] else ''
-                })
+                    'action': signal,
+                    'confidence': confidence,
+                    'reason': reasoning,
+                    'key_insight': key_insight
+                }
+                
+                if agent_tags:
+                    contribution['tags'] = agent_tags
+                    
+                structured_contributions.append(contribution)
         
         # Sort by confidence (descending)
         structured_contributions.sort(key=lambda x: x.get('confidence', 0), reverse=True)
         
+        # Add disagreement summary if there are divergent signals
+        disagreement_summary = self._generate_disagreement_summary(signals_by_type)
+        if disagreement_summary:
+            structured_contributions.append({
+                'agent': 'DISAGREEMENT_SUMMARY',
+                'action': 'INFO',
+                'confidence': 100,  # This is metadata, not a real signal
+                'reason': disagreement_summary,
+                'key_insight': "Agent disagreement detected",
+                'tags': ['agent_disagreement']
+            })
+            market_mood_tags.add('mixed_signals')
+        
+        # Add market mood summary if we have tags
+        if market_mood_tags:
+            structured_contributions.append({
+                'agent': 'MARKET_MOOD',
+                'action': 'INFO',
+                'confidence': 100,  # This is metadata, not a real signal
+                'reason': f"Market mood: {', '.join(sorted(market_mood_tags))}",
+                'key_insight': "Market mood indicators",
+                'tags': list(market_mood_tags)
+            })
+        
         return structured_contributions
+    
+    def _generate_disagreement_summary(self, signals_by_type: Dict[str, List[Dict[str, Any]]]) -> Optional[str]:
+        """
+        Generate a summary of agent disagreements.
+        
+        Args:
+            signals_by_type: Dictionary mapping signal types to lists of agents
+            
+        Returns:
+            String summary of disagreements or None if no significant disagreement
+        """
+        # Check if we have opposing signals (BUY vs SELL)
+        buy_agents = signals_by_type.get("BUY", [])
+        sell_agents = signals_by_type.get("SELL", [])
+        neutral_agents = signals_by_type.get("NEUTRAL", []) + signals_by_type.get("HOLD", [])
+        
+        if not buy_agents and not sell_agents:
+            return None  # No directional signals to compare
+            
+        # Minimal disagreement case - check confidence
+        if buy_agents and not sell_agents and len(neutral_agents) <= 1:
+            return None  # Only BUY signals, no significant disagreement
+            
+        if sell_agents and not buy_agents and len(neutral_agents) <= 1:
+            return None  # Only SELL signals, no significant disagreement
+        
+        # We have some form of disagreement, generate summary
+        parts = []
+        
+        if buy_agents and sell_agents:
+            # Direct BUY vs SELL conflict
+            buy_list = ", ".join([f"{a['agent'].replace('Agent', '')}" for a in buy_agents])
+            sell_list = ", ".join([f"{a['agent'].replace('Agent', '')}" for a in sell_agents])
+            
+            parts.append(f"{buy_list} show{'s' if len(buy_agents) == 1 else ''} bullish pressure")
+            parts.append(f"while {sell_list} {'is' if len(sell_agents) == 1 else 'are'} bearish")
+        
+        # Add neutral agents if they're significant
+        if neutral_agents and (buy_agents or sell_agents):
+            neutral_list = ", ".join([f"{a['agent'].replace('Agent', '')}" for a in neutral_agents])
+            parts.append(f"and {neutral_list} remain{'s' if len(neutral_agents) == 1 else ''} neutral")
+        
+        # Add insight-based details for high confidence signals
+        high_confidence_insights = []
+        
+        for signal_type, agents in signals_by_type.items():
+            for agent in agents:
+                if agent.get('confidence', 0) >= 75 and agent.get('key_insight'):
+                    agent_name = agent['agent'].replace('Agent', '')
+                    insight = agent['key_insight']
+                    high_confidence_insights.append(f"{agent_name}: {insight}")
+        
+        # Combine everything
+        summary = ". ".join(parts)
+        
+        if high_confidence_insights:
+            summary += ". Key insights: " + "; ".join(high_confidence_insights[:3])  # Limit to top 3 insights
+            
+        return summary
+        
+    def _generate_agent_specific_tags(
+        self, 
+        agent_name: str, 
+        signal: str, 
+        confidence: float,
+        key_insight: str = ""
+    ) -> List[str]:
+        """
+        Generate market mood tags based on agent, signal, and confidence.
+        
+        Args:
+            agent_name: Name of the agent
+            signal: Agent's signal
+            confidence: Agent's confidence
+            key_insight: Key insight from the agent
+            
+        Returns:
+            List of tags describing market mood
+        """
+        tags = []
+        agent_type = agent_name.lower().replace('agent', '').strip()
+        
+        # High confidence signals get special tags
+        if confidence >= 80:
+            if signal == "BUY":
+                tags.append("strong_bullish")
+            elif signal == "SELL":
+                tags.append("strong_bearish")
+            elif signal == "HOLD":
+                tags.append("strong_indecision")
+        
+        # Add agent-specific tags
+        if "technical" in agent_type:
+            if signal == "BUY":
+                tags.append("technical_bullish")
+            elif signal == "SELL":
+                tags.append("technical_bearish")
+            elif signal == "NEUTRAL" or signal == "HOLD":
+                tags.append("technical_neutral")
+                
+            # Add key insight based tags
+            if key_insight:
+                insight_lower = key_insight.lower()
+                if any(term in insight_lower for term in ["oversold", "support", "bottom"]):
+                    tags.append("oversold_conditions")
+                if any(term in insight_lower for term in ["overbought", "resistance", "top"]):
+                    tags.append("overbought_conditions")
+                if any(term in insight_lower for term in ["trend", "uptrend", "bullish trend"]):
+                    tags.append("trending_market")
+                if any(term in insight_lower for term in ["reversal", "turning", "pivot"]):
+                    tags.append("potential_reversal")
+        
+        elif "sentiment" in agent_type:
+            if signal == "BUY":
+                tags.append("positive_sentiment")
+            elif signal == "SELL":
+                tags.append("negative_sentiment")
+            elif signal == "NEUTRAL" or signal == "HOLD":
+                tags.append("mixed_sentiment")
+                
+            # Add key insight based tags
+            if key_insight:
+                insight_lower = key_insight.lower()
+                if any(term in insight_lower for term in ["fear", "panic", "anxiety"]):
+                    tags.append("fear_dominant")
+                if any(term in insight_lower for term in ["greed", "fomo", "excitement"]):
+                    tags.append("greed_dominant")
+        
+        elif "liquidity" in agent_type:
+            if signal == "BUY":
+                tags.append("good_buy_liquidity")
+            elif signal == "SELL":
+                tags.append("good_sell_liquidity")
+            elif signal == "NEUTRAL" or signal == "HOLD":
+                tags.append("balanced_liquidity")
+                
+            # Add key insight based tags
+            if key_insight:
+                insight_lower = key_insight.lower()
+                if any(term in insight_lower for term in ["wall", "barrier", "resistance"]):
+                    tags.append("liquidity_wall")
+                if any(term in insight_lower for term in ["thin", "shallow", "low liquidity"]):
+                    tags.append("thin_liquidity")
+        
+        elif "funding" in agent_type:
+            if signal == "BUY":
+                tags.append("favorable_funding")
+            elif signal == "SELL":
+                tags.append("unfavorable_funding")
+            elif signal == "NEUTRAL" or signal == "HOLD":
+                tags.append("neutral_funding")
+        
+        elif "interest" in agent_type:
+            if signal == "BUY":
+                tags.append("increasing_interest")
+            elif signal == "SELL":
+                tags.append("decreasing_interest")
+            elif signal == "NEUTRAL" or signal == "HOLD":
+                tags.append("stable_interest")
+        
+        return tags
     
     def _generate_reason_summary(
         self, 
@@ -1629,7 +2025,7 @@ class TradePlanAgent(BaseDecisionAgent):
         Returns:
             List of dictionaries containing structured agent contributions
         """
-        # Use the new _format_agent_contributions method to get structured agent data
+        # Use the enhanced _format_agent_contributions method to get structured agent data with insights
         return self._format_agent_contributions(decision, analyst_outputs)
     
     def _calculate_validity_period(
@@ -1797,7 +2193,8 @@ class TradePlanAgent(BaseDecisionAgent):
         is_conflicted: bool = False,  # Explicit conflict flag
         conflict_type: str = None,    # Type of conflict (soft_conflict, conflicted)
         conflict_handling_applied: bool = False,  # Whether position size was adjusted
-        conflict_score: Optional[int] = None  # Specific conflict score
+        conflict_score: Optional[int] = None,  # Specific conflict score
+        confidence_adjustment_reason: Optional[Dict[str, Any]] = None  # New: Confidence adjustment reasoning
     ) -> str:
         """
         Generate a human-readable digest of the trade plan.
@@ -1812,6 +2209,11 @@ class TradePlanAgent(BaseDecisionAgent):
             reason_summary: Optional list of agent contribution summaries
             tags: Optional list of tags associated with the trade plan
             agent_contributions: Optional dictionary of agent contributions
+            is_conflicted: Whether there is an explicit conflict flag
+            conflict_type: Type of conflict (soft_conflict, conflicted, etc.)
+            conflict_handling_applied: Whether position size was adjusted
+            conflict_score: Specific conflict score percentage
+            confidence_adjustment_reason: Dictionary containing detailed reasoning for confidence adjustments
             
         Returns:
             Human-readable plan digest with enhanced insights from agent contributions and tags
@@ -2022,6 +2424,36 @@ class TradePlanAgent(BaseDecisionAgent):
                     digest += f" Tight {r_r_ratio:.1f}:1 {trade_type} with caution."
             else:
                 digest += f" Consider {trade_type} approach."  # End with period if no R:R available
+        
+        # Add confidence adjustment reasoning if available
+        if confidence_adjustment_reason and isinstance(confidence_adjustment_reason, dict):
+            # Extract the main details
+            original_pos_size = confidence_adjustment_reason.get('original_position_size')
+            adjusted_pos_size = confidence_adjustment_reason.get('adjusted_position_size')
+            adjustment_factors = confidence_adjustment_reason.get('adjustment_factors', {})
+            
+            if original_pos_size is not None and adjusted_pos_size is not None and original_pos_size != adjusted_pos_size:
+                # Calculate percentage adjustment
+                pct_change = ((adjusted_pos_size / original_pos_size) - 1) * 100
+                adjustment_str = f" Position size {abs(pct_change):.0f}% {'reduced' if pct_change < 0 else 'increased'}"
+                
+                # Add reason if available
+                if adjustment_factors:
+                    reasons = []
+                    
+                    if 'conflict_score' in adjustment_factors:
+                        reasons.append(f"conflict score of {adjustment_factors['conflict_score']}%")
+                        
+                    if 'agent_disagreements' in adjustment_factors:
+                        disagreements = adjustment_factors['agent_disagreements']
+                        if isinstance(disagreements, list) and disagreements:
+                            agent_str = ", ".join(disagreements[:2])
+                            reasons.append(f"disagreement between {agent_str}")
+                    
+                    # Add factors to the adjustment string
+                    if reasons:
+                        adjustment_str += f" due to {' and '.join(reasons)}."
+                        digest += adjustment_str
         
         # Add conflict prefix if necessary
         return conflict_prefix + digest

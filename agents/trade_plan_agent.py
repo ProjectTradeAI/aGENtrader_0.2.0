@@ -200,6 +200,50 @@ class TradePlanAgent(BaseDecisionAgent):
         except Exception as e:
             self.logger.warning(f"Could not initialize portfolio manager: {str(e)}")
             self.portfolio_manager = None
+            
+    def _get_portfolio_state(self) -> Dict[str, Any]:
+        """
+        Get the current portfolio state from the portfolio manager.
+        
+        Returns:
+            Dictionary containing portfolio information including:
+            - total_value: Portfolio total value
+            - available_cash: Available cash for new positions
+            - total_exposure_pct: Current portfolio exposure percentage
+            - asset_exposures: Dictionary of asset-specific exposure percentages
+            - open_positions: List of current open positions
+        """
+        if self.portfolio_manager is None:
+            return {}
+            
+        try:
+            # Get portfolio summary
+            portfolio_summary = self.portfolio_manager.get_portfolio_summary()
+            
+            # Extract key metrics for trade planning
+            summary = {
+                "total_value": portfolio_summary.get("total_value", 0),
+                "available_cash": portfolio_summary.get("available_cash", 0),
+                "total_exposure_pct": portfolio_summary.get("total_exposure_pct", 0),
+                "asset_exposures": {},
+                "open_positions": []
+            }
+            
+            # Extract asset exposures
+            positions = portfolio_summary.get("positions", [])
+            for position in positions:
+                if isinstance(position, dict):
+                    asset = position.get("symbol", "").split("/")[0] if "/" in position.get("symbol", "") else position.get("symbol", "")
+                    exposure_pct = position.get("exposure_pct", 0)
+                    
+                    if asset:
+                        summary["asset_exposures"][asset] = exposure_pct
+                        summary["open_positions"].append(position)
+            
+            return summary
+        except Exception as e:
+            self.logger.warning(f"Error getting portfolio state: {str(e)}")
+            return {}
     
     def generate_trade_plan(
         self, 
@@ -599,8 +643,16 @@ class TradePlanAgent(BaseDecisionAgent):
         # Auto-tagging based on logic
         auto_tags = []
         
-        # Calculate position size based on confidence, conflict score, and conflict flag
-        position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason = self._calculate_position_size(confidence, conflict_score, is_conflicted)
+        # Extract symbol from market data for portfolio-aware position sizing
+        symbol = market_data.get('symbol', '')
+        
+        # Calculate position size based on confidence, conflict score, conflict flag, and symbol
+        position_size, conflict_type, conflict_handling_applied, confidence_adjustment_reason = self._calculate_position_size(
+            confidence=confidence, 
+            conflict_score=conflict_score, 
+            is_conflicted=is_conflicted, 
+            symbol=symbol
+        )
         
         # Add conflict tag if applicable
         if conflict_type:
@@ -890,6 +942,9 @@ class TradePlanAgent(BaseDecisionAgent):
         }
         
         # Generate a human-readable plan digest
+        # Store portfolio_info for access in other methods
+        portfolio_info = getattr(self, 'portfolio_info', {})
+        
         plan_digest = self._generate_plan_digest(
             signal=str(signal),  # Cast to string for type safety
             confidence=confidence,
@@ -904,7 +959,8 @@ class TradePlanAgent(BaseDecisionAgent):
             conflict_type=conflict_type,  # Pass the conflict type (soft_conflict or conflicted)
             conflict_handling_applied=conflict_handling_applied,  # Whether position size was adjusted
             conflict_score=conflict_score,  # Pass the specific conflict score percentage
-            confidence_adjustment_reason=confidence_adjustment_reason  # New: Include confidence adjustment reasoning
+            confidence_adjustment_reason=confidence_adjustment_reason,  # Include confidence adjustment reasoning
+            portfolio_info=portfolio_info  # Include portfolio state information
         )
         
         # Prepare decision trace object for transparency and future learning
@@ -1013,6 +1069,9 @@ class TradePlanAgent(BaseDecisionAgent):
             "plan_digest": plan_digest,
             "decision_trace": decision_trace,
             "performance": performance_metrics,
+            
+            # Portfolio information if available
+            "portfolio_info": getattr(self, 'portfolio_info', {}),
             
             # Timestamps and metadata
             "timestamp": datetime.now().isoformat(),
@@ -1346,14 +1405,16 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return entry_price, stop_loss, take_profit, used_fallback
     
-    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, is_conflicted: bool = False) -> Tuple[float, str, bool, Dict[str, Any]]:
+    def _calculate_position_size(self, confidence: float, conflict_score: Optional[int] = None, 
+                          is_conflicted: bool = False, symbol: str = "") -> Tuple[float, str, bool, Dict[str, Any]]:
         """
-        Calculate position size based on confidence level and conflict score.
+        Calculate position size based on confidence level, conflict score, and portfolio state.
         
         Args:
             confidence: Decision confidence percentage
             conflict_score: Optional conflict score (0-100) indicating level of disagreement between agents
             is_conflicted: Boolean flag indicating if the signal is explicitly CONFLICTED
+            symbol: Trading symbol for portfolio-aware position sizing
             
         Returns:
             Tuple containing:
@@ -1507,6 +1568,8 @@ class TradePlanAgent(BaseDecisionAgent):
         
         # Apply portfolio-based adjustments if portfolio manager is available
         portfolio_adjustment_applied = False
+        self.portfolio_info = {}  # Store as instance attribute for use in other methods
+        
         if self.portfolio_manager is not None:
             try:
                 # Get portfolio summary 
@@ -1520,22 +1583,77 @@ class TradePlanAgent(BaseDecisionAgent):
                     max_exposure = self.portfolio_manager.max_total_exposure_pct
                     available_exposure = max_exposure - total_exposure
                     
-                    # Check asset-specific exposure
-                    symbol_parts = symbol.replace("/", "").split(self.portfolio_manager.base_currency)
-                    if len(symbol_parts) > 0:
-                        asset = symbol_parts[0]
+                    # Extract asset name from symbol
+                    asset = ""
+                    if "/" in symbol:
+                        asset = symbol.split("/")[0]
+                    else:
+                        # Try to extract using base currency
+                        symbol_parts = symbol.replace("/", "").split(self.portfolio_manager.base_currency)
+                        if len(symbol_parts) > 0:
+                            asset = symbol_parts[0]
+                    
+                    # Store portfolio info for logging and later use
+                    self.portfolio_info = {
+                        "total_value": portfolio_summary.get("total_value", 0),
+                        "available_cash": portfolio_summary.get("available_cash", 0),
+                        "total_exposure_pct": total_exposure,
+                        "max_exposure_pct": max_exposure,
+                        "available_exposure_pct": available_exposure,
+                        "asset": asset
+                    }
+                    
+                    # Local reference for this method
+                    portfolio_info = self.portfolio_info
+                    
+                    logger.info(f"Portfolio state: total value={portfolio_info['total_value']:.2f}, " +
+                               f"available cash={portfolio_info['available_cash']:.2f}, " +
+                               f"current exposure={total_exposure:.2f}%, max={max_exposure:.2f}%")
+                    
+                    # If we have a valid asset, check asset-specific exposure
+                    if asset:
                         asset_exposure = portfolio_summary.get("asset_exposures", {}).get(asset, 0)
                         asset_max_exposure = self.portfolio_manager.max_per_asset_exposure_pct
                         available_asset_exposure = asset_max_exposure - asset_exposure
+                        
+                        # Add to portfolio info
+                        portfolio_info.update({
+                            "asset_exposure_pct": asset_exposure,
+                            "asset_max_exposure_pct": asset_max_exposure,
+                            "asset_available_exposure_pct": available_asset_exposure
+                        })
+                        
+                        logger.info(f"Asset {asset} exposure: current={asset_exposure:.2f}%, " +
+                                   f"max={asset_max_exposure:.2f}%, available={available_asset_exposure:.2f}%")
                         
                         # Choose the more restrictive limit
                         portfolio_max_size = min(available_exposure, available_asset_exposure) / 100
                         
                         # Apply portfolio limit if needed
                         if portfolio_max_size < position_size and portfolio_max_size > 0:
+                            prev_position = position_size
                             position_size = min(position_size, portfolio_max_size)
                             portfolio_adjustment_applied = True
-                            confidence_adjustment_reason["adjustment_factors"]["portfolio_limit"] = f"Portfolio exposure limit ({available_exposure:.1f}% total, {available_asset_exposure:.1f}% {asset})"
+                            
+                            adjustment_reason = f"Portfolio limit: {available_exposure:.1f}% total, {available_asset_exposure:.1f}% {asset}"
+                            confidence_adjustment_reason["adjustment_factors"]["portfolio_limit"] = adjustment_reason
+                            
+                            # Add portfolio adjustment details
+                            confidence_adjustment_reason["portfolio_adjustment"] = {
+                                "type": "exposure_limit",
+                                "before": prev_position,
+                                "after": position_size,
+                                "total_exposure_pct": total_exposure,
+                                "max_exposure_pct": max_exposure,
+                                "asset_exposure_pct": asset_exposure,
+                                "asset_max_exposure_pct": asset_max_exposure,
+                                "limiting_factor": "asset" if available_asset_exposure < available_exposure else "total"
+                            }
+                            
+                            logger.warning(f"📊 Applied portfolio limit: reducing position from {prev_position:.2f} to {position_size:.2f} " +
+                                          f"due to {portfolio_max_size*100:.1f}% available exposure")
+                    else:
+                        logger.info(f"Could not extract asset from symbol: {symbol}")
             except Exception as e:
                 self.logger.warning(f"Error applying portfolio adjustments: {str(e)}")
         
@@ -2251,7 +2369,8 @@ class TradePlanAgent(BaseDecisionAgent):
         conflict_type: str = None,    # Type of conflict (soft_conflict, conflicted)
         conflict_handling_applied: bool = False,  # Whether position size was adjusted
         conflict_score: Optional[int] = None,  # Specific conflict score
-        confidence_adjustment_reason: Optional[Dict[str, Any]] = None  # New: Confidence adjustment reasoning
+        confidence_adjustment_reason: Optional[Dict[str, Any]] = None,  # Confidence adjustment reasoning
+        portfolio_info: Optional[Dict[str, Any]] = None  # Portfolio state information
     ) -> str:
         """
         Generate a human-readable digest of the trade plan.
@@ -2481,6 +2600,23 @@ class TradePlanAgent(BaseDecisionAgent):
                     digest += f" Tight {r_r_ratio:.1f}:1 {trade_type} with caution."
             else:
                 digest += f" Consider {trade_type} approach."  # End with period if no R:R available
+                
+        # Add portfolio information if available
+        if portfolio_info and isinstance(portfolio_info, dict) and len(portfolio_info) > 0:
+            asset = portfolio_info.get('asset', '')
+            total_exposure = portfolio_info.get('total_exposure_pct', 0)
+            max_exposure = portfolio_info.get('max_exposure_pct', 100)
+            available_exposure = portfolio_info.get('available_exposure_pct', 0)
+            
+            # Add asset-specific exposure if available
+            asset_exposure_info = ""
+            if asset and 'asset_exposure_pct' in portfolio_info:
+                asset_exposure = portfolio_info.get('asset_exposure_pct', 0)
+                asset_max_exposure = portfolio_info.get('asset_max_exposure_pct', 0)
+                asset_exposure_info = f", {asset}: {asset_exposure:.1f}% of {asset_max_exposure:.1f}% limit"
+            
+            # Format portfolio constraint information
+            digest += f" Portfolio constraints: {total_exposure:.1f}% allocated of {max_exposure:.1f}% max{asset_exposure_info}."
         
         # Add confidence adjustment reasoning if available
         if confidence_adjustment_reason and isinstance(confidence_adjustment_reason, dict):
@@ -2646,6 +2782,28 @@ class TradePlanAgent(BaseDecisionAgent):
         logger.info(f"- R:R Ratio:     {rr_ratio:.2f}")
         logger.info(f"- Portfolio Risk: {portfolio_risk:.1f}%")
         logger.info(f"- Position Size:  {position_size:.4f}")
+        
+        # Portfolio info if available
+        portfolio_info = trade_plan.get('portfolio_info', {})
+        if portfolio_info and isinstance(portfolio_info, dict) and len(portfolio_info) > 0:
+            logger.info("")
+            logger.info("📊 Portfolio Information:")
+            
+            # Display total portfolio metrics
+            logger.info(f"- Total Value:    {portfolio_info.get('total_value', 0):.2f}")
+            logger.info(f"- Available Cash: {portfolio_info.get('available_cash', 0):.2f}")
+            
+            # Display exposure metrics
+            total_exposure = portfolio_info.get('total_exposure_pct', 0)
+            max_exposure = portfolio_info.get('max_exposure_pct', 100)
+            logger.info(f"- Total Exposure: {total_exposure:.1f}% / {max_exposure:.1f}% max")
+            
+            # Display asset-specific exposure if available
+            asset = portfolio_info.get('asset', '')
+            if asset and 'asset_exposure_pct' in portfolio_info:
+                asset_exposure = portfolio_info.get('asset_exposure_pct', 0)
+                asset_max = portfolio_info.get('asset_max_exposure_pct', 0)
+                logger.info(f"- {asset} Exposure: {asset_exposure:.1f}% / {asset_max:.1f}% max")
         
         # Trade info
         if trade_type:
@@ -2864,7 +3022,8 @@ class TradePlanAgent(BaseDecisionAgent):
                     # Explicit CONFLICTED with 70% reduction (only 30% of normal size)
                     estimated_original = position_size / 0.3  # Reverse the 70% reduction
                     dir_conf = ""
-                    if directional_confidence := trade_plan.get('directional_confidence'):
+                    directional_confidence = trade_plan.get('directional_confidence')
+                    if directional_confidence:
                         dir_conf = f", directional confidence: {directional_confidence}%"
                         
                     logger.info(f"  → 🔴 EXPLICIT CONFLICT HANDLING: Aggressive 70% position reduction applied{dir_conf}")
@@ -2938,7 +3097,8 @@ class TradePlanAgent(BaseDecisionAgent):
                 conflict_info = ""
                 if trade_plan.get('is_conflicted', False):
                     conflict_info = " [EXPLICIT CONFLICT - 70% POSITION REDUCTION]"
-                elif conflict_type := trade_plan.get('conflict_type'):
+                elif trade_plan.get('conflict_type'):
+                    conflict_type = trade_plan.get('conflict_type')
                     if conflict_type == "conflicted":
                         conflict_info = " [HIGH CONFLICT - 50% POSITION REDUCTION]"
                     elif conflict_type == "soft_conflict":

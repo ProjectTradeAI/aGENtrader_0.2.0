@@ -31,6 +31,7 @@ def test_calculate_position_size(
     confidence: float = 75.0, 
     conflict_score: Optional[int] = None, 
     is_conflicted: bool = False,
+    symbol: str = "BTC/USDT"
 ) -> Dict[str, Any]:
     """
     Test the _calculate_position_size method directly to verify graduated conflict handling.
@@ -39,6 +40,7 @@ def test_calculate_position_size(
         confidence: Decision confidence percentage
         conflict_score: Optional conflict score (0-100)
         is_conflicted: Whether the decision is explicitly marked as conflicted
+        symbol: Trading symbol for portfolio-aware position sizing tests
         
     Returns:
         Dictionary with test results
@@ -53,7 +55,8 @@ def test_calculate_position_size(
     position_size_info = trade_plan_agent._calculate_position_size(
         confidence=confidence,
         conflict_score=conflict_score,
-        is_conflicted=is_conflicted
+        is_conflicted=is_conflicted,
+        symbol=symbol
     )
     
     # Extract results
@@ -80,7 +83,8 @@ def test_calculate_position_size(
         "inputs": {
             "confidence": confidence,
             "conflict_score": conflict_score,
-            "is_conflicted": is_conflicted
+            "is_conflicted": is_conflicted,
+            "symbol": symbol
         }
     }
 

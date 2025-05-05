@@ -1066,6 +1066,12 @@ class TradePlanAgent(BaseDecisionAgent):
             elif r_r < 1.5:
                 unique_tags.append("high_volatility")
         
+        # Check for tag conflicts and generate mood clarification
+        mood_clarification = self._detect_tag_conflicts()
+        if mood_clarification:
+            # If a mood clarification exists, log it
+            logger.info(f"[MOOD CLARIFICATION] {mood_clarification}")
+            
         # Prepare comprehensive trade plan with enhanced details
         trade_plan = {
             # Plan metadata
@@ -1118,6 +1124,7 @@ class TradePlanAgent(BaseDecisionAgent):
             "plan_digest": plan_digest,
             "decision_trace": decision_trace,
             "performance": performance_metrics,
+            "mood_clarification": mood_clarification,  # Add mood tag conflict clarification
             
             # Portfolio information if available
             "portfolio_info": getattr(self, 'portfolio_info', {}),
@@ -2108,7 +2115,61 @@ class TradePlanAgent(BaseDecisionAgent):
         
         return structured_contributions
     
-    def _generate_strategy_tags(self, signal: str, analyst_outputs: Optional[Dict[str, Any]] = None, 
+    def _detect_tag_conflicts(self) -> Optional[str]:
+        """
+        Detect conflicts between market mood tags and provide clarification.
+        
+        Returns:
+            String explanation of tag conflicts or None if no conflicts
+        """
+        if not hasattr(self, 'generated_tags') or not self.generated_tags:
+            return None
+            
+        # Check for specific conflicts
+        bullish_tags = []
+        bearish_tags = []
+        mixed_tags = []
+        
+        # Group tags by sentiment
+        for tag, sentiment, confidence in self.generated_tags:
+            if sentiment == "bullish":
+                bullish_tags.append((tag, confidence))
+            elif sentiment == "bearish":
+                bearish_tags.append((tag, confidence))
+            elif sentiment == "mixed":
+                mixed_tags.append((tag, confidence))
+        
+        # Check for conflict (both bullish and bearish tags present)
+        if bullish_tags and bearish_tags:
+            # Find strongest bullish and bearish tags
+            strongest_bullish = max(bullish_tags, key=lambda x: x[1])
+            strongest_bearish = max(bearish_tags, key=lambda x: x[1])
+            
+            # Log the tag conflict for debugging
+            logger.info(f"[INFO] Mood clarification added due to conflicting tags: {strongest_bullish[0]} vs {strongest_bearish[0]}")
+            
+            # Generate appropriate clarification
+            if strongest_bullish[1] > strongest_bearish[1]:
+                return f"Conflicting indicators present: {strongest_bullish[0]} is dominant over {strongest_bearish[0]}, " \
+                       f"suggesting short-term noise is contrary to primary signal."
+            elif strongest_bearish[1] > strongest_bullish[1]:
+                return f"Conflicting indicators present: {strongest_bearish[0]} overrides {strongest_bullish[0]}, " \
+                       f"indicating mixed signals with bearish tone prevailing."
+            else:
+                return f"Equal strength conflict between {strongest_bullish[0]} and {strongest_bearish[0]}, " \
+                       f"suggesting market indecision and potentially choppy conditions."
+        
+        # Check for mixed tags conflicting with directional tags
+        if mixed_tags and (bullish_tags or bearish_tags):
+            mixed_tag = mixed_tags[0][0]
+            sentiment = "bullish" if bullish_tags else "bearish"
+            return f"Mixed indicator ({mixed_tag}) present alongside {sentiment} bias, " \
+                   f"suggesting caution despite directional pressure."
+                
+        # No conflicts
+        return None
+        
+    def _generate_strategy_tags(self, signal: Optional[str], analyst_outputs: Optional[Dict[str, Any]] = None, 
                              historical_data: Optional[List[Dict[str, Any]]] = None) -> List[str]:
         """
         Generate specific trading strategy tags based on market conditions.
@@ -2124,6 +2185,8 @@ class TradePlanAgent(BaseDecisionAgent):
         Returns:
             List of strategy tags
         """
+        # Store the generated tags for conflict checking later
+        self.generated_tags = []
         strategy_tags = []
         
         # Skip strategy tagging for non-actionable signals
@@ -2251,58 +2314,97 @@ class TradePlanAgent(BaseDecisionAgent):
             if reasoning and any(term in reasoning.lower() for term in ["diverge", "contrary", "opposite", "differ"]):
                 sentiment_divergence = True
                 
+        # Extract funding rate data for potential tag conflicts
+        funding_data = None
+        if analyst_outputs and isinstance(analyst_outputs, dict):
+            if "funding_rate_analysis" in analyst_outputs:
+                funding_data = analyst_outputs["funding_rate_analysis"]
+            elif "FundingRateAnalystAgent" in analyst_outputs:
+                funding_data = analyst_outputs["FundingRateAnalystAgent"]
+        
+        # Check for favorable/unfavorable funding
+        favorable_funding = False
+        unfavorable_funding = False
+        funding_signal = "NEUTRAL"
+        
+        if isinstance(funding_data, dict):
+            funding_signal = funding_data.get("signal", "NEUTRAL")
+            funding_confidence = funding_data.get("confidence", 0)
+            
+            # Check for funding conditions
+            if funding_signal == "BUY" and funding_confidence >= 60:
+                favorable_funding = True
+                self.generated_tags.append(("favorable_funding", "bullish", funding_confidence))
+            elif funding_signal == "SELL" and funding_confidence >= 60:
+                unfavorable_funding = True
+                self.generated_tags.append(("unfavorable_funding", "bearish", funding_confidence))
+        
         # Now determine strategy tags
         # BUY signal strategies
         if signal == "BUY":
             # Oversold bounce strategy
             if rsi_value is not None and rsi_value < 35:
                 strategy_tags.append("oversold_bounce")
+                self.generated_tags.append(("oversold_bounce", "bullish", 75))
             elif near_support and (in_downtrend or has_buy_wall):
                 strategy_tags.append("support_bounce")
+                self.generated_tags.append(("support_bounce", "bullish", 70))
                 
             # Bullish breakout strategy
             if near_resistance and high_volume and strong_momentum:
                 strategy_tags.append("bullish_breakout")
+                self.generated_tags.append(("bullish_breakout", "bullish", 80))
                 
             # Trend following strategy
             if in_uptrend and strong_momentum:
                 strategy_tags.append("momentum_surge")
+                self.generated_tags.append(("momentum_surge", "bullish", 75))
                 
             # Sentiment-based strategies
             if sentiment_bullish and near_support:
                 strategy_tags.append("sentiment_support_buy")
+                self.generated_tags.append(("sentiment_support_buy", "bullish", 70))
             elif sentiment_bearish and sentiment_extreme:
                 strategy_tags.append("contrarian_buy")  # Contrarian strategy
+                self.generated_tags.append(("contrarian_buy", "bullish", 60))
                 
             # Divergence strategies
             if sentiment_divergence and technical_data and isinstance(technical_data, dict) and technical_data.get("signal") == "BUY":
                 strategy_tags.append("technical_sentiment_divergence")
+                self.generated_tags.append(("technical_sentiment_divergence", "mixed", 65))
                 
         # SELL signal strategies
         elif signal == "SELL":
             # Overbought reversal strategy
             if rsi_value is not None and rsi_value > 65:
                 strategy_tags.append("overbought_reversal")
+                self.generated_tags.append(("overbought_reversal", "bearish", 75))
             elif near_resistance and (in_uptrend or has_sell_wall):
                 strategy_tags.append("resistance_reversal")
+                self.generated_tags.append(("resistance_reversal", "bearish", 70))
                 
             # Bearish breakdown strategy
             if near_support and high_volume and strong_momentum:
                 strategy_tags.append("bearish_breakdown")
+                self.generated_tags.append(("bearish_breakdown", "bearish", 80))
                 
             # Trend following strategy
             if in_downtrend and strong_momentum:
                 strategy_tags.append("momentum_drop")
+                self.generated_tags.append(("momentum_drop", "bearish", 75))
                 
             # Sentiment-based strategies
             if sentiment_bearish and near_resistance:
                 strategy_tags.append("sentiment_resistance_sell")
+                self.generated_tags.append(("sentiment_resistance_sell", "bearish", 70))
             elif sentiment_bullish and sentiment_extreme:
                 strategy_tags.append("contrarian_sell")  # Contrarian strategy
+                self.generated_tags.append(("contrarian_sell", "bearish", 60))
                 
             # Divergence strategies
             if sentiment_divergence and technical_data and isinstance(technical_data, dict) and technical_data.get("signal") == "SELL":
                 strategy_tags.append("technical_sentiment_divergence")
+                self.generated_tags.append(("technical_sentiment_divergence", "mixed", 65))
         
         return strategy_tags
         
@@ -3044,6 +3146,11 @@ class TradePlanAgent(BaseDecisionAgent):
             
         logger.info(f"- Signal:        {signal} (Confidence: {confidence_display})")
         
+        # Add mood clarification if available
+        mood_clarification = trade_plan.get('mood_clarification')
+        if mood_clarification:
+            logger.info(f"- Mood Status:   ⚠️ {mood_clarification}")
+        
         # Price levels
         if entry_price:
             logger.info(f"- Entry:         {entry_price:.2f}")
@@ -3387,6 +3494,12 @@ class TradePlanAgent(BaseDecisionAgent):
                         conflict_info = " [SOFT CONFLICT - 20% POSITION REDUCTION]"
                         
                 f.write(f"Signal: {trade_plan.get('signal')}{conflict_info} (Confidence: {confidence_display})\n")
+                
+                # Add mood clarification if available
+                mood_clarification = trade_plan.get('mood_clarification')
+                if mood_clarification:
+                    f.write(f"Mood Status: {mood_clarification}\n")
+                    
                 f.write(f"Entry: {trade_plan.get('entry_price')}\n")
                 f.write(f"Stop-Loss: {trade_plan.get('stop_loss')}\n")
                 f.write(f"Take-Profit: {trade_plan.get('take_profit')}\n")

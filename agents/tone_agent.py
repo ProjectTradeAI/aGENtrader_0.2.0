@@ -76,6 +76,9 @@ class ToneAgent(BaseAgent):
         self.logs_dir = os.path.join(parent_dir, "logs")
         if not os.path.exists(self.logs_dir):
             os.makedirs(self.logs_dir)
+            
+        # Initialize agent signals storage for validation
+        self._agent_signals = {}
         
         self.logger.info(f"Tone Agent initialized with {len(self.tone_profiles)} agent profiles")
     
@@ -96,6 +99,9 @@ class ToneAgent(BaseAgent):
         Returns:
             Dictionary with agent comments and system summary
         """
+        # First, log the actual signals from analyst results for validation
+        self._validate_and_log_signals(analysis_results)
+        
         if not self.grok_client or not self.grok_client.enabled:
             self.logger.warning("Grok client not available. Using fallback summary.")
             return self._generate_fallback_summary(analysis_results, final_decision, symbol, interval)
@@ -108,14 +114,42 @@ class ToneAgent(BaseAgent):
             
             # Prepare analyst information for the prompt
             analyst_info = []
-            for agent_name, analysis in analysis_results.items():
-                if isinstance(analysis, dict) and "signal" in analysis and "confidence" in analysis and "reasoning" in analysis:
-                    analyst_info.append({
-                        "agent": agent_name,
-                        "signal": analysis.get("signal", "UNKNOWN"),
-                        "confidence": analysis.get("confidence", 0),
-                        "reasoning": analysis.get("reasoning", "No reasoning provided")[:300]  # Truncate for prompt length
-                    })
+            
+            # Map analysis type keys to agent names for better readability
+            analysis_type_to_agent = {
+                'technical_analysis': 'TechnicalAnalystAgent',
+                'sentiment_analysis': 'SentimentAnalystAgent',
+                'sentiment_aggregator_analysis': 'SentimentAggregatorAgent',
+                'liquidity_analysis': 'LiquidityAnalystAgent',
+                'open_interest_analysis': 'OpenInterestAnalystAgent',
+                'funding_rate_analysis': 'FundingRateAnalystAgent'
+            }
+            
+            self.logger.info(f"Raw analysis_results keys: {list(analysis_results.keys())}")
+            
+            for analysis_type, analysis in analysis_results.items():
+                if not isinstance(analysis, dict):
+                    self.logger.warning(f"Analysis for {analysis_type} is not a dictionary")
+                    continue
+                    
+                # Get the proper agent name
+                agent_name = analysis_type_to_agent.get(analysis_type, analysis_type)
+                
+                # Extract signal with fallbacks for different field names
+                signal = analysis.get("signal") or analysis.get("final_signal") or analysis.get("action") or "UNKNOWN"
+                confidence = analysis.get("confidence", 0)
+                
+                # Extract reasoning with fallbacks
+                reasoning = analysis.get("reasoning") or analysis.get("reason") or "No reasoning provided"
+                
+                self.logger.info(f"Agent: {agent_name}, Signal: {signal}, Confidence: {confidence}")
+                
+                analyst_info.append({
+                    "agent": agent_name,
+                    "signal": signal,
+                    "confidence": confidence,
+                    "reasoning": reasoning[:300]  # Truncate for prompt length
+                })
             
             # Construct the prompt
             prompt = self._construct_prompt(analyst_info, final_decision, symbol, interval)
@@ -129,9 +163,13 @@ class ToneAgent(BaseAgent):
                         "content": (
                             "You are an expert crypto trading narrator that summarizes multi-agent trading decisions. "
                             "For each agent, create a unique voice using their personality profile. "
-                            "Then create an overall summary that balances all views. "
-                            "Your response should be in JSON format with keys for agent_comments (object with agent names as keys), "
-                            "system_summary (string), and mood (string - one of: bullish, neutral, conflicted, cautious, euphoric)."
+                            "IMPORTANT: You must accurately convey each agent's actual signal (BUY, SELL, HOLD, or NEUTRAL) "
+                            "in their tone comment. Never misrepresent what signal an agent is giving - accuracy of signal "
+                            "representation is critical. For example, if TechnicalAnalystAgent gives a BUY signal, their "
+                            "tone must clearly indicate they are positive/recommending buying, not holding or selling. "
+                            "Then create an overall summary that balances all views. Your response should be in JSON format "
+                            "with keys for agent_comments (object with agent names as keys), system_summary (string), and "
+                            "mood (string - one of: bullish, neutral, conflicted, cautious, euphoric)."
                         )
                     },
                     {
@@ -221,6 +259,13 @@ class ToneAgent(BaseAgent):
         # Special instructions based on decision state
         prompt += "\nSPECIAL INSTRUCTIONS:\n"
         
+        # Emphasis on signal accuracy
+        prompt += "- CRITICAL: For each agent comment, you MUST clearly convey their exact signal (BUY/SELL/HOLD/NEUTRAL).\n"
+        prompt += "- If an agent gives a BUY signal, their comment should clearly indicate bullishness or buying action.\n"
+        prompt += "- If an agent gives a NEUTRAL or HOLD signal, their comment should express caution, neutrality, or waiting.\n"
+        prompt += "- If an agent gives a SELL signal, their comment should clearly indicate bearishness or selling action.\n"
+        prompt += "- Never misrepresent an agent's signal in their comment - this is a critical requirement.\n"
+        
         if is_conflicted:
             prompt += "- Use a more cautious tone in the system summary as this is a conflicted or low confidence decision.\n"
         
@@ -292,14 +337,32 @@ For example:
             result["system_summary"] = f"Conflicted signals for {symbol}, requires caution."
             result["mood"] = "conflicted"
         
+        # Map analysis type keys to agent names for better readability
+        analysis_type_to_agent = {
+            'technical_analysis': 'TechnicalAnalystAgent',
+            'sentiment_analysis': 'SentimentAnalystAgent',
+            'sentiment_aggregator_analysis': 'SentimentAggregatorAgent',
+            'liquidity_analysis': 'LiquidityAnalystAgent',
+            'open_interest_analysis': 'OpenInterestAnalystAgent',
+            'funding_rate_analysis': 'FundingRateAnalystAgent'
+        }
+        
         # Add basic agent comments
-        for agent_name, analysis in analysis_results.items():
-            if isinstance(analysis, dict) and "signal" in analysis:
-                agent_signal = analysis.get("signal", "UNKNOWN")
-                agent_confidence = analysis.get("confidence", 0)
+        for analysis_type, analysis in analysis_results.items():
+            if not isinstance(analysis, dict):
+                continue
                 
-                comment = f"{agent_signal} signal with {agent_confidence}% confidence."
-                result["agent_comments"][agent_name] = comment
+            # Get the proper agent name
+            agent_name = analysis_type_to_agent.get(analysis_type, analysis_type)
+            
+            # Extract signal with fallbacks for different field names
+            signal = analysis.get("signal") or analysis.get("final_signal") or analysis.get("action") or "UNKNOWN"
+            confidence = analysis.get("confidence", 0)
+            
+            comment = f"{signal} signal with {confidence}% confidence."
+            result["agent_comments"][agent_name] = comment
+            
+            self.logger.info(f"Fallback for {agent_name}: {signal} with {confidence}%")
         
         # Save the summary to logs
         self._save_summary(result, symbol, interval)
@@ -338,6 +401,70 @@ For example:
         except Exception as e:
             self.logger.error(f"Error saving tone summary: {str(e)}")
     
+    def _validate_and_log_signals(self, analysis_results: Dict[str, Any]) -> None:
+        """
+        Validate and log the actual signals from the analysis results.
+        This helps in debugging signal mismatches between agent outputs and tone summaries.
+        
+        Args:
+            analysis_results: Dictionary of all analyst outputs
+        """
+        try:
+            # Map analysis type keys to agent names for better readability
+            analysis_type_to_agent = {
+                'technical_analysis': 'TechnicalAnalystAgent',
+                'sentiment_analysis': 'SentimentAnalystAgent',
+                'sentiment_aggregator_analysis': 'SentimentAggregatorAgent',
+                'liquidity_analysis': 'LiquidityAnalystAgent',
+                'open_interest_analysis': 'OpenInterestAnalystAgent',
+                'funding_rate_analysis': 'FundingRateAnalystAgent'
+            }
+            
+            # Count signals by type
+            signal_counts = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0, "UNKNOWN": 0}
+            agent_signals = {}
+            
+            # Banner for visibility in logs
+            self.logger.info("=" * 50)
+            self.logger.info("VALIDATION - ACTUAL AGENT SIGNALS:")
+            self.logger.info("-" * 50)
+            
+            for analysis_type, analysis in analysis_results.items():
+                if not isinstance(analysis, dict):
+                    self.logger.warning(f"Analysis for {analysis_type} is not a dictionary")
+                    continue
+                
+                # Get the proper agent name
+                agent_name = analysis_type_to_agent.get(analysis_type, analysis_type)
+                
+                # Extract signal with fallbacks for different field names
+                signal = analysis.get("signal") or analysis.get("final_signal") or analysis.get("action") or "UNKNOWN"
+                confidence = analysis.get("confidence", 0)
+                
+                # Update counts and record
+                if signal in signal_counts:
+                    signal_counts[signal] += 1
+                else:
+                    signal_counts["UNKNOWN"] += 1
+                
+                agent_signals[agent_name] = {
+                    "signal": signal,
+                    "confidence": confidence
+                }
+                
+                self.logger.info(f"Agent: {agent_name}, Signal: {signal}, Confidence: {confidence}%")
+                
+            # Print summary of signals
+            self.logger.info("-" * 50)
+            self.logger.info(f"Signal Count: BUY: {signal_counts['BUY']}, SELL: {signal_counts['SELL']}, HOLD/NEUTRAL: {signal_counts['HOLD'] + signal_counts['NEUTRAL']}, UNKNOWN: {signal_counts['UNKNOWN']}")
+            self.logger.info("=" * 50)
+            
+            # Store for comparison later
+            self._agent_signals = agent_signals
+            
+        except Exception as e:
+            self.logger.error(f"Error validating signals: {str(e)}")
+            
     def _print_formatted_summary(self, summary: Dict[str, Any], symbol: str, interval: str) -> None:
         """
         Print the summary in a formatted way.
@@ -359,6 +486,31 @@ For example:
             output += "📣 Agent Voices:\n"
             for agent, comment in agent_comments.items():
                 output += f"- {agent}: \"{comment}\"\n"
+            
+            # Extract and count signals from agent comments (for validation)
+            signal_counts = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0, "UNKNOWN": 0}
+            for comment in agent_comments.values():
+                for signal in signal_counts.keys():
+                    if signal in comment:
+                        signal_counts[signal] += 1
+                        break
+            
+            # Log signal counts for validation
+            output += f"\n📊 Signal Count (from tone): BUY: {signal_counts['BUY']}, SELL: {signal_counts['SELL']}, HOLD/NEUTRAL: {signal_counts['HOLD'] + signal_counts['NEUTRAL']}\n"
+            
+            # Compare with actual signals (if available)
+            if hasattr(self, '_agent_signals') and self._agent_signals:
+                output += "\n⚠️ VALIDATION - Signals in Tone vs Actual:\n"
+                for agent, comment in agent_comments.items():
+                    if agent in self._agent_signals:
+                        actual_signal = self._agent_signals[agent]["signal"]
+                        actual_confidence = self._agent_signals[agent]["confidence"]
+                        
+                        # Check if the tone matches the actual signal
+                        tone_matches = actual_signal in comment
+                        match_marker = "✅" if tone_matches else "❌"
+                        
+                        output += f"{match_marker} {agent}: Actual={actual_signal} @ {actual_confidence}%, Tone: \"{comment}\"\n"
                 
             # Add system summary
             output += f"\n🧠 Summary: {system_summary}\n"

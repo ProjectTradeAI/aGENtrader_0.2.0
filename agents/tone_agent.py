@@ -7,6 +7,7 @@ decisions, giving each agent a unique voice and providing an overall narrative.
 import os
 import sys
 import json
+import random
 import logging
 from typing import Dict, Any, List, Optional, Union
 import time
@@ -70,6 +71,56 @@ class ToneAgent(BaseAgent):
             "OpenInterestAnalystAgent": "Cautious, looks for consistency or divergence.",
             "FundingRateAnalystAgent": "Skeptical, sharp. Knows when the herd is paying the wrong price.",
             "SentimentAggregatorAgent": "Strategic and composed. Thinks big picture, macro framing."
+        }
+        
+        # Define confidence-based tone modifiers
+        self.confidence_tone_modifiers = {
+            "high": {  # 80%+ confidence
+                "prefix_templates": [
+                    "Decisively", "Confidently", "Absolutely", "Clearly", "Without a doubt",
+                    "All indicators suggest", "The data strongly shows", "I'm convinced"
+                ],
+                "suffix_templates": [
+                    "with strong conviction", "with high confidence", "based on solid evidence",
+                    "looking remarkably clear", "- the signals are strong"
+                ],
+                "description": "assertive, confident, definitive"
+            },
+            "medium": {  # 60-79% confidence
+                "prefix_templates": [
+                    "Moderately", "Reasonably", "It appears", "The data suggests", "I believe",
+                    "There's decent evidence", "It seems", "I'm seeing signs"
+                ],
+                "suffix_templates": [
+                    "with moderate confidence", "with reasonable certainty", "though not absolutely certain",
+                    "based on adequate evidence", "- the signals are moderate"
+                ],
+                "description": "balanced, measured, somewhat cautious"
+            },
+            "low": {  # Below 60% confidence
+                "prefix_templates": [
+                    "Tentatively", "Hesitantly", "Perhaps", "There's a hint that", "I'm sensing",
+                    "Early indications suggest", "It's possible", "I'm slightly leaning"
+                ],
+                "suffix_templates": [
+                    "but I'm not entirely confident", "though the signals are weak", "with low confidence",
+                    "though it's too early to be certain", "- take this with caution"
+                ],
+                "description": "hesitant, reserved, speculative"
+            }
+        }
+        
+        # Define fallback tone modifiers
+        self.fallback_tone_modifiers = {
+            "prefix_templates": [
+                "With limited data", "Based on partial information", "Working with minimal signals",
+                "From what little I can gather", "With incomplete information"
+            ],
+            "suffix_templates": [
+                "but take this with extra caution", "though more data would help", "though this is highly uncertain",
+                "consider this preliminary at best", "until more information becomes available"
+            ],
+            "description": "cautious, minimal, explicitly uncertain"
         }
         
         # Create logs directory if it doesn't exist
@@ -142,13 +193,24 @@ class ToneAgent(BaseAgent):
                 # Extract reasoning with fallbacks
                 reasoning = analysis.get("reasoning") or analysis.get("reason") or "No reasoning provided"
                 
-                self.logger.info(f"Agent: {agent_name}, Signal: {signal}, Confidence: {confidence}")
+                # Check for fallback/partial data flags
+                is_fallback = analysis.get("is_fallback", False) or analysis.get("fallback", False)
+                is_partial_data = analysis.get("is_partial", False) or analysis.get("partial_data", False)
+                using_heuristics = analysis.get("using_heuristics", False) or analysis.get("heuristic_based", False)
+                
+                # Generate a flag for fallback data
+                data_quality = "normal"
+                if is_fallback or is_partial_data or using_heuristics:
+                    data_quality = "fallback"
+                    
+                self.logger.info(f"Agent: {agent_name}, Signal: {signal}, Confidence: {confidence}, Data Quality: {data_quality}")
                 
                 analyst_info.append({
                     "agent": agent_name,
                     "signal": signal,
                     "confidence": confidence,
-                    "reasoning": reasoning[:300]  # Truncate for prompt length
+                    "reasoning": reasoning[:300],  # Truncate for prompt length
+                    "data_quality": data_quality
                 })
             
             # Construct the prompt
@@ -242,10 +304,12 @@ class ToneAgent(BaseAgent):
             signal = info.get("signal", "UNKNOWN")
             confidence = info.get("confidence", 0)
             reasoning = info.get("reasoning", "No reasoning provided")
+            data_quality = info.get("data_quality", "normal")
             
             prompt += f"- {agent}:\n"
             prompt += f"  Signal: {signal}\n"
             prompt += f"  Confidence: {confidence}%\n"
+            prompt += f"  Data Quality: {data_quality}\n"
             prompt += f"  Reasoning: {reasoning}\n\n"
         
         # Add final decision
@@ -265,6 +329,18 @@ class ToneAgent(BaseAgent):
         prompt += "- If an agent gives a NEUTRAL or HOLD signal, their comment should express caution, neutrality, or waiting.\n"
         prompt += "- If an agent gives a SELL signal, their comment should clearly indicate bearishness or selling action.\n"
         prompt += "- Never misrepresent an agent's signal in their comment - this is a critical requirement.\n"
+        
+        # Add dynamic tone scaling instructions based on confidence levels
+        prompt += "\nTONE SCALING INSTRUCTIONS:\n"
+        prompt += "- Adjust each agent's tone based on their confidence level:\n"
+        prompt += "  * 80%+ confidence: Use assertive, confident, definitive language\n"
+        prompt += "  * 60-79% confidence: Use balanced, measured, somewhat cautious language\n"
+        prompt += "  * Below 60% confidence: Use hesitant, reserved, speculative language\n"
+        
+        # Add fallback tone instructions
+        prompt += "- For any agent whose data is flagged as fallback or has missing/partial data:\n"
+        prompt += "  * Use explicitly cautious, minimal tone that acknowledges limited information\n"
+        prompt += "  * Include phrasing like 'with limited data' or 'based on partial information'\n"
         
         if is_conflicted:
             prompt += "- Use a more cautious tone in the system summary as this is a conflicted or low confidence decision.\n"
@@ -323,18 +399,32 @@ For example:
         signal = final_decision.get("signal", "UNKNOWN")
         confidence = final_decision.get("confidence", 0)
         
-        # Adjust system summary based on signal
+        # Determine tone level based on confidence
+        if confidence >= 80:
+            tone_level = "high"
+            mood_prefix = ""
+        elif confidence >= 60:
+            tone_level = "medium"
+            mood_prefix = "cautiously_"
+        else:
+            tone_level = "low"
+            mood_prefix = "tentatively_"
+            
+        # Get tone modifiers
+        prefix = random.choice(self.confidence_tone_modifiers[tone_level]["prefix_templates"])
+        
+        # Adjust system summary based on signal with appropriate tone
         if signal == "BUY":
-            result["system_summary"] = f"Bullish signal for {symbol} with {confidence}% confidence."
-            result["mood"] = "bullish"
+            result["system_summary"] = f"{prefix} seeing a bullish signal for {symbol} with {confidence}% confidence."
+            result["mood"] = f"{mood_prefix}bullish"
         elif signal == "SELL":
-            result["system_summary"] = f"Bearish signal for {symbol} with {confidence}% confidence."
-            result["mood"] = "bearish"
+            result["system_summary"] = f"{prefix} seeing a bearish signal for {symbol} with {confidence}% confidence."
+            result["mood"] = f"{mood_prefix}bearish"
         elif signal == "HOLD":
-            result["system_summary"] = f"Neutral stance on {symbol} with {confidence}% confidence."
+            result["system_summary"] = f"{prefix} maintaining a neutral stance on {symbol} with {confidence}% confidence."
             result["mood"] = "neutral"
         elif signal == "CONFLICTED":
-            result["system_summary"] = f"Conflicted signals for {symbol}, requires caution."
+            result["system_summary"] = f"Seeing conflicted signals for {symbol}, which requires caution."
             result["mood"] = "conflicted"
         
         # Map analysis type keys to agent names for better readability
@@ -359,10 +449,34 @@ For example:
             signal = analysis.get("signal") or analysis.get("final_signal") or analysis.get("action") or "UNKNOWN"
             confidence = analysis.get("confidence", 0)
             
-            comment = f"{signal} signal with {confidence}% confidence."
+            # Check for fallback/partial data flags
+            is_fallback = analysis.get("is_fallback", False) or analysis.get("fallback", False)
+            is_partial_data = analysis.get("is_partial", False) or analysis.get("partial_data", False)
+            using_heuristics = analysis.get("using_heuristics", False) or analysis.get("heuristic_based", False)
+            
+            # Apply confidence-based tone modifiers
+            if confidence >= 80:
+                tone_level = "high"
+            elif confidence >= 60:
+                tone_level = "medium"
+            else:
+                tone_level = "low"
+                
+            # Generate comment with appropriate tone
+            if is_fallback or is_partial_data or using_heuristics:
+                # Use fallback tone
+                prefix = self.fallback_tone_modifiers["prefix_templates"][0]
+                suffix = self.fallback_tone_modifiers["suffix_templates"][0]
+                comment = f"{prefix}, I'm seeing a {signal} signal {suffix}."
+            else:
+                # Use confidence-based tone
+                prefix = self.confidence_tone_modifiers[tone_level]["prefix_templates"][0]
+                suffix = self.confidence_tone_modifiers[tone_level]["suffix_templates"][0]
+                comment = f"{prefix} seeing a {signal} signal {suffix}."
+            
             result["agent_comments"][agent_name] = comment
             
-            self.logger.info(f"Fallback for {agent_name}: {signal} with {confidence}%")
+            self.logger.info(f"Fallback for {agent_name}: {signal} with {confidence}% (Tone: {tone_level})")
         
         # Save the summary to logs
         self._save_summary(result, symbol, interval)

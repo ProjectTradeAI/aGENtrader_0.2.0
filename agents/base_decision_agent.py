@@ -18,24 +18,9 @@ from core.logging import decision_logger
 # Configure logging
 logger = logging.getLogger("aGENtrader.agents.decision")
 
-class BaseDecisionAgent(BaseAgent, DecisionAgentInterface):
-    """
-    Base class for decision agents that synthesize analysis results.
-    
-    This class implements the common functionality for decision agents:
-    - Collecting analysis results from various analyst agents
-    - Weighing different analysis types
-    - Synthesizing a final trading decision
-    - Logging the decision with explanation
-    """
-    
-    def __init__(self, analyst_results: Optional[Dict[str, Any]] = None):
-        """
-        Initialize the base decision agent.
-        
-        Args:
-            analyst_results: Optional dictionary of analyst results
-        """
+class BaseDecisionAgent(\1):
+    """BaseDecisionAgent for aGENtrader v0.2.2"""
+\2def __init__(self\3):\4    self.version = "v0.2.2"
         super().__init__(agent_name="decision")
         self._description = "Base decision agent for trading signals"
         

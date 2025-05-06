@@ -1,5 +1,5 @@
 """
-aGENtrader v2 Tone Agent
+aGENtrader v0.2.2 Tone Agent
 
 This agent is responsible for generating human-like, styled summaries of multi-agent trade
 decisions, giving each agent a unique voice and providing an overall narrative.
@@ -34,12 +34,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ToneAgent")
 
 class ToneAgent(BaseAgent):
-    """
-    Agent that generates human-like, styled summaries of multi-agent trade decisions.
-    
-    This agent takes all analyst outputs and the final decision, then creates
-    a narrative with each agent having a unique voice/tone.
-    """
+    """ToneAgent for aGENtrader v0.2.2"""
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
@@ -49,6 +44,7 @@ class ToneAgent(BaseAgent):
             config: Configuration dictionary with optional settings
         """
         super().__init__("ToneAgent")
+        self.version = "v0.2.2"
         self.description = "Generates human-like summaries of multi-agent trade decisions"
         
         # Set up logger

@@ -24,21 +24,17 @@ logging.basicConfig(
 logger = logging.getLogger('funding_rate_analyst')
 
 class FundingRateAnalystAgent(BaseAnalystAgent):
-    """
-    Agent that analyzes funding rates in perpetual futures markets.
+    """FundingRateAnalystAgent for aGENtrader v0.2.2"""
     
-    This agent evaluates historical funding rates and their trends to
-    identify market sentiment and potential entry/exit opportunities.
-    """
-    
-    def __init__(self, data_fetcher=None, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, data_fetcher=None, config=None):
         """
         Initialize the funding rate analyst agent.
         
         Args:
-            data_fetcher: Data fetcher instance for retrieving market data
-            config: Configuration parameters
+            data_fetcher: Data fetcher for market data
+            config: Configuration dictionary
         """
+        self.version = "v0.2.2"
         super().__init__(agent_name="funding_rate_analyst")
         self.name = "FundingRateAnalystAgent"
         self.description = "Analyzes funding rates in perpetual futures markets"
@@ -50,7 +46,7 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
         
         # Get agent config
         self.agent_config = self.get_agent_config()
-        self.trading_config = self.get_trading_config()
+        self.trading_config = self._get_trading_config()
         
         # Use agent-specific timeframe from config if available
         funding_config = self.agent_config.get("funding_rate_analyst", {})
@@ -564,6 +560,51 @@ class FundingRateAnalystAgent(BaseAnalystAgent):
             logger.error(f"Error fetching market data: {str(e)}")
             return {}
             
+    def _get_trading_config(self) -> Dict[str, Any]:
+        """
+        Get trading configuration.
+        
+        Returns:
+            Trading configuration dictionary with default settings
+        """
+        try:
+            # Try to import the trading config from the config module
+            from config.trading_config import get_trading_config
+            return get_trading_config()
+        except ImportError:
+            # Fall back to default config if trading_config module is not available
+            logger.warning("Could not import trading_config, using default values")
+            return {
+                "default_interval": "1h",
+                "risk_level": "medium",
+                "position_sizing": {
+                    "max_position_size_pct": 5.0,
+                    "max_total_exposure_pct": 50.0
+                }
+            }
+            
+    def validate_input(self, symbol: str, interval: str) -> bool:
+        """
+        Validate input parameters.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            True if inputs are valid, False otherwise
+        """
+        if not symbol:
+            logger.warning("Invalid symbol: empty")
+            return False
+            
+        valid_intervals = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"]
+        if interval not in valid_intervals:
+            logger.warning(f"Invalid interval: {interval}, must be one of {valid_intervals}")
+            return False
+            
+        return True
+        
     def _generate_mock_funding_data(self, symbol: Union[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Generate mock funding rate data for testing purposes.

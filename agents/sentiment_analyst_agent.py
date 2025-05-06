@@ -36,17 +36,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SentimentAnalystAgent")
 
 class SentimentAnalystAgent(BaseAnalystAgent):
-    """
-    Agent that analyzes market sentiment using Grok's language model.
-    """
+    """SentimentAnalystAgent for aGENtrader v0.2.2"""
     
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, sentiment_provider=None, config=None):
         """
-        Initialize the Sentiment Analyst Agent.
+        Initialize the sentiment analyst agent.
         
         Args:
-            config: Configuration dictionary with optional settings
+            sentiment_provider: Provider for sentiment data
+            config: Configuration dictionary
         """
+        self.version = "v0.2.2"
         super().__init__("SentimentAnalystAgent")
         self.description = "Analyzes market sentiment from various text sources"
         

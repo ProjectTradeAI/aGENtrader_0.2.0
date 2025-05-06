@@ -76,21 +76,9 @@ class TradeType(Enum):
     def __str__(self):
         return self.value
 
-class TradePlanAgent(BaseDecisionAgent):
-    """
-    Agent that generates comprehensive trade plans.
-    
-    This agent processes decisions from the DecisionAgent and creates a structured 
-    trade execution plan with entry prices, stop-loss, take-profit, and position sizing.
-    """
-    
-    def __init__(self, config: Optional[Dict[str, Any]] = None):
-        """
-        Initialize the trade plan agent.
-        
-        Args:
-            config: Optional configuration parameters
-        """
+class TradePlanAgent(\1):
+    """TradePlanAgent for aGENtrader v0.2.2"""
+\2def __init__(self\3):\4    self.version = "v0.2.2"
         super().__init__()
         self.name = "TradePlanAgent"
         self._description = "Generates detailed trade execution plans"

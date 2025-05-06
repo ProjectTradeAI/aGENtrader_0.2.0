@@ -26,21 +26,17 @@ logging.basicConfig(
 logger = logging.getLogger('sentiment_aggregator')
 
 class SentimentAggregatorAgent(BaseAnalystAgent):
-    """
-    Agent that analyzes market sentiment using Grok AI.
+    """SentimentAggregatorAgent for aGENtrader v0.2.2"""
     
-    This agent retrieves sentiment data from various sources and uses
-    Grok AI to analyze the overall market sentiment for specific assets.
-    """
-    
-    def __init__(self, data_fetcher=None, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, sentiment_providers=None, config=None):
         """
         Initialize the sentiment aggregator agent.
         
         Args:
-            data_fetcher: Optional data fetcher instance
-            config: Configuration parameters
+            sentiment_providers: List of sentiment data providers
+            config: Configuration dictionary
         """
+        self.version = "v0.2.2"
         super().__init__()
         self.name = "SentimentAggregatorAgent"
         self.description = "Analyzes market sentiment using Grok AI"
@@ -49,7 +45,7 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         
         # Get agent config for timeframe setting
         self.agent_config = self.get_agent_config()
-        self.trading_config = self.get_trading_config()
+        self.trading_config = self._get_trading_config()
         
         # Use agent-specific timeframe from config if available
         sentiment_config = self.agent_config.get("sentiment_analyst", {})
@@ -495,6 +491,51 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             "status": "success"
         }
     
+    def _get_trading_config(self) -> Dict[str, Any]:
+        """
+        Get trading configuration.
+        
+        Returns:
+            Trading configuration dictionary with default settings
+        """
+        try:
+            # Try to import the trading config from the config module
+            from config.trading_config import get_trading_config
+            return get_trading_config()
+        except ImportError:
+            # Fall back to default config if trading_config module is not available
+            logger.warning("Could not import trading_config, using default values")
+            return {
+                "default_interval": "1h",
+                "risk_level": "medium",
+                "position_sizing": {
+                    "max_position_size_pct": 5.0,
+                    "max_total_exposure_pct": 50.0
+                }
+            }
+            
+    def validate_input(self, symbol: str, interval: str) -> bool:
+        """
+        Validate input parameters.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            True if inputs are valid, False otherwise
+        """
+        if not symbol:
+            logger.warning("Invalid symbol: empty")
+            return False
+            
+        valid_intervals = ["1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"]
+        if interval not in valid_intervals:
+            logger.warning(f"Invalid interval: {interval}, must be one of {valid_intervals}")
+            return False
+            
+        return True
+        
     def _api_error_response(self, symbol, error_type: str = "api_error", interval: Optional[str] = None) -> Dict[str, Any]:
         """
         Handle API errors gracefully, particularly rate limiting (429) errors.

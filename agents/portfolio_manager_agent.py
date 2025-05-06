@@ -34,19 +34,9 @@ class TradeValidationStatus(Enum):
     REJECTED = "REJECTED"
 
 
-class PortfolioManagerAgent(BaseAnalystAgent):
-    """
-    Portfolio Manager Agent for tracking portfolio allocation and risk.
-    
-    This agent:
-    - Tracks simulated portfolio holdings (balances per asset/pair)
-    - Maintains a record of open trades
-    - Enforces position limits and exposure rules
-    - Logs portfolio state periodically
-    """
-    
-    def __init__(self):
-        """Initialize the Portfolio Manager Agent."""
+class PortfolioManagerAgent(\1):
+    """PortfolioManagerAgent for aGENtrader v0.2.2"""
+\2def __init__(self\3):\4    self.version = "v0.2.2"
         super().__init__(agent_name="portfolio_manager")
         
         # Initialize logger

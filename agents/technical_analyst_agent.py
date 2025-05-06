@@ -73,21 +73,17 @@ logging.basicConfig(
 logger = logging.getLogger('technical_analyst')
 
 class TechnicalAnalystAgent(BaseAnalystAgent):
-    """
-    Agent that analyzes market data using technical analysis.
+    """TechnicalAnalystAgent for aGENtrader v0.2.2"""
     
-    This agent evaluates price patterns, technical indicators, and chart patterns
-    to determine market conditions and generate trading signals.
-    """
-    
-    def __init__(self, data_fetcher=None, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, data_fetcher=None, config=None):
         """
         Initialize the technical analyst agent.
         
         Args:
-            data_fetcher: Data fetcher instance for retrieving market data
-            config: Configuration parameters
+            data_fetcher: Data fetcher for market data
+            config: Configuration dictionary
         """
+        self.version = "v0.2.2"
         super().__init__(agent_name="technical_analyst")
         self.name = "TechnicalAnalystAgent"
         self.description = "Analyzes market data using technical analysis"

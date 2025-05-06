@@ -24,22 +24,17 @@ logging.basicConfig(
 logger = logging.getLogger('liquidity_analyst')
 
 class LiquidityAnalystAgent(BaseAnalystAgent):
-    """
-    Agent that analyzes market liquidity conditions.
+    """LiquidityAnalystAgent for aGENtrader v0.2.2"""
     
-    This agent evaluates order book depth, bid-ask spreads, and other
-    liquidity metrics to determine market conditions and potential 
-    entry/exit opportunities.
-    """
-    
-    def __init__(self, data_fetcher=None, config: Optional[Dict[str, Any]] = None):
+    def __init__(self, data_fetcher=None, config=None):
         """
         Initialize the liquidity analyst agent.
         
         Args:
-            data_fetcher: Data fetcher instance for retrieving market data
-            config: Configuration parameters
+            data_fetcher: Data fetcher for market data
+            config: Configuration dictionary
         """
+        self.version = "v0.2.2"
         super().__init__(agent_name="liquidity_analyst")
         self.name = "LiquidityAnalystAgent"
         self.description = "Analyzes market liquidity conditions"
@@ -51,7 +46,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
         # Get agent config
         self.agent_config = self.get_agent_config()
-        self.trading_config = self.get_trading_config()
+        self.trading_config = self._get_trading_config()
         
         # Use agent-specific timeframe from config if available
         liquidity_config = self.agent_config.get("liquidity_analyst", {})
@@ -522,6 +517,29 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 
         return signal, confidence, explanation
         
+    def _get_trading_config(self) -> Dict[str, Any]:
+        """
+        Get trading configuration.
+        
+        Returns:
+            Trading configuration dictionary with default settings
+        """
+        try:
+            # Try to import the trading config from the config module
+            from config.trading_config import get_trading_config
+            return get_trading_config()
+        except ImportError:
+            # Fall back to default config if trading_config module is not available
+            logger.warning("Could not import trading_config, using default values")
+            return {
+                "default_interval": "1h",
+                "risk_level": "medium",
+                "position_sizing": {
+                    "max_position_size_pct": 5.0,
+                    "max_total_exposure_pct": 50.0
+                }
+            }
+            
     def _fetch_market_data(self, symbol: str, **kwargs) -> Dict[str, Any]:
         """
         Fetch market data for liquidity analysis.

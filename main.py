@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-aGENtrader v2 - Main Entry Point
+aGENtrader v0.2.2 - Main Entry Point
 
-This script implements the main entry point for the aGENtrader v2 system
+This script implements the main entry point for the aGENtrader v0.2.2 system
 with both testing and live trading capabilities.
 """
 

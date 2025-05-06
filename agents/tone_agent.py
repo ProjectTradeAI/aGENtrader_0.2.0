@@ -469,25 +469,21 @@ Respond ONLY with a valid JSON in this format:
             interval: Time interval
         """
         try:
-            # Check if colorama is available for better formatting
-            try:
-                from colorama import Fore, Style, init
-                init(autoreset=True)
-                colored_output = True
-            except ImportError:
-                colored_output = False
-                
+            # Import colorama at the method level to avoid LSP issues
+            import colorama
+            from colorama import Fore, Style
+            
+            # Initialize colorama
+            colorama.init(autoreset=True)
+            
             # Define colors for colored output
-            if colored_output:
-                GREEN = Fore.GREEN
-                YELLOW = Fore.YELLOW
-                CYAN = Fore.CYAN
-                MAGENTA = Fore.MAGENTA
-                RED = Fore.RED
-                WHITE = Fore.WHITE
-                RESET = Style.RESET_ALL
-            else:
-                GREEN = YELLOW = CYAN = MAGENTA = RED = WHITE = RESET = ""
+            GREEN = Fore.GREEN
+            YELLOW = Fore.YELLOW
+            CYAN = Fore.CYAN
+            MAGENTA = Fore.MAGENTA
+            RED = Fore.RED
+            WHITE = Fore.WHITE
+            RESET = Style.RESET_ALL
                 
             # Print header
             print(f"\n{GREEN}{'=' * 80}{RESET}")

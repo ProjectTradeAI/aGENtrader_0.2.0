@@ -36,3 +36,4 @@ matplotlib
 numpy
 pandas
 colorama
+openai

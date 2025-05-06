@@ -45,6 +45,8 @@ from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
 from agents.decision_agent import DecisionAgent
 from agents.trade_plan_agent import TradePlanAgent
 from agents.tone_agent import ToneAgent
+from agents.portfolio_manager_agent import PortfolioManagerAgent
+from agents.risk_guard_agent import RiskGuardAgent
 
 
 # Attempt to import mock data provider (for testing mode)
@@ -232,6 +234,127 @@ def run_full_trade_cycle(symbol="BTC/USDT", interval="1h", use_api=True, mock_da
     
     # Display the tone summary
     tone_agent.print_styled_summary(tone_summary, symbol, interval)
+
+    # Display signal count and validation sections
+    print("\n" + "=" * 80)
+    print(f"{Fore.CYAN}📊 SIGNAL COUNT:{Style.RESET_ALL}")
+    print("-" * 40)
+    
+    # Count signals from analyses
+    signal_counts = {}
+    for agent_name, result in analyses.items():
+        signal = result.get('signal', 'UNKNOWN')
+        if signal not in signal_counts:
+            signal_counts[signal] = []
+        agent_display_name = agent_name.replace('_analysis', '').replace('_', ' ').title()
+        signal_counts[signal].append(f"{agent_display_name} ({result.get('confidence', 0)}%)")
+    
+    # Display signal counts
+    for signal, agents in signal_counts.items():
+        color = Fore.GREEN if signal == 'BUY' else Fore.RED if signal == 'SELL' else Fore.YELLOW
+        print(f"{color}{signal}: {len(agents)} {Style.RESET_ALL}")
+        for agent in agents:
+            print(f"  - {agent}")
+
+    # Run risk assessment with RiskGuardAgent
+    if 'RiskGuardAgent' in globals() and RiskGuardAgent is not None:
+        print("\n" + "=" * 80)
+        print(f"{Fore.CYAN}⚠️ RISK ASSESSMENT:{Style.RESET_ALL}")
+        print("-" * 40)
+        
+        try:
+            # Skip risk assessment for HOLD or non-actionable signals
+            if decision.get('signal') in ['HOLD', 'NEUTRAL'] or trade_plan.get('action') in [None, 'UNKNOWN', 'HOLD', 'NEUTRAL']:
+                print(f"{Fore.YELLOW}Risk assessment skipped for non-actionable signal: {decision.get('signal', 'UNKNOWN')}{Style.RESET_ALL}")
+            else:
+                risk_guard = RiskGuardAgent()
+                
+                # Evaluate the trade plan
+                market_data = {
+                    "symbol": symbol,
+                    "interval": interval,
+                    "current_price": current_price,
+                    "data": data_provider.fetch_ohlcv(symbol=symbol, interval=interval, limit=100)
+                }
+                
+                portfolio_data = {
+                    "symbol": symbol,
+                    "portfolio_value": 10000,  # Mock portfolio value for testing
+                    "available_balance": 10000
+                }
+                
+                risk_result = risk_guard.run(
+                    trade_plan=trade_plan,
+                    market_data=market_data,
+                    portfolio_data=portfolio_data
+                )
+                
+                # Display risk assessment
+                risk_level = risk_result.get('risk_level', 'UNKNOWN')
+                color = Fore.GREEN if risk_level == 'LOW' else Fore.YELLOW if risk_level == 'MEDIUM' else Fore.RED
+                print(f"{color}Risk Level: {risk_level}{Style.RESET_ALL}")
+                
+                # Check if trade plan was adjusted
+                adjustment_details = risk_result.get('adjustment_details', {})
+                adjustments_made = adjustment_details.get('adjustments_made', False)
+                
+                if adjustments_made:
+                    print(f"{Fore.YELLOW}Trade plan adjusted due to risk assessment{Style.RESET_ALL}")
+                    print(f"Risk factors: {', '.join(adjustment_details.get('risk_factors', []))}")
+                    
+                    # Show changes
+                    original_position = trade_plan.get('position_size', 0)
+                    adjusted_position = risk_result.get('adjusted_trade_plan', {}).get('position_size', 0)
+                    
+                    if original_position != adjusted_position:
+                        print(f"Position size adjusted: {original_position} → {adjusted_position}")
+                else:
+                    print(f"{Fore.GREEN}No risk adjustments needed for this trade plan{Style.RESET_ALL}")
+        except Exception as e:
+            print(f"{Fore.RED}Error during risk assessment: {str(e)}{Style.RESET_ALL}")
+
+    # Run validation with PortfolioManagerAgent
+    if 'PortfolioManagerAgent' in globals() and PortfolioManagerAgent is not None:
+        print("\n" + "=" * 80)
+        print(f"{Fore.CYAN}💼 VALIDATION:{Style.RESET_ALL}")
+        print("-" * 40)
+        
+        try:
+            portfolio_manager = PortfolioManagerAgent()
+            
+            # Skip validation for HOLD or non-actionable signals
+            if decision.get('signal') in ['HOLD', 'NEUTRAL'] or trade_plan.get('action') in [None, 'UNKNOWN', 'HOLD', 'NEUTRAL']:
+                print(f"{Fore.YELLOW}Validation skipped for non-actionable signal: {decision.get('signal', 'UNKNOWN')}{Style.RESET_ALL}")
+                
+                # Still display portfolio state
+                portfolio_summary = portfolio_manager.get_portfolio_summary()
+                
+                print(f"\n{Fore.CYAN}Portfolio State:{Style.RESET_ALL}")
+                print(f"Value: {portfolio_summary.get('portfolio_value', 0)} {portfolio_summary.get('base_currency', 'USDT')}")
+                print(f"Exposure: {portfolio_summary.get('total_exposure_pct', 0)}%")
+                print(f"Open positions: {portfolio_summary.get('open_positions_count', 0)}")
+            else:
+                # Validate the trade plan
+                validation_result = portfolio_manager.validate_trade(trade_plan)
+                
+                # Display validation result
+                status = validation_result.get('status', 'UNKNOWN')
+                reason = validation_result.get('reason', 'No reason provided')
+                
+                color = Fore.GREEN if status == 'APPROVED' else Fore.RED
+                print(f"{color}Status: {status}{Style.RESET_ALL}")
+                print(f"Reason: {reason}")
+                
+                # Get portfolio summary
+                portfolio_summary = portfolio_manager.get_portfolio_summary()
+                
+                # Display portfolio state
+                print(f"\n{Fore.CYAN}Portfolio State:{Style.RESET_ALL}")
+                print(f"Value: {portfolio_summary.get('portfolio_value', 0)} {portfolio_summary.get('base_currency', 'USDT')}")
+                print(f"Exposure: {portfolio_summary.get('total_exposure_pct', 0)}%")
+                print(f"Open positions: {portfolio_summary.get('open_positions_count', 0)}")
+        except Exception as e:
+            print(f"{Fore.RED}Error during validation: {str(e)}{Style.RESET_ALL}")
     
     # Save all data to file
     log_dir = "logs"

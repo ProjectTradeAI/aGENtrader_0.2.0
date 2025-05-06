@@ -1,0 +1,219 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2709
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
+{\colortbl;\red255\green255\blue255;}
+{\*\expandedcolortbl;;}
+\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\fs24 \cf0 Reinitializing data provider with new settings...\
+Using Binance data provider for BTC/USDT\
+Using real Binance API for EC2 deployment\
+Initialized Binance Data Provider using mainnet\
+Spot API: https://api.binance.com\
+Futures API: https://fapi.binance.com\
+Initializing ToneAgent with data provider...\
+Grok sentiment client initialized successfully\
+Tone Agent initialized with 6 agent profiles\
+ToneAgent successfully initialized\
+\
+Test Configuration:\
+Agent:       DecisionAgent\
+Symbol:      BTC/USDT\
+Interval:    4h\
+Data Source: Live\
+Temperature: 0.0\
+Explain:     Yes\
+Full Cycle:  Yes\
+Trade Cycle: Yes\
+\
+Proceed with this configuration? (y/n, default: y): \
+\
+Running test with selected configuration...\
+\
+Running FULL TRADE CYCLE TEST with all agents\
+Target symbol: BTC/USDT, Interval: 4h\
+Running analysis for Technical Analysis\
+Using agent-specific LLM config for technical_analyst: grok:grok-2-1212\
+XAI_API_KEY is available\
+LLM client initialized with: grok:grok-2-1212\
+Fetching price data for BTC/USDT at 4h interval\
+Generated SELL signal for 95100.15 with 79% confidence: Bearish signals (71.4%) with trend strength 61/100, confirmed by strong bearish ADX at 44.2\
+Decision recorded in performance tracker with ID: BTCUSDT-2025-05-06T19:26:11.199041\
+SELL decision for BTC/USDT @ 95100.15\
+Reasoning: Bearish signals (71.4%) with trend strength 61/100, confirmed by strong bearish ADX at 44.2\
+Running analysis for Sentiment Analysis\
+Grok sentiment client initialized successfully\
+Sentiment Analyst Agent initialized with 2 data sources\
+Using dynamic temperature (random between 0.6-0.9)\
+Using provided symbol parameter: BTC/USDT\
+No specific sentiment data provided, analyzing general market sentiment\
+Using dynamic temperature: 0.78\
+HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"\
+Generated sentiment reasoning (full): The text provides a factual statement about market conditions without expressing a positive or negative sentiment. It is neutral as it lacks any emotional or judgmental language.\
+Running analysis for Sentiment Aggregator Analysis\
+Using agent-specific LLM config for sentiment_aggregator: grok:grok-2-1212\
+XAI_API_KEY is available\
+LLM client initialized with: grok:grok-2-1212\
+Sentiment Analyzer initialized with Grok model: grok-2-1212\
+Using default price for BTC/USDT: 50000.0\
+Decision recorded in performance tracker with ID: BTCUSDT-2025-05-06T19:26:14.972739\
+BUY decision for BTC/USDT @ 50000.0\
+Reasoning: The sentiment for BTC is bullish, driven by increased trading volume, new institutional interest, and positive price targets from major firms. However, mixed social sentiment and regulatory uncertainties temper the bullishness slightly. The overall market activity suggests a strong upward trend with cautious optimism.\
+Running analysis for Liquidity Analysis\
+Using agent-specific LLM config for liquidity_analyst: grok:grok-2-1212\
+XAI_API_KEY is available\
+LLM client initialized with: grok:grok-2-1212\
+Fetching order book data for BTC/USDT\
+Loaded 150 historical decisions\
+Decision recorded in performance tracker with ID: BTCUSDT-2025-05-06T19:26:15.052333\
+NEUTRAL decision for BTC/USDT @ 95100.155\
+Reasoning: Highly liquid market conditions (score: 80/100), neutral bias. Watch support at 95100.15 and resistance at 95100.16. Top bids: [95100.15: 3.97, 95100.14: 0.00, 95100.12: 0.00], top asks: [95100.16: 4.53, 95100.17: 0.00, 95100.80: 0.00]\
+Running analysis for Open Interest Analysis\
+Using agent-specific LLM config for open_interest_analyst: grok:grok-2-1212\
+XAI_API_KEY is available\
+LLM client initialized with: grok:grok-2-1212\
+Using futures symbol: BTCUSDT (converted from BTC/USDT)\
+Fetching open interest data for BTCUSDT\
+Requesting futures open interest for symbol: BTCUSDT\
+Open interest params: \{'symbol': 'BTCUSDT', 'period': '4h', 'limit': 30\}\
+Trying to fetch mainnet historical open interest from /futures/data/openInterestHist\
+Successfully fetched 30 futures open interest records from mainnet historical open interest\
+Received 30 open interest records\
+First record sample: \{'symbol': 'BTCUSDT', 'sumOpenInterest': 86573.179, 'sumOpenInterestValue': 8349602192.5624, 'timestamp': 1746129600000\}\
+Fetching price data for BTC/USDT\
+Processing 30 open interest records\
+Open interest item 0: \{'symbol': 'BTCUSDT', 'sumOpenInterest': 86573.179, 'sumOpenInterestValue': 8349602192.5624, 'timestamp': 1746129600000\}\
+Extracted OI: 86573.179, Timestamp: 1746129600000\
+Open interest item 1: \{'symbol': 'BTCUSDT', 'sumOpenInterest': 86024.787, 'sumOpenInterestValue': 8295776517.322894, 'timestamp': 1746144000000\}\
+Extracted OI: 86024.787, Timestamp: 1746144000000\
+Successfully parsed 30 open interest values out of 30 records\
+Loaded 150 historical decisions\
+Decision recorded in performance tracker with ID: BTCUSDT-2025-05-06T19:26:15.257788\
+NEUTRAL decision for BTC/USDT @ 95100.15\
+Reasoning: Open interest decreasing (-5.6%) with stable price indicates positions unwinding without clear directional bias. Recent open interest decreasing by -5.6% over the last 30 periods while price neutral -1.4%.. Recent OI changes: [-0.94%, 0.08%, -1.14%, 0.53%, -0.26%, -0.23%, 0.75%, 1.38%], price changes: [-0.28%, 0.62%, 0.41%, -0.30%, -0.06%, -0.62%, 0.80%, 0.57%]\
+Running analysis for Funding Rate Analysis\
+Using agent-specific LLM config for funding_rate_analyst: grok:grok-2-1212\
+XAI_API_KEY is available\
+LLM client initialized with: grok:grok-2-1212\
+Decision recorded in performance tracker with ID: BTCUSDT-2025-05-06T19:26:15.450681\
+BUY decision for BTC/USDT @ 95100.15\
+Reasoning: Consistently positive and increasing funding rates (0.0008%) indicate strong long bias building with shorts paying increasing premiums. Recent funding rates: [0.0032%, 0.0037%, -0.0024%, 0.0036%, -0.0022%, 0.0020%, 0.0044%, 0.0008%]\
+Running DecisionAgent analysis\
+2025-05-06 19:26:15,562 - decision_agent - INFO - Using agent weights: \{'LiquidityAnalystAgent': 1.0, 'TechnicalAnalystAgent': 1.2, 'SentimentAnalystAgent': 0.8, 'SentimentAggregatorAgent': 0.8, 'FundingRateAnalystAgent': 0.8, 'OpenInterestAnalystAgent': 1.0\}\
+Using agent weights: \{'LiquidityAnalystAgent': 1.0, 'TechnicalAnalystAgent': 1.2, 'SentimentAnalystAgent': 0.8, 'SentimentAggregatorAgent': 0.8, 'FundingRateAnalystAgent': 0.8, 'OpenInterestAnalystAgent': 1.0\}\
+Using agent-specific LLM config for decision_agent: grok:grok-2-1212\
+XAI_API_KEY is available\
+LLM client initialized with: grok:grok-2-1212\
+2025-05-06 19:26:15,563 - decision_agent - INFO - Decision Agent initialized with confidence threshold=70, allow_conflict_state=True\
+Decision Agent initialized with confidence threshold=70, allow_conflict_state=True\
+2025-05-06 19:26:15,563 - decision_agent - INFO - Making decision for BTC/USDT at 4h interval\
+Making decision for BTC/USDT at 4h interval\
+2025-05-06 19:26:15,563 - decision_agent - INFO - Using agent weights: \{'LiquidityAnalystAgent': 1.0, 'TechnicalAnalystAgent': 1.2, 'SentimentAnalystAgent': 0.8, 'SentimentAggregatorAgent': 0.8, 'FundingRateAnalystAgent': 0.8, 'OpenInterestAnalystAgent': 1.0\}\
+Using agent weights: \{'LiquidityAnalystAgent': 1.0, 'TechnicalAnalystAgent': 1.2, 'SentimentAnalystAgent': 0.8, 'SentimentAggregatorAgent': 0.8, 'FundingRateAnalystAgent': 0.8, 'OpenInterestAnalystAgent': 1.0\}\
+2025-05-06 19:26:15,563 - decision_agent - INFO - Making decision with analyses from: technical_analysis, sentiment_analysis, sentiment_aggregator_analysis, liquidity_analysis, open_interest_analysis, funding_rate_analysis\
+Making decision with analyses from: technical_analysis, sentiment_analysis, sentiment_aggregator_analysis, liquidity_analysis, open_interest_analysis, funding_rate_analysis\
+2025-05-06 19:26:15,563 - decision_agent - INFO - Attempting weighted decision from multiple analyses\
+Attempting weighted decision from multiple analyses\
+2025-05-06 19:26:15,563 - decision_agent - INFO - TechnicalAnalystAgent: SELL with confidence 79, weight 1.2, weighted score 94.8\
+TechnicalAnalystAgent: SELL with confidence 79, weight 1.2, weighted score 94.8\
+2025-05-06 19:26:15,564 - decision_agent - INFO - SentimentAnalystAgent: HOLD with confidence 70, weight 0.8, weighted score 56.0\
+SentimentAnalystAgent: HOLD with confidence 70, weight 0.8, weighted score 56.0\
+2025-05-06 19:26:15,564 - decision_agent - INFO - SentimentAggregatorAgent: BUY with confidence 75, weight 0.8, weighted score 60.0\
+SentimentAggregatorAgent: BUY with confidence 75, weight 0.8, weighted score 60.0\
+2025-05-06 19:26:15,564 - decision_agent - INFO - LiquidityAnalystAgent: NEUTRAL with confidence 50, weight 1.0, weighted score 50.0\
+LiquidityAnalystAgent: NEUTRAL with confidence 50, weight 1.0, weighted score 50.0\
+2025-05-06 19:26:15,564 - decision_agent - INFO - OpenInterestAnalystAgent: NEUTRAL with confidence 65, weight 1.0, weighted score 65.0\
+OpenInterestAnalystAgent: NEUTRAL with confidence 65, weight 1.0, weighted score 65.0\
+2025-05-06 19:26:15,564 - decision_agent - INFO - FundingRateAnalystAgent: BUY with confidence 65, weight 0.8, weighted score 52.0\
+FundingRateAnalystAgent: BUY with confidence 65, weight 0.8, weighted score 52.0\
+2025-05-06 19:26:15,564 - decision_agent - INFO - Signal breakdown:\
+Signal breakdown:\
+2025-05-06 19:26:15,564 - decision_agent - INFO -   BUY: 2 agents (avg 70.0%, weighted score: 112.0)\
+  BUY: 2 agents (avg 70.0%, weighted score: 112.0)\
+2025-05-06 19:26:15,564 - decision_agent - INFO -   SELL: 1 agents (avg 79.0%, weighted score: 94.8)\
+  SELL: 1 agents (avg 79.0%, weighted score: 94.8)\
+2025-05-06 19:26:15,565 - decision_agent - INFO -   HOLD: 1 agents (avg 70.0%, weighted score: 56.0)\
+  HOLD: 1 agents (avg 70.0%, weighted score: 56.0)\
+2025-05-06 19:26:15,565 - decision_agent - INFO -   NEUTRAL: 2 agents (avg 57.5%, weighted score: 115.0)\
+  NEUTRAL: 2 agents (avg 57.5%, weighted score: 115.0)\
+2025-05-06 19:26:15,565 - decision_agent - INFO - Converting NEUTRAL to HOLD for final action and final signal\
+Converting NEUTRAL to HOLD for final action and final signal\
+2025-05-06 19:26:15,565 - decision_agent - INFO - Final signal: HOLD, confidence: 30.4%, directional confidence: 0.0%\
+Final signal: HOLD, confidence: 30.4%, directional confidence: 0.0%\
+2025-05-06 19:26:15,565 - decision_agent - INFO - Contributing agents: SentimentAnalystAgent, LiquidityAnalystAgent, OpenInterestAnalystAgent\
+Contributing agents: SentimentAnalystAgent, LiquidityAnalystAgent, OpenInterestAnalystAgent\
+Running TradePlanAgent analysis\
+Loading existing trades to initialize portfolio state\
+Loaded 0 trades from trade log\
+Current portfolio state: 0 open positions\
+Current balance: 10000 USDT\
+Portfolio snapshot thread started with interval 60 minutes\
+Portfolio Manager Agent initialized with base currency USDT\
+Max exposure limits: 85% total, 35% per asset\
+Max open trades: 10\
+Portfolio manager initialized successfully for trade planning\
+Loading existing trades to initialize portfolio state\
+Loaded 0 trades from trade log\
+Current portfolio state: 0 open positions\
+Current balance: 10000 USDT\
+Portfolio snapshot taken: 0 open positions, 10000.00 USDT\
+Portfolio snapshot thread started with interval 60 minutes\
+Portfolio Manager Agent initialized with base currency USDT\
+Max exposure limits: 85% total, 35% per asset\
+Max open trades: 10\
+Portfolio manager initialized successfully for trade planning\
+Trade plan agent initialized with risk:reward ratio 1.5\
+Created enhanced TradePlanAgent with config parameters: ['data_fetcher', 'symbol', 'interval']\
+Portfolio snapshot taken: 0 open positions, 10000.00 USDT\
+Generating trade plan for None decision\
+DecisionAgent returned explicit HOLD. Respecting this decision and not generating a trade plan.\
+Non-actionable signal HOLD, generating minimal plan\
+DecisionAgent returned HOLD due to low directional confidence. No trade plan generated.\
+Generating styled agent voices with ToneAgent\
+==================================================\
+VALIDATION - ACTUAL AGENT SIGNALS:\
+--------------------------------------------------\
+Agent: TechnicalAnalystAgent, Signal: SELL, Confidence: 79%\
+Agent: SentimentAnalystAgent, Signal: HOLD, Confidence: 70%\
+Agent: SentimentAggregatorAgent, Signal: BUY, Confidence: 75%\
+Agent: LiquidityAnalystAgent, Signal: NEUTRAL, Confidence: 50%\
+Agent: OpenInterestAnalystAgent, Signal: NEUTRAL, Confidence: 65%\
+Agent: FundingRateAnalystAgent, Signal: BUY, Confidence: 65%\
+--------------------------------------------------\
+Signal Count: BUY: 2, SELL: 1, HOLD/NEUTRAL: 3, UNKNOWN: 0\
+==================================================\
+Raw analysis_results keys: ['technical_analysis', 'sentiment_analysis', 'sentiment_aggregator_analysis', 'liquidity_analysis', 'open_interest_analysis', 'funding_rate_analysis']\
+Agent: TechnicalAnalystAgent, Signal: SELL, Confidence: 79\
+Agent: SentimentAnalystAgent, Signal: HOLD, Confidence: 70\
+Agent: SentimentAggregatorAgent, Signal: BUY, Confidence: 75\
+Agent: LiquidityAnalystAgent, Signal: NEUTRAL, Confidence: 50\
+Agent: OpenInterestAnalystAgent, Signal: NEUTRAL, Confidence: 65\
+Agent: FundingRateAnalystAgent, Signal: BUY, Confidence: 65\
+HTTP Request: POST https://api.x.ai/v1/chat/completions "HTTP/1.1 200 OK"\
+Tone summary saved to /home/ec2-user/aGENtrader/logs/tone_summary_BTCUSDT_4h_20250506_192620.json\
+\
+\uc0\u55356 \u57241 \u65039  ToneAgent Summary \'97 BTC/USDT (4h)\
+\
+\uc0\u55357 \u56547  Agent Voices:\
+- TechnicalAnalystAgent: "Analysis of the indicators suggests a SELL with 79% confidence; the market appears overbought."\
+- SentimentAnalystAgent: "The crowd's mood is steady, suggesting we should HOLD with a 70% confidence; there's no rush to act."\
+- LiquidityAnalystAgent: "The order book shows no clear advantage, hence I'm NEUTRAL with 50% confidence; it's a standoff."\
+- OpenInterestAnalystAgent: "Open interest remains stable, indicating a NEUTRAL stance with 65% confidence; no significant shifts detected."\
+- FundingRateAnalystAgent: "The funding rates indicate the market might be undervalued, leading to a BUY signal with 65% confidence; it's time to capitalize."\
+- SentimentAggregatorAgent: "Macro trends suggest a BUY with 75% confidence; the broader picture supports accumulation."\
+\
+\uc0\u55357 \u56522  Signal Count (from tone): BUY: 2, SELL: 1, HOLD/NEUTRAL: 3\
+\
+\uc0\u9888 \u65039  VALIDATION - Signals in Tone vs Actual:\
+\uc0\u9989  TechnicalAnalystAgent: Actual=SELL @ 79%, Tone: "Analysis of the indicators suggests a SELL with 79% confidence; the market appears overbought."\
+\uc0\u9989  SentimentAnalystAgent: Actual=HOLD @ 70%, Tone: "The crowd's mood is steady, suggesting we should HOLD with a 70% confidence; there's no rush to act."\
+\uc0\u9989  LiquidityAnalystAgent: Actual=NEUTRAL @ 50%, Tone: "The order book shows no clear advantage, hence I'm NEUTRAL with 50% confidence; it's a standoff."\
+\uc0\u9989  OpenInterestAnalystAgent: Actual=NEUTRAL @ 65%, Tone: "Open interest remains stable, indicating a NEUTRAL stance with 65% confidence; no significant shifts detected."\
+\uc0\u9989  FundingRateAnalystAgent: Actual=BUY @ 65%, Tone: "The funding rates indicate the market might be undervalued, leading to a BUY signal with 65% confidence; it's time to capitalize."\
+\uc0\u9989  SentimentAggregatorAgent: Actual=BUY @ 75%, Tone: "Macro trends suggest a BUY with 75% confidence; the broader picture supports accumulation."\
+\
+\uc0\u55358 \u56800  Summary: Despite a conflicted outlook with varied signals, the final decision leans towards BUY with cautious optimism, acknowledging the Technical Analyst's bearish view and the neutral stances from liquidity and open interest.\
+\
+\uc0\u55357 \u56622  Mood: conflicted\
+\
+Trade cycle test results saved to trade_cycle_test_BTCUSDT_4h_20250506_192620.json}

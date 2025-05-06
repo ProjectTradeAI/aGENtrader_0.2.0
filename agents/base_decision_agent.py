@@ -18,9 +18,16 @@ from core.logging import decision_logger
 # Configure logging
 logger = logging.getLogger("aGENtrader.agents.decision")
 
-class BaseDecisionAgent(\1):
+class BaseDecisionAgent(BaseAgent, DecisionAgentInterface):
     """BaseDecisionAgent for aGENtrader v0.2.2"""
-\2def __init__(self\3):\4    self.version = "v0.2.2"
+    
+    def __init__(self, analyst_results: Optional[Dict[str, Dict[str, Any]]] = None):
+        """Initialize the base decision agent.
+        
+        Args:
+            analyst_results: Optional pre-loaded analyst results
+        """
+        self.version = "v0.2.2"
         super().__init__(agent_name="decision")
         self._description = "Base decision agent for trading signals"
         

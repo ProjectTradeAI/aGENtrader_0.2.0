@@ -99,7 +99,7 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         
         # Get agent config
         self.agent_config = self.get_agent_config()
-        self.trading_config = self.get_trading_config()
+        self.trading_config = self._get_trading_config()
         
         # Use agent-specific timeframe from config if available
         technical_config = self.agent_config.get("technical_analyst", {})
@@ -366,6 +366,47 @@ class TechnicalAnalystAgent(BaseAnalystAgent):
         
         return df
     
+    def get_analysis(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Get analysis for a trading pair. This is a wrapper for analyze().
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            **kwargs: Additional parameters
+            
+        Returns:
+            Analysis results
+        """
+        return self.analyze(symbol=symbol, interval=interval, **kwargs)
+        
+    def _get_trading_config(self) -> Dict[str, Any]:
+        """
+        Get trading configuration from settings file.
+        
+        Returns:
+            Trading configuration dictionary
+        """
+        try:
+            # Try to load from config/settings.yaml first
+            config_path = "config/settings.yaml"
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    return config.get('trading', {})
+            
+            # Fallback to config/default.json
+            config_path = "config/default.json"
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    return config.get('trading', {})
+        except Exception as e:
+            logger.error(f"Error loading trading config: {str(e)}")
+            
+        # Return empty dict if config couldn't be loaded
+        return {}
+        
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Calculate technical indicators on price data using the centralized indicators module.

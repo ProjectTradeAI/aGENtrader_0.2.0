@@ -1,5 +1,10 @@
 # aGENtrader v2 Configuration File
 
+# System Configuration
+system:
+  version: "0.2.2"
+  name: "aGENtrader"
+
 # LLM Configuration
 llm:
   # LLM Backend Provider (mock, ollama, openai)

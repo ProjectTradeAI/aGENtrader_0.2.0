@@ -191,10 +191,77 @@ class DecisionAgent:
         self.allow_conflict_state = allow_conflict_state
         self.high_confidence_threshold = 80  # Threshold to consider a signal "high confidence"
         
+        # Storage for analyst results (for compatibility with BaseDecisionAgent)
+        self.analyst_results = {}
+        
+        # Symbol and price state
+        self.symbol = None
+        self.current_price = None
+        
         self.logger.info(f"Decision Agent initialized with confidence threshold={self.confidence_threshold}, allow_conflict_state={self.allow_conflict_state}")
     
-    def make_decision(self, 
-                     agent_analyses: Dict[str, Any], 
+    def add_analyst_result(self, analysis_type: str, result: Dict[str, Any]) -> None:
+        """
+        Add an analyst result to be considered in decision making.
+        
+        Args:
+            analysis_type: Type of analysis (e.g., 'technical_analysis', 'sentiment_analysis')
+            result: Dictionary with analysis results
+        """
+        if not result:
+            self.logger.warning(f"Received empty {analysis_type} result")
+            return
+        
+        # Create a copy of the result to avoid modifying the original
+        processed_result = result.copy()
+        
+        # Check for required fields and attempt to fix missing ones
+        required_fields = ['signal', 'confidence', 'reasoning']
+        missing_fields = []
+        
+        for field in required_fields:
+            if field not in processed_result:
+                missing_fields.append(field)
+        
+        # If fields are missing, try to fix them with reasonable defaults
+        if missing_fields:
+            self.logger.warning(f"{analysis_type} result missing required fields: {', '.join(missing_fields)}")
+            
+            # If signal is missing, default to NEUTRAL
+            if 'signal' not in processed_result:
+                processed_result['signal'] = 'NEUTRAL'
+                self.logger.warning(f"Added default 'signal' (NEUTRAL) to {analysis_type} result")
+            
+            # If confidence is missing, default to 50%
+            if 'confidence' not in processed_result:
+                processed_result['confidence'] = 50
+                self.logger.warning(f"Added default 'confidence' (50%) to {analysis_type} result")
+            
+            # If reasoning is missing, try to generate one from available data
+            if 'reasoning' not in processed_result:
+                # Check for alternative fields that might have reasoning
+                reason = None
+                for alt_field in ['reason', 'description', 'explanation', 'analysis', 'summary']:
+                    if alt_field in processed_result and processed_result[alt_field]:
+                        reason = processed_result[alt_field]
+                        self.logger.info(f"Using '{alt_field}' as reasoning for {analysis_type}")
+                        break
+                
+                # If no alternative field found, generate a basic reasoning
+                if not reason:
+                    signal = processed_result['signal']
+                    confidence = processed_result['confidence']
+                    reason = f"{analysis_type.replace('_', ' ').title()} indicates {signal} with {confidence}% confidence"
+                    self.logger.warning(f"Generated basic reasoning for {analysis_type}")
+                
+                processed_result['reasoning'] = reason
+        
+        # Store the processed result
+        self.analyst_results[analysis_type] = processed_result
+        self.logger.info(f"Added {analysis_type} result with signal: {processed_result['signal']}, confidence: {processed_result['confidence']}")
+    
+    def make_decision(self,
+                     agent_analyses: Optional[Dict[str, Any]] = None,
                      symbol: Optional[str] = None,
                      interval: Optional[str] = None,
                      agent_weights_override: Optional[Dict[str, float]] = None,
@@ -213,11 +280,19 @@ class DecisionAgent:
             Dictionary with trading decision
         """
         try:
+            # If no agent_analyses provided, use the stored analyst_results
+            if agent_analyses is None:
+                agent_analyses = self.analyst_results
+                
             # Validate inputs
             if not isinstance(agent_analyses, dict):
                 raise ValidationError(f"agent_analyses must be a dictionary, got {type(agent_analyses)}")
                 
+            # Use symbol from instance if provided, or from parameters
+            if self.symbol is not None:
+                symbol = symbol or self.symbol
             symbol = symbol or self.default_symbol
+            
             interval = interval or self.default_interval
             # Update the instance variable for interval (needed for conflict logging)
             self.interval = interval

@@ -1,9 +1,11 @@
-# aGENtrader v2.2
+# aGENtrader v0.2.2
 
 An advanced multi-agent AI trading platform with sophisticated deployment and workflow management capabilities, focusing on intelligent cryptocurrency trading and comprehensive system monitoring.
 
 ## Recent Updates
 
+- **2025-05-06**: Added CI integration with version tag validation to ensure consistent versioning across all components
+- **2025-05-06**: Updated system version to v0.2.2 with standardized version tracking in all agent outputs
 - **2025-04-30**: Implemented unified agent architecture with standardized interfaces and improved testability (branch: v2.2.1)
 - **2025-04-30**: Created comprehensive agent testing framework with isolated testing capabilities
 - **2025-04-29**: Implemented automatic Ollama health check system with environment-specific startup procedures
@@ -11,7 +13,6 @@ An advanced multi-agent AI trading platform with sophisticated deployment and wo
 - **2025-04-29**: Implemented agent-specific LLM routing - Sentiment agents now use Grok, others use Mistral
 - **2025-04-29**: Fixed validation script to properly detect Binance API initialization by matching the correct log pattern
 - **2025-04-28**: Upgraded from Mixtral to Mistral as the default LLM due to EC2 memory constraints
-- **2025-04-27**: Enhanced error handling in all market data providers
 
 ## Repository Structure
 
@@ -50,7 +51,7 @@ The system is built around a multi-agent architecture where specialist agents co
 - **Open Interest Analyst Agent**: Evaluates open interest trends (Uses Mistral)
 - **Decision Agent**: Weighs all analyses and makes final decisions (Uses Mistral)
 
-#### Agent Architecture (v2.2.1)
+#### Agent Architecture (v0.2.2)
 
 The agent system follows a standardized architecture with interfaces and base classes:
 
@@ -152,10 +153,26 @@ python deployment/verify_versioning.py
 
 The aGENtrader platform uses Git tags and commit hashes for versioning:
 
-- Each release is tagged with a version (e.g., `v0.2.0`)
+- Each release is tagged with a version (e.g., `v0.2.2`)
 - Docker images are built with version information through build arguments
 - Rollbacks can target any specific version or commit hash
 - Version information is accessible at runtime for monitoring and logging
+
+##### Version Tag Validation
+
+The system includes automatic version tag validation through CI:
+
+- Ensures all agent outputs include the current system version
+- Validates version consistency across all system components
+- Prevents deployment of inconsistent versions
+- Run validation locally: `python scripts/validate_version_tags.py`
+
+The version tags are sourced from:
+1. `version.json`
+2. `core/version.py`
+3. `config/settings.yaml` (under `system.version`)
+
+For detailed information on version validation, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 #### Rollback System
 

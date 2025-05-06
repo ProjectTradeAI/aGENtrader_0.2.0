@@ -6,7 +6,7 @@ All components should import VERSION from this module for consistency.
 """
 
 # Current version of aGENtrader
-VERSION = "0.2.0"
+VERSION = "0.2.2"
 
 # ASCII art logo for display in console applications
 ASCII_LOGO = """

@@ -7,6 +7,7 @@ using Grok's advanced language understanding capabilities.
 import os
 import sys
 import json
+import yaml
 import logging
 from typing import Dict, Any, List, Optional, Union
 import time
@@ -20,9 +21,9 @@ if parent_dir not in sys.path:
 
 # Import base agent class and interfaces
 try:
-    from agents.base_agent import AgentInterface, AnalystAgentInterface, BaseAgent, BaseAnalystAgent
+    from agents.base_agent import AgentInterface, BaseAgent, BaseAnalystAgent
 except ImportError:
-    from base_agent import AgentInterface, AnalystAgentInterface, BaseAgent, BaseAnalystAgent
+    from base_agent import AgentInterface, BaseAgent, BaseAnalystAgent
 
 # Import Grok sentiment client
 try:
@@ -105,6 +106,47 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             "news": [],
             "social_posts": []
         }
+        
+    def get_analysis(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Get analysis for a trading pair. This is a wrapper for analyze().
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            **kwargs: Additional parameters
+            
+        Returns:
+            Analysis results
+        """
+        return self.analyze(symbol=symbol, interval=interval, **kwargs)
+        
+    def _get_trading_config(self) -> Dict[str, Any]:
+        """
+        Get trading configuration from settings file.
+        
+        Returns:
+            Trading configuration dictionary
+        """
+        try:
+            # Try to load from config/settings.yaml first
+            config_path = "config/settings.yaml"
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    return config.get('trading', {})
+            
+            # Fallback to config/default.json
+            config_path = "config/default.json"
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    return config.get('trading', {})
+        except Exception as e:
+            logger.error(f"Error loading trading config: {str(e)}")
+            
+        # Return empty dict if config couldn't be loaded
+        return {}
         
     def run(self, *args, **kwargs) -> Dict[str, Any]:
         """

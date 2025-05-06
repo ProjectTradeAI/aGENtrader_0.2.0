@@ -1,66 +1,53 @@
+#!/usr/bin/env python3
 """
-aGENtrader v0.2.2 Tone Agent
+aGENtrader v2 - Tone Agent
 
-This agent is responsible for generating human-like, styled summaries of multi-agent trade
-decisions, giving each agent a unique voice and providing an overall narrative.
+This module provides a tone agent that generates human-like styled summaries of
+multi-agent trade decisions and integrates it into the full trade cycle test output.
 """
+
 import os
-import sys
 import json
-import random
 import logging
-from typing import Dict, Any, List, Optional, Union
-import time
+from typing import Dict, Any, List, Optional
 from datetime import datetime
-from pathlib import Path
 
-# Add parent directory to path to allow importing from sibling directories
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if parent_dir not in sys.path:
-    sys.path.append(parent_dir)
-
-# Import base agent class
+# Import base agent
 from agents.base_agent import BaseAgent
 
-# Import Grok sentiment client for LLM capabilities
-try:
-    from models.grok_sentiment_client import GrokSentimentClient
-except ImportError:
-    GrokSentimentClient = None
-    print("Warning: GrokSentimentClient not available")
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ToneAgent")
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
+logger = logging.getLogger(__name__)
 
 class ToneAgent(BaseAgent):
-    """ToneAgent for aGENtrader v0.2.2"""
+    """ToneAgent for aGENtrader v0.2.2
+    
+    This agent generates human-like styled summaries of multi-agent trade decisions.
+    It provides a unique "voice" for each agent and synthesizes an overall narrative.
+    """
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
-        Initialize the Tone Agent.
+        Initialize the tone agent.
         
         Args:
-            config: Configuration dictionary with optional settings
+            config: Configuration dictionary (optional)
         """
-        super().__init__("ToneAgent")
+        super().__init__(agent_name="ToneAgent")
         self.version = "v0.2.2"
-        self.description = "Generates human-like summaries of multi-agent trade decisions"
-        
-        # Set up logger
-        self.logger = logging.getLogger(__name__)
-        
-        # Initialize Grok client if available
-        self.grok_client = GrokSentimentClient() if GrokSentimentClient else None
-        
-        if self.grok_client and not self.grok_client.enabled:
-            self.logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
-        
-        # Agent-specific configuration
         self.config = config or {}
         
-        # Define agent tone profiles
-        self.tone_profiles = {
+        # Configure paths
+        self.log_dir = os.path.join(os.getcwd(), "logs")
+        if not os.path.exists(self.log_dir):
+            os.makedirs(self.log_dir, exist_ok=True)
+            
+        # Load agent tone profiles
+        self.agent_tones = {
             "TechnicalAnalystAgent": "Analytical and precise. Likes indicators, rarely exaggerates.",
             "SentimentAnalystAgent": "Emotive, intuitive, speaks in moods. Feels the crowd.",
             "LiquidityAnalystAgent": "Blunt and tactical. Sees the order book like a battlefield.",
@@ -69,568 +56,542 @@ class ToneAgent(BaseAgent):
             "SentimentAggregatorAgent": "Strategic and composed. Thinks big picture, macro framing."
         }
         
-        # Define confidence-based tone modifiers
-        self.confidence_tone_modifiers = {
-            "high": {  # 80%+ confidence
-                "prefix_templates": [
-                    "Decisively", "Confidently", "Absolutely", "Clearly", "Without a doubt",
-                    "All indicators suggest", "The data strongly shows", "I'm convinced"
-                ],
-                "suffix_templates": [
-                    "with strong conviction", "with high confidence", "based on solid evidence",
-                    "looking remarkably clear", "- the signals are strong"
-                ],
-                "description": "assertive, confident, definitive"
-            },
-            "medium": {  # 60-79% confidence
-                "prefix_templates": [
-                    "Moderately", "Reasonably", "It appears", "The data suggests", "I believe",
-                    "There's decent evidence", "It seems", "I'm seeing signs"
-                ],
-                "suffix_templates": [
-                    "with moderate confidence", "with reasonable certainty", "though not absolutely certain",
-                    "based on adequate evidence", "- the signals are moderate"
-                ],
-                "description": "balanced, measured, somewhat cautious"
-            },
-            "low": {  # Below 60% confidence
-                "prefix_templates": [
-                    "Tentatively", "Hesitantly", "Perhaps", "There's a hint that", "I'm sensing",
-                    "Early indications suggest", "It's possible", "I'm slightly leaning"
-                ],
-                "suffix_templates": [
-                    "but I'm not entirely confident", "though the signals are weak", "with low confidence",
-                    "though it's too early to be certain", "- take this with caution"
-                ],
-                "description": "hesitant, reserved, speculative"
-            }
-        }
-        
-        # Define fallback tone modifiers
-        self.fallback_tone_modifiers = {
-            "prefix_templates": [
-                "With limited data", "Based on partial information", "Working with minimal signals",
-                "From what little I can gather", "With incomplete information"
-            ],
-            "suffix_templates": [
-                "but take this with extra caution", "though more data would help", "though this is highly uncertain",
-                "consider this preliminary at best", "until more information becomes available"
-            ],
-            "description": "cautious, minimal, explicitly uncertain"
-        }
-        
-        # Create logs directory if it doesn't exist
-        self.logs_dir = os.path.join(parent_dir, "logs")
-        if not os.path.exists(self.logs_dir):
-            os.makedirs(self.logs_dir)
+        # Try to load from LLM client for Grok integration
+        try:
+            from models.llm_client import LLMClient
+            self.llm_client = LLMClient(model="grok:grok-2-1212")
+            self.use_api = self.config.get("use_api", True)
+            logger.info("ToneAgent initialized with Grok LLM client")
+        except ImportError:
+            logger.warning("LLMClient not available, ToneAgent will use fallback generation")
+            self.llm_client = None
+            self.use_api = False
             
-        # Initialize agent signals storage for validation
-        self._agent_signals = {}
-        
-        self.logger.info(f"Tone Agent initialized with {len(self.tone_profiles)} agent profiles")
-    
     def generate_summary(self, 
-                         analysis_results: Dict[str, Any], 
-                         final_decision: Dict[str, Any], 
-                         symbol: str, 
-                         interval: str) -> Dict[str, Any]:
+                          analysis_results: Dict[str, Dict[str, Any]], 
+                          final_decision: Dict[str, Any],
+                          symbol: str = "BTC/USDT",
+                          interval: str = "1h") -> Dict[str, Any]:
         """
-        Generate a human-like summary of the multi-agent trade decision.
+        Generate a human-like styled summary of multi-agent trade decisions.
         
         Args:
-            analysis_results: Dictionary of all analyst outputs
-            final_decision: Final trade decision JSON
-            symbol: Trading symbol (e.g., "BTC/USDT")
-            interval: Trading interval (e.g., "1h", "4h")
+            analysis_results: Results from each analyst agent
+            final_decision: Final decision from the decision agent
+            symbol: Trading symbol
+            interval: Time interval
             
         Returns:
-            Dictionary with agent comments and system summary
+            Dictionary containing agent comments, system summary, and mood
         """
-        # First, log the actual signals from analyst results for validation
-        self._validate_and_log_signals(analysis_results)
-        
-        if not self.grok_client or not self.grok_client.enabled:
-            self.logger.warning("Grok client not available. Using fallback summary.")
-            return self._generate_fallback_summary(analysis_results, final_decision, symbol, interval)
-        
         try:
-            # Extract key information for prompt
+            # Map from expected keys in analysis_results to agent names
+            key_to_agent_map = {
+                "technical_analysis": "TechnicalAnalystAgent",
+                "sentiment_analysis": "SentimentAnalystAgent",
+                "liquidity_analysis": "LiquidityAnalystAgent",
+                "open_interest_analysis": "OpenInterestAnalystAgent",
+                "funding_rate_analysis": "FundingRateAnalystAgent",
+                "sentiment_aggregator": "SentimentAggregatorAgent"
+            }
+            
+            # Build the prompt for the LLM
+            prompt = self._build_generation_prompt(analysis_results, final_decision, key_to_agent_map, symbol, interval)
+            
+            # Generate the summary using the LLM
+            if self.use_api and self.llm_client:
+                logger.info("Generating summary using Grok API")
+                summary = self._generate_with_llm(prompt, symbol, interval)
+            else:
+                logger.info("Generating summary using fallback method")
+                summary = self._generate_fallback(analysis_results, final_decision, symbol, interval)
+                
+            # Save the summary to a file
+            self._save_summary_to_file(summary, symbol)
+            
+            return summary
+            
+        except Exception as e:
+            logger.error(f"Error generating summary: {str(e)}", exc_info=True)
+            return self._generate_error_response(symbol, interval)
+            
+    def _build_generation_prompt(self, 
+                                analysis_results: Dict[str, Dict[str, Any]], 
+                                final_decision: Dict[str, Any],
+                                key_to_agent_map: Dict[str, str],
+                                symbol: str,
+                                interval: str) -> str:
+        """
+        Build a prompt for the LLM to generate a summary.
+        
+        Args:
+            analysis_results: Results from each analyst agent
+            final_decision: Final decision from the decision agent
+            key_to_agent_map: Mapping from analysis keys to agent names
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            Prompt string for the LLM
+        """
+        # Extract current price from final decision
+        current_price = final_decision.get("current_price", "unknown")
+        signal = final_decision.get("signal", "UNKNOWN")
+        confidence = final_decision.get("confidence", 0)
+        directional_confidence = final_decision.get("directional_confidence", 0)
+        conflict_score = final_decision.get("conflict_score", 0)
+        
+        prompt = f"""
+You are the ToneAgent for aGENtrader v0.2.2, a multi-agent AI trading system. Your role is to generate human-like styled summaries of trading decisions.
+
+Trading context:
+- Symbol: {symbol}
+- Interval: {interval}
+- Current price: {current_price}
+- Final decision: {signal} with {confidence}% confidence
+- Directional confidence: {directional_confidence}%
+- Conflict score: {conflict_score}
+
+Agent analysis results:
+"""
+        
+        # Add each agent's analysis to the prompt
+        for key, analysis in analysis_results.items():
+            agent_name = key_to_agent_map.get(key, key)
+            agent_tone = self.agent_tones.get(agent_name, "Analytical and professional.")
+            
+            signal = analysis.get("signal", "UNKNOWN")
+            confidence = analysis.get("confidence", 0)
+            reasoning = analysis.get("reasoning", "No reasoning provided.")
+            
+            prompt += f"""
+{agent_name}:
+- Tone profile: {agent_tone}
+- Signal: {signal}
+- Confidence: {confidence}%
+- Reasoning: {reasoning}
+"""
+        
+        prompt += f"""
+Final decision details:
+{json.dumps(final_decision, indent=2)}
+
+Task:
+1. Generate one unique sentence for each agent in their characteristic tone representing their perspective.
+2. Create an overall system summary that balances all views (2-3 sentences).
+3. Assign a mood from: bullish, neutral, conflicted, cautious, euphoric
+
+Respond ONLY with a valid JSON in this format:
+{{
+  "agent_comments": {{
+    "AgentName1": "Their comment in their unique voice...",
+    "AgentName2": "Their comment in their unique voice..."
+  }},
+  "system_summary": "Overall balanced market narrative...",
+  "mood": "bullish|neutral|conflicted|cautious|euphoric"
+}}
+"""
+
+        if confidence < 70 or signal == "CONFLICTED":
+            prompt += "\nInclude a more cautious tone in the system summary since confidence is low or the decision is conflicted."
+            
+        return prompt
+        
+    def _generate_with_llm(self, prompt: str, symbol: str, interval: str) -> Dict[str, Any]:
+        """
+        Generate a summary using the LLM client.
+        
+        Args:
+            prompt: Prompt for the LLM
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            Dictionary containing agent comments, system summary, and mood
+        """
+        try:
+            # Call the LLM with JSON response format
+            start_time = datetime.now()
+            try:
+                # Try the new API format
+                import openai
+                
+                # Check if we have an XAI API key in the environment
+                xai_api_key = os.environ.get("XAI_API_KEY")
+                
+                if xai_api_key:
+                    # Initialize a client for xAI using OpenAI-compatible client
+                    xai_client = openai.OpenAI(base_url="https://api.x.ai/v1", api_key=xai_api_key)
+                    
+                    # Make the request using the OpenAI-compatible API
+                    xai_response = xai_client.chat.completions.create(
+                        model="grok-2-1212",
+                        messages=[
+                            {"role": "system", "content": "You are a trading summary expert for aGENtrader. Format your response as JSON."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        response_format={"type": "json_object"},
+                        max_tokens=1000,
+                        temperature=0.7
+                    )
+                    
+                    # Extract the content from the response
+                    response = {"content": xai_response.choices[0].message.content}
+                    logger.info("Successfully called xAI API with OpenAI-compatible client")
+                else:
+                    # Fall back to the original client if available
+                    if self.llm_client and hasattr(self.llm_client, 'query'):
+                        response = self.llm_client.query(
+                            prompt=prompt,
+                            model="grok-2-1212",
+                            json_response=True,
+                            max_tokens=1000,
+                            temperature=0.7
+                        )
+                    else:
+                        raise ValueError("No xAI API key and no compatible LLM client available")
+            except Exception as e:
+                logger.error(f"Error calling xAI API: {e}", exc_info=True)
+                # Fall back to the original client if available
+                if self.llm_client and hasattr(self.llm_client, 'query'):
+                    response = self.llm_client.query(
+                        prompt=prompt,
+                        model="grok-2-1212",
+                        json_response=True,
+                        max_tokens=1000,
+                        temperature=0.7
+                    )
+                else:
+                    raise ValueError("Failed to call xAI API and no fallback LLM client available")
+            end_time = datetime.now()
+            
+            # Log performance metrics
+            duration = (end_time - start_time).total_seconds()
+            logger.info(f"LLM call completed in {duration:.2f} seconds")
+            
+            # Parse the response
+            if isinstance(response, dict) and "content" in response:
+                content = response["content"]
+                if isinstance(content, str):
+                    try:
+                        # Try to parse the content as JSON
+                        summary = json.loads(content)
+                        return summary
+                    except json.JSONDecodeError:
+                        logger.error("Failed to parse LLM response as JSON")
+                        return self._generate_fallback(None, None, symbol, interval)
+                elif isinstance(content, dict):
+                    return content
+            
+            # If we got here, something went wrong
+            logger.error(f"Unexpected LLM response format: {type(response)}")
+            return self._generate_fallback(None, None, symbol, interval)
+            
+        except Exception as e:
+            logger.error(f"Error calling LLM: {str(e)}", exc_info=True)
+            return self._generate_fallback(None, None, symbol, interval)
+            
+    def _generate_fallback(self, 
+                           analysis_results: Optional[Dict[str, Dict[str, Any]]], 
+                           final_decision: Optional[Dict[str, Any]],
+                           symbol: str,
+                           interval: str) -> Dict[str, Any]:
+        """
+        Generate a fallback summary when the LLM is not available.
+        
+        Args:
+            analysis_results: Results from each analyst agent
+            final_decision: Final decision from the decision agent
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            Dictionary containing agent comments, system summary, and mood
+        """
+        logger.warning("Using fallback summary generation")
+        
+        # Create agent comments
+        agent_comments = {}
+        
+        # If analysis_results is available, extract agent signals
+        if analysis_results:
+            signal_map = {
+                "BUY": "bullish",
+                "SELL": "bearish",
+                "HOLD": "cautious",
+                "NEUTRAL": "neutral",
+                "UNKNOWN": "uncertain"
+            }
+            
+            for key, analysis in analysis_results.items():
+                agent_name = key.replace("_analysis", "").title() + "AnalystAgent"
+                signal = analysis.get("signal", "UNKNOWN")
+                mood = signal_map.get(signal, "neutral")
+                
+                if "technical" in key:
+                    agent_comments[agent_name] = f"The indicators suggest a {mood} trend with moderate volume supporting the move."
+                elif "sentiment" in key:
+                    agent_comments[agent_name] = f"Market sentiment feels {mood} with social chatter increasingly focused on this direction."
+                elif "liquidity" in key:
+                    agent_comments[agent_name] = f"Order books show {mood} pressure with key levels forming around current price."
+                elif "funding" in key:
+                    agent_comments[agent_name] = f"Funding rates indicate {mood} bias in the derivatives market."
+                elif "open_interest" in key:
+                    agent_comments[agent_name] = f"Open interest patterns suggest a {mood} momentum building."
+                else:
+                    agent_comments[agent_name] = f"Analysis indicates a {mood} outlook based on available data."
+        else:
+            # Provide generic comments if no analysis data is available
+            agent_comments = {
+                "TechnicalAnalystAgent": "Charts are showing a potential trend change, but need confirmation.",
+                "SentimentAnalystAgent": "Market mood is shifting but remains cautious overall.",
+                "LiquidityAnalystAgent": "Order flow is balanced with support building at key levels.",
+                "FundingRateAnalystAgent": "Funding shows balanced positioning with no excessive leverage.",
+                "OpenInterestAnalystAgent": "Position changes remain muted, suggesting indecision."
+            }
+        
+        # Determine overall mood from final decision
+        mood = "neutral"
+        if final_decision:
             signal = final_decision.get("signal", "UNKNOWN")
             confidence = final_decision.get("confidence", 0)
             conflict_score = final_decision.get("conflict_score", 0)
             
-            # Prepare analyst information for the prompt
-            analyst_info = []
+            if signal == "BUY" and confidence > 75:
+                mood = "bullish"
+            elif signal == "SELL" and confidence > 75:
+                mood = "bearish"
+            elif conflict_score > 60:
+                mood = "conflicted"
+            elif confidence < 60:
+                mood = "cautious"
             
-            # Map analysis type keys to agent names for better readability
-            analysis_type_to_agent = {
-                'technical_analysis': 'TechnicalAnalystAgent',
-                'sentiment_analysis': 'SentimentAnalystAgent',
-                'sentiment_aggregator_analysis': 'SentimentAggregatorAgent',
-                'liquidity_analysis': 'LiquidityAnalystAgent',
-                'open_interest_analysis': 'OpenInterestAnalystAgent',
-                'funding_rate_analysis': 'FundingRateAnalystAgent'
-            }
+        # Create system summary
+        if final_decision:
+            signal = final_decision.get("signal", "UNKNOWN")
+            confidence = final_decision.get("confidence", 0)
             
-            self.logger.info(f"Raw analysis_results keys: {list(analysis_results.keys())}")
-            
-            for analysis_type, analysis in analysis_results.items():
-                if not isinstance(analysis, dict):
-                    self.logger.warning(f"Analysis for {analysis_type} is not a dictionary")
-                    continue
-                    
-                # Get the proper agent name
-                agent_name = analysis_type_to_agent.get(analysis_type, analysis_type)
-                
-                # Extract signal with fallbacks for different field names
-                signal = analysis.get("signal") or analysis.get("final_signal") or analysis.get("action") or "UNKNOWN"
-                confidence = analysis.get("confidence", 0)
-                
-                # Extract reasoning with fallbacks
-                reasoning = analysis.get("reasoning") or analysis.get("reason") or "No reasoning provided"
-                
-                # Check for fallback/partial data flags
-                is_fallback = analysis.get("is_fallback", False) or analysis.get("fallback", False)
-                is_partial_data = analysis.get("is_partial", False) or analysis.get("partial_data", False)
-                using_heuristics = analysis.get("using_heuristics", False) or analysis.get("heuristic_based", False)
-                
-                # Generate a flag for fallback data
-                data_quality = "normal"
-                if is_fallback or is_partial_data or using_heuristics:
-                    data_quality = "fallback"
-                    
-                self.logger.info(f"Agent: {agent_name}, Signal: {signal}, Confidence: {confidence}, Data Quality: {data_quality}")
-                
-                analyst_info.append({
-                    "agent": agent_name,
-                    "signal": signal,
-                    "confidence": confidence,
-                    "reasoning": reasoning[:300],  # Truncate for prompt length
-                    "data_quality": data_quality
-                })
-            
-            # Construct the prompt
-            prompt = self._construct_prompt(analyst_info, final_decision, symbol, interval)
-            
-            # Generate summary using Grok
-            response = self.grok_client.client.chat.completions.create(
-                model="grok-2-1212",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are an expert crypto trading narrator that summarizes multi-agent trading decisions. "
-                            "For each agent, create a unique voice using their personality profile. "
-                            "IMPORTANT: You must accurately convey each agent's actual signal (BUY, SELL, HOLD, or NEUTRAL) "
-                            "in their tone comment. Never misrepresent what signal an agent is giving - accuracy of signal "
-                            "representation is critical. For example, if TechnicalAnalystAgent gives a BUY signal, their "
-                            "tone must clearly indicate they are positive/recommending buying, not holding or selling. "
-                            "Then create an overall summary that balances all views. Your response should be in JSON format "
-                            "with keys for agent_comments (object with agent names as keys), system_summary (string), and "
-                            "mood (string - one of: bullish, neutral, conflicted, cautious, euphoric)."
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                response_format={"type": "json_object"},
-                temperature=0.7
-            )
-            
-            # Parse the response
-            if not response or not response.choices or not response.choices[0].message.content:
-                raise ValueError("Empty response from Grok API")
-                
-            content = response.choices[0].message.content
-            result = json.loads(content)
-            
-            # Validate and ensure expected fields
-            if not isinstance(result, dict):
-                raise ValueError("Response is not a dictionary")
-                
-            if "agent_comments" not in result or "system_summary" not in result:
-                raise ValueError("Response missing required fields")
-                
-            # Save the summary to logs
-            self._save_summary(result, symbol, interval)
-            
-            # Print formatted summary
-            self._print_formatted_summary(result, symbol, interval)
-            
-            return result
-            
-        except Exception as e:
-            self.logger.error(f"Error generating summary: {str(e)}")
-            return self._generate_fallback_summary(analysis_results, final_decision, symbol, interval)
-    
-    def _construct_prompt(self, analyst_info: List[Dict[str, Any]], 
-                          final_decision: Dict[str, Any], 
-                          symbol: str, 
-                          interval: str) -> str:
-        """
-        Construct the prompt for the Grok API.
-        
-        Args:
-            analyst_info: List of dictionaries with analyst information
-            final_decision: Final trade decision
-            symbol: Trading symbol
-            interval: Trading interval
-            
-        Returns:
-            Constructed prompt as string
-        """
-        # Extract signal and confidence
-        signal = final_decision.get("signal", "UNKNOWN")
-        confidence = final_decision.get("confidence", 0)
-        conflict_score = final_decision.get("conflict_score", 0)
-        is_conflicted = signal == "CONFLICTED" or confidence < 70
-        
-        prompt = f"Generate a styled narrative summary for a {symbol} {interval} trade decision.\n\n"
-        
-        # Add agent tone profiles
-        prompt += "AGENT TONE PROFILES:\n"
-        for agent, tone in self.tone_profiles.items():
-            prompt += f"- {agent}: {tone}\n"
-        
-        prompt += "\nANALYST OUTPUTS:\n"
-        for info in analyst_info:
-            agent = info.get("agent", "UnknownAgent")
-            signal = info.get("signal", "UNKNOWN")
-            confidence = info.get("confidence", 0)
-            reasoning = info.get("reasoning", "No reasoning provided")
-            data_quality = info.get("data_quality", "normal")
-            
-            prompt += f"- {agent}:\n"
-            prompt += f"  Signal: {signal}\n"
-            prompt += f"  Confidence: {confidence}%\n"
-            prompt += f"  Data Quality: {data_quality}\n"
-            prompt += f"  Reasoning: {reasoning}\n\n"
-        
-        # Add final decision
-        prompt += "FINAL DECISION:\n"
-        prompt += f"Signal: {signal}\n"
-        prompt += f"Confidence: {confidence}%\n"
-        
-        if conflict_score > 0:
-            prompt += f"Conflict Score: {conflict_score}%\n"
-        
-        # Special instructions based on decision state
-        prompt += "\nSPECIAL INSTRUCTIONS:\n"
-        
-        # Emphasis on signal accuracy
-        prompt += "- CRITICAL: For each agent comment, you MUST clearly convey their exact signal (BUY/SELL/HOLD/NEUTRAL).\n"
-        prompt += "- If an agent gives a BUY signal, their comment should clearly indicate bullishness or buying action.\n"
-        prompt += "- If an agent gives a NEUTRAL or HOLD signal, their comment should express caution, neutrality, or waiting.\n"
-        prompt += "- If an agent gives a SELL signal, their comment should clearly indicate bearishness or selling action.\n"
-        prompt += "- Never misrepresent an agent's signal in their comment - this is a critical requirement.\n"
-        
-        # Add dynamic tone scaling instructions based on confidence levels
-        prompt += "\nTONE SCALING INSTRUCTIONS:\n"
-        prompt += "- Adjust each agent's tone based on their confidence level:\n"
-        prompt += "  * 80%+ confidence: Use assertive, confident, definitive language\n"
-        prompt += "  * 60-79% confidence: Use balanced, measured, somewhat cautious language\n"
-        prompt += "  * Below 60% confidence: Use hesitant, reserved, speculative language\n"
-        
-        # Add fallback tone instructions
-        prompt += "- For any agent whose data is flagged as fallback or has missing/partial data:\n"
-        prompt += "  * Use explicitly cautious, minimal tone that acknowledges limited information\n"
-        prompt += "  * Include phrasing like 'with limited data' or 'based on partial information'\n"
-        
-        if is_conflicted:
-            prompt += "- Use a more cautious tone in the system summary as this is a conflicted or low confidence decision.\n"
-        
-        if signal == "BUY":
-            prompt += "- The final decision is bullish, but acknowledge any dissenting views.\n"
-        elif signal == "SELL":
-            prompt += "- The final decision is bearish, but acknowledge any dissenting views.\n"
-        
-        # Output format instructions
-        prompt += """
-OUTPUT FORMAT:
-Generate a JSON object with these keys:
-1. agent_comments: An object where keys are agent names and values are their comments in their distinctive voice (1 sentence each)
-2. system_summary: A 1-2 sentence overall summary that balances all views
-3. mood: A single word describing the overall mood (bullish, neutral, conflicted, cautious, or euphoric)
-
-For example:
-{
-  "agent_comments": {
-    "TechnicalAnalystAgent": "The RSI is cooling off but I see a promising setup forming.",
-    ...
-  },
-  "system_summary": "Growing bullish momentum with some caution flags.",
-  "mood": "cautiously_bullish"
-}
-"""
-        
-        return prompt
-    
-    def _generate_fallback_summary(self, 
-                                 analysis_results: Dict[str, Any], 
-                                 final_decision: Dict[str, Any], 
-                                 symbol: str, 
-                                 interval: str) -> Dict[str, Any]:
-        """
-        Generate a fallback summary when Grok is unavailable.
-        
-        Args:
-            analysis_results: Dictionary of all analyst outputs
-            final_decision: Final trade decision JSON
-            symbol: Trading symbol
-            interval: Trading interval
-            
-        Returns:
-            Dictionary with agent comments and system summary
-        """
-        # Create basic summary with generic agent comments
-        result = {
-            "agent_comments": {},
-            "system_summary": "Trading decision based on multiple factors.",
-            "mood": "neutral"
-        }
-        
-        # Extract signal and confidence
-        signal = final_decision.get("signal", "UNKNOWN")
-        confidence = final_decision.get("confidence", 0)
-        
-        # Determine tone level based on confidence
-        if confidence >= 80:
-            tone_level = "high"
-            mood_prefix = ""
-        elif confidence >= 60:
-            tone_level = "medium"
-            mood_prefix = "cautiously_"
+            if signal == "BUY":
+                system_summary = f"Analysis suggests upward momentum for {symbol} with {confidence}% confidence based on technical and sentiment factors."
+            elif signal == "SELL":
+                system_summary = f"Conditions appear to favor downward movement for {symbol} with {confidence}% confidence, primarily due to technical indicators."
+            elif signal == "HOLD":
+                system_summary = f"Current market conditions suggest holding positions for {symbol} with limited directional bias at this time."
+            elif signal == "NEUTRAL":
+                system_summary = f"The market lacks clear direction for {symbol} with agents showing mixed signals. Recommend waiting for clearer setups."
+            else:
+                system_summary = f"Market conditions for {symbol} are uncertain. Consider reducing exposure until stronger signals emerge."
         else:
-            tone_level = "low"
-            mood_prefix = "tentatively_"
-            
-        # Get tone modifiers
-        prefix = random.choice(self.confidence_tone_modifiers[tone_level]["prefix_templates"])
+            system_summary = f"Market analysis for {symbol} shows mixed signals. Consider waiting for confirmation before taking action."
         
-        # Adjust system summary based on signal with appropriate tone
-        if signal == "BUY":
-            result["system_summary"] = f"{prefix} seeing a bullish signal for {symbol} with {confidence}% confidence."
-            result["mood"] = f"{mood_prefix}bullish"
-        elif signal == "SELL":
-            result["system_summary"] = f"{prefix} seeing a bearish signal for {symbol} with {confidence}% confidence."
-            result["mood"] = f"{mood_prefix}bearish"
-        elif signal == "HOLD":
-            result["system_summary"] = f"{prefix} maintaining a neutral stance on {symbol} with {confidence}% confidence."
-            result["mood"] = "neutral"
-        elif signal == "CONFLICTED":
-            result["system_summary"] = f"Seeing conflicted signals for {symbol}, which requires caution."
-            result["mood"] = "conflicted"
-        
-        # Map analysis type keys to agent names for better readability
-        analysis_type_to_agent = {
-            'technical_analysis': 'TechnicalAnalystAgent',
-            'sentiment_analysis': 'SentimentAnalystAgent',
-            'sentiment_aggregator_analysis': 'SentimentAggregatorAgent',
-            'liquidity_analysis': 'LiquidityAnalystAgent',
-            'open_interest_analysis': 'OpenInterestAnalystAgent',
-            'funding_rate_analysis': 'FundingRateAnalystAgent'
+        # Construct the final summary
+        summary = {
+            "agent_comments": agent_comments,
+            "system_summary": system_summary,
+            "mood": mood
         }
         
-        # Add basic agent comments
-        for analysis_type, analysis in analysis_results.items():
-            if not isinstance(analysis, dict):
-                continue
-                
-            # Get the proper agent name
-            agent_name = analysis_type_to_agent.get(analysis_type, analysis_type)
-            
-            # Extract signal with fallbacks for different field names
-            signal = analysis.get("signal") or analysis.get("final_signal") or analysis.get("action") or "UNKNOWN"
-            confidence = analysis.get("confidence", 0)
-            
-            # Check for fallback/partial data flags
-            is_fallback = analysis.get("is_fallback", False) or analysis.get("fallback", False)
-            is_partial_data = analysis.get("is_partial", False) or analysis.get("partial_data", False)
-            using_heuristics = analysis.get("using_heuristics", False) or analysis.get("heuristic_based", False)
-            
-            # Apply confidence-based tone modifiers
-            if confidence >= 80:
-                tone_level = "high"
-            elif confidence >= 60:
-                tone_level = "medium"
-            else:
-                tone_level = "low"
-                
-            # Generate comment with appropriate tone
-            if is_fallback or is_partial_data or using_heuristics:
-                # Use fallback tone
-                prefix = self.fallback_tone_modifiers["prefix_templates"][0]
-                suffix = self.fallback_tone_modifiers["suffix_templates"][0]
-                comment = f"{prefix}, I'm seeing a {signal} signal {suffix}."
-            else:
-                # Use confidence-based tone
-                prefix = self.confidence_tone_modifiers[tone_level]["prefix_templates"][0]
-                suffix = self.confidence_tone_modifiers[tone_level]["suffix_templates"][0]
-                comment = f"{prefix} seeing a {signal} signal {suffix}."
-            
-            result["agent_comments"][agent_name] = comment
-            
-            self.logger.info(f"Fallback for {agent_name}: {signal} with {confidence}% (Tone: {tone_level})")
+        return summary
         
-        # Save the summary to logs
-        self._save_summary(result, symbol, interval)
-        
-        # Print formatted summary
-        self._print_formatted_summary(result, symbol, interval)
-        
-        return result
-    
-    def _save_summary(self, summary: Dict[str, Any], symbol: str, interval: str) -> None:
+    def _save_summary_to_file(self, summary: Dict[str, Any], symbol: str) -> None:
         """
-        Save the summary to a log file.
+        Save the summary to a file.
         
         Args:
             summary: Summary dictionary
             symbol: Trading symbol
-            interval: Trading interval
         """
         try:
-            # Create a timestamp
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Sanitize symbol for filename
+            symbol_safe = symbol.replace("/", "_").replace("\\", "_").replace(":", "_")
             
-            # Clean the symbol for filename
-            clean_symbol = symbol.replace("/", "")
+            filename = f"tone_summary_{symbol_safe}_{timestamp}.json"
+            filepath = os.path.join(self.log_dir, filename)
             
-            # Create the log filename
-            filename = f"tone_summary_{clean_symbol}_{interval}_{timestamp}.json"
-            filepath = os.path.join(self.logs_dir, filename)
-            
-            # Save the summary as JSON
             with open(filepath, "w") as f:
                 json.dump(summary, f, indent=2)
                 
-            self.logger.info(f"Tone summary saved to {filepath}")
+            logger.info(f"Saved tone summary to {filepath}")
             
         except Exception as e:
-            self.logger.error(f"Error saving tone summary: {str(e)}")
-    
-    def _validate_and_log_signals(self, analysis_results: Dict[str, Any]) -> None:
+            logger.error(f"Error saving summary to file: {str(e)}", exc_info=True)
+            
+    def _generate_error_response(self, symbol: str, interval: str) -> Dict[str, Any]:
         """
-        Validate and log the actual signals from the analysis results.
-        This helps in debugging signal mismatches between agent outputs and tone summaries.
+        Generate an error response when summary generation fails.
         
         Args:
-            analysis_results: Dictionary of all analyst outputs
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            Dictionary containing error response
         """
-        try:
-            # Map analysis type keys to agent names for better readability
-            analysis_type_to_agent = {
-                'technical_analysis': 'TechnicalAnalystAgent',
-                'sentiment_analysis': 'SentimentAnalystAgent',
-                'sentiment_aggregator_analysis': 'SentimentAggregatorAgent',
-                'liquidity_analysis': 'LiquidityAnalystAgent',
-                'open_interest_analysis': 'OpenInterestAnalystAgent',
-                'funding_rate_analysis': 'FundingRateAnalystAgent'
-            }
-            
-            # Count signals by type
-            signal_counts = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0, "UNKNOWN": 0}
-            agent_signals = {}
-            
-            # Banner for visibility in logs
-            self.logger.info("=" * 50)
-            self.logger.info("VALIDATION - ACTUAL AGENT SIGNALS:")
-            self.logger.info("-" * 50)
-            
-            for analysis_type, analysis in analysis_results.items():
-                if not isinstance(analysis, dict):
-                    self.logger.warning(f"Analysis for {analysis_type} is not a dictionary")
-                    continue
-                
-                # Get the proper agent name
-                agent_name = analysis_type_to_agent.get(analysis_type, analysis_type)
-                
-                # Extract signal with fallbacks for different field names
-                signal = analysis.get("signal") or analysis.get("final_signal") or analysis.get("action") or "UNKNOWN"
-                confidence = analysis.get("confidence", 0)
-                
-                # Update counts and record
-                if signal in signal_counts:
-                    signal_counts[signal] += 1
-                else:
-                    signal_counts["UNKNOWN"] += 1
-                
-                agent_signals[agent_name] = {
-                    "signal": signal,
-                    "confidence": confidence
-                }
-                
-                self.logger.info(f"Agent: {agent_name}, Signal: {signal}, Confidence: {confidence}%")
-                
-            # Print summary of signals
-            self.logger.info("-" * 50)
-            self.logger.info(f"Signal Count: BUY: {signal_counts['BUY']}, SELL: {signal_counts['SELL']}, HOLD/NEUTRAL: {signal_counts['HOLD'] + signal_counts['NEUTRAL']}, UNKNOWN: {signal_counts['UNKNOWN']}")
-            self.logger.info("=" * 50)
-            
-            # Store for comparison later
-            self._agent_signals = agent_signals
-            
-        except Exception as e:
-            self.logger.error(f"Error validating signals: {str(e)}")
-            
-    def _print_formatted_summary(self, summary: Dict[str, Any], symbol: str, interval: str) -> None:
+        return {
+            "agent_comments": {
+                "TechnicalAnalystAgent": "Technical signals are unclear at this point.",
+                "SentimentAnalystAgent": "Market sentiment is mixed with no clear direction.",
+                "LiquidityAnalystAgent": "Order book shows balanced liquidity levels.",
+                "OpenInterestAnalystAgent": "No significant change in market positions detected.",
+                "FundingRateAnalystAgent": "Funding rates indicate neutral market expectations."
+            },
+            "system_summary": f"Unable to generate a complete analysis for {symbol} on {interval} timeframe. Consider waiting for clearer market conditions.",
+            "mood": "cautious"
+        }
+        
+    def run(self, *args, **kwargs) -> Dict[str, Any]:
         """
-        Print the summary in a formatted way.
+        Run the tone agent (wrapper for generate_summary).
+        
+        Args:
+            *args: Positional arguments
+            **kwargs: Keyword arguments
+            
+        Returns:
+            Dictionary containing agent comments, system summary, and mood
+        """
+        # Extract required parameters
+        analysis_results = kwargs.get("analysis_results", {})
+        final_decision = kwargs.get("final_decision", {})
+        symbol = kwargs.get("symbol", "BTC/USDT")
+        interval = kwargs.get("interval", "1h")
+        
+        return self.generate_summary(analysis_results, final_decision, symbol, interval)
+    
+    def print_styled_summary(self, summary: Dict[str, Any], symbol: str, interval: str) -> None:
+        """
+        Print a styled summary to the console.
         
         Args:
             summary: Summary dictionary
             symbol: Trading symbol
-            interval: Trading interval
+            interval: Time interval
         """
         try:
+            # Check if colorama is available for better formatting
+            try:
+                from colorama import Fore, Style, init
+                init(autoreset=True)
+                colored_output = True
+            except ImportError:
+                colored_output = False
+                
+            # Define colors for colored output
+            if colored_output:
+                GREEN = Fore.GREEN
+                YELLOW = Fore.YELLOW
+                CYAN = Fore.CYAN
+                MAGENTA = Fore.MAGENTA
+                RED = Fore.RED
+                WHITE = Fore.WHITE
+                RESET = Style.RESET_ALL
+            else:
+                GREEN = YELLOW = CYAN = MAGENTA = RED = WHITE = RESET = ""
+                
+            # Print header
+            print(f"\n{GREEN}{'=' * 80}{RESET}")
+            print(f"{CYAN}🎙️ ToneAgent Summary — {symbol} ({interval}){RESET}")
+            print(f"{GREEN}{'=' * 80}{RESET}")
+            
+            # Print agent comments
             agent_comments = summary.get("agent_comments", {})
-            system_summary = summary.get("system_summary", "No summary available")
-            mood = summary.get("mood", "neutral")
-            
-            # Format the output
-            output = f"\n🎙️ ToneAgent Summary — {symbol} ({interval})\n\n"
-            
-            # Add agent comments
-            output += "📣 Agent Voices:\n"
-            for agent, comment in agent_comments.items():
-                output += f"- {agent}: \"{comment}\"\n"
-            
-            # Extract and count signals from agent comments (for validation)
-            signal_counts = {"BUY": 0, "SELL": 0, "HOLD": 0, "NEUTRAL": 0, "UNKNOWN": 0}
-            for comment in agent_comments.values():
-                for signal in signal_counts.keys():
-                    if signal in comment:
-                        signal_counts[signal] += 1
-                        break
-            
-            # Log signal counts for validation
-            output += f"\n📊 Signal Count (from tone): BUY: {signal_counts['BUY']}, SELL: {signal_counts['SELL']}, HOLD/NEUTRAL: {signal_counts['HOLD'] + signal_counts['NEUTRAL']}\n"
-            
-            # Compare with actual signals (if available)
-            if hasattr(self, '_agent_signals') and self._agent_signals:
-                output += "\n⚠️ VALIDATION - Signals in Tone vs Actual:\n"
+            if agent_comments:
+                print(f"\n{YELLOW}📣 Agent Voices:{RESET}")
                 for agent, comment in agent_comments.items():
-                    if agent in self._agent_signals:
-                        actual_signal = self._agent_signals[agent]["signal"]
-                        actual_confidence = self._agent_signals[agent]["confidence"]
-                        
-                        # Check if the tone matches the actual signal
-                        tone_matches = actual_signal in comment
-                        match_marker = "✅" if tone_matches else "❌"
-                        
-                        output += f"{match_marker} {agent}: Actual={actual_signal} @ {actual_confidence}%, Tone: \"{comment}\"\n"
-                
-            # Add system summary
-            output += f"\n🧠 Summary: {system_summary}\n"
+                    print(f"{MAGENTA}- {agent}:{RESET} \"{WHITE}{comment}{RESET}\"")
             
-            # Add mood if available
-            if mood:
-                output += f"\n🔮 Mood: {mood}\n"
+            # Print system summary
+            system_summary = summary.get("system_summary", "")
+            if system_summary:
+                print(f"\n{YELLOW}🧠 Summary:{RESET} {WHITE}{system_summary}{RESET}")
+            
+            # Print mood
+            mood = summary.get("mood", "neutral")
+            mood_color = YELLOW
+            if mood.lower() in ["bullish", "euphoric"]:
+                mood_color = GREEN
+            elif mood.lower() in ["bearish"]:
+                mood_color = RED
+            elif mood.lower() in ["cautious", "conflicted"]:
+                mood_color = YELLOW
                 
-            # Print the formatted summary
-            logger.info(output)
+            print(f"\n{YELLOW}⚡ Market Mood:{RESET} {mood_color}{mood.capitalize()}{RESET}")
+            print(f"{GREEN}{'=' * 80}{RESET}\n")
             
         except Exception as e:
-            self.logger.error(f"Error printing formatted summary: {str(e)}")
+            logger.error(f"Error printing styled summary: {str(e)}", exc_info=True)
+            # Fallback to simple print
+            print("\n=== ToneAgent Summary ===")
+            print(json.dumps(summary, indent=2))
+            print("========================\n")
+
+def test_tone_agent():
+    """
+    Test the tone agent functionality.
+    """
+    # Sample analysis results
+    analysis_results = {
+        "technical_analysis": {
+            "signal": "BUY",
+            "confidence": 75,
+            "reasoning": "Moving averages show bullish crossover and RSI indicates momentum."
+        },
+        "sentiment_analysis": {
+            "signal": "BUY",
+            "confidence": 80,
+            "reasoning": "Social media sentiment has turned positive with increased mentions."
+        },
+        "liquidity_analysis": {
+            "signal": "NEUTRAL",
+            "confidence": 60,
+            "reasoning": "Order book shows balanced buying and selling pressure."
+        },
+        "funding_rate_analysis": {
+            "signal": "SELL",
+            "confidence": 65,
+            "reasoning": "Funding rates turning negative, indicating potential market exhaustion."
+        },
+        "open_interest_analysis": {
+            "signal": "NEUTRAL",
+            "confidence": 55,
+            "reasoning": "Open interest has been flat over the past 24 hours."
+        }
+    }
+    
+    # Sample final decision
+    final_decision = {
+        "signal": "BUY",
+        "confidence": 72,
+        "directional_confidence": 65,
+        "reason": "Bullish technical indicators with supportive sentiment.",
+        "position_size": 0.15,
+        "risk_score": 65,
+        "timestamp": datetime.now().isoformat(),
+        "symbol": "BTC/USDT",
+        "current_price": 49876.32,
+        "validity_period_hours": 24,
+        "conflict_score": 35,
+        "contributing_agents": ["TechnicalAnalystAgent", "SentimentAnalystAgent"],
+        "strategy_tags": ["momentum_driven", "sentiment_aligned"],
+        "risk_feedback": "Position size adjusted due to funding rate concerns"
+    }
+    
+    # Initialize tone agent
+    tone_agent = ToneAgent()
+    
+    # Generate summary
+    summary = tone_agent.generate_summary(
+        analysis_results=analysis_results,
+        final_decision=final_decision,
+        symbol="BTC/USDT",
+        interval="4h"
+    )
+    
+    # Print styled summary
+    tone_agent.print_styled_summary(summary, "BTC/USDT", "4h")
+    
+    return summary
+
+if __name__ == "__main__":
+    test_tone_agent()

@@ -76,9 +76,16 @@ class TradeType(Enum):
     def __str__(self):
         return self.value
 
-class TradePlanAgent(\1):
+class TradePlanAgent(BaseDecisionAgent):
     """TradePlanAgent for aGENtrader v0.2.2"""
-\2def __init__(self\3):\4    self.version = "v0.2.2"
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize the TradePlanAgent with the given configuration.
+        
+        Args:
+            config: Configuration dictionary
+        """
+        self.version = "v0.2.2"
         super().__init__()
         self.name = "TradePlanAgent"
         self._description = "Generates detailed trade execution plans"

@@ -8,6 +8,7 @@ It aggregates sentiment data from various sources and provides a unified sentime
 import os
 import time
 import json
+import yaml
 import random
 import logging
 import requests
@@ -28,16 +29,17 @@ logger = logging.getLogger('sentiment_aggregator')
 class SentimentAggregatorAgent(BaseAnalystAgent):
     """SentimentAggregatorAgent for aGENtrader v0.2.2"""
     
-    def __init__(self, sentiment_providers=None, config=None):
+    def __init__(self, sentiment_providers=None, config=None, data_fetcher=None):
         """
         Initialize the sentiment aggregator agent.
         
         Args:
             sentiment_providers: List of sentiment data providers
             config: Configuration dictionary
+            data_fetcher: Data fetcher for market data
         """
         self.version = "v0.2.2"
-        super().__init__()
+        super().__init__(agent_name="sentiment_aggregator")
         self.name = "SentimentAggregatorAgent"
         self.description = "Analyzes market sentiment using Grok AI"
         self.data_fetcher = data_fetcher
@@ -262,6 +264,47 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 # Add interval to error response for consistency
                 error_response["interval"] = interval
                 return error_response
+    
+    def get_analysis(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Get analysis for a trading pair. This is a wrapper for analyze().
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            **kwargs: Additional parameters
+            
+        Returns:
+            Analysis results
+        """
+        return self.analyze(symbol=symbol, interval=interval, **kwargs)
+        
+    def _get_trading_config(self) -> Dict[str, Any]:
+        """
+        Get trading configuration from settings file.
+        
+        Returns:
+            Trading configuration dictionary
+        """
+        try:
+            # Try to load from config/settings.yaml first
+            config_path = "config/settings.yaml"
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    return config.get('trading', {})
+            
+            # Fallback to config/default.json
+            config_path = "config/default.json"
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    return config.get('trading', {})
+        except Exception as e:
+            logger.error(f"Error loading trading config: {str(e)}")
+            
+        # Return empty dict if config couldn't be loaded
+        return {}
     
     def _fetch_market_data_text(self, symbol) -> str:
         """
@@ -534,6 +577,38 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             logger.warning(f"Invalid interval: {interval}, must be one of {valid_intervals}")
             return False
             
+        return True
+        
+    def validate_input(self, symbol: Optional[str] = None, interval: Optional[str] = None) -> bool:
+        """
+        Validate input parameters.
+        
+        Args:
+            symbol: Trading symbol
+            interval: Time interval
+            
+        Returns:
+            True if inputs are valid, False otherwise
+        """
+        # Basic validation for symbol
+        if symbol is None:
+            logger.warning("Symbol is None, will use default symbol")
+            return True  # We allow None and will set a default
+            
+        # Allow dict for symbol (common in the system)
+        if isinstance(symbol, dict):
+            if 'symbol' not in symbol:
+                logger.warning("Symbol dict doesn't contain 'symbol' key")
+                return False
+            return True
+            
+        # Basic validation for interval
+        valid_intervals = ['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '8h', '12h', '1d', '3d', '1w', '1M']
+        if interval is not None and interval not in valid_intervals:
+            logger.warning(f"Invalid interval: {interval}, must be one of: {valid_intervals}")
+            return False
+            
+        # If we got here, input is valid
         return True
         
     def _api_error_response(self, symbol, error_type: str = "api_error", interval: Optional[str] = None) -> Dict[str, Any]:

@@ -255,7 +255,8 @@ class AgentTestHarness:
         temperature: float = 0.0,
         explain: bool = False,
         data_override: Optional[Dict[str, Any]] = None,
-        log_conflict_traces: bool = True
+        log_conflict_traces: bool = True,
+        interactive: bool = False
     ):
         """
         Initialize the test harness.
@@ -269,6 +270,7 @@ class AgentTestHarness:
             explain: Whether to print detailed explanations
             data_override: Override input data for the agent
             log_conflict_traces: Whether to enable structured logging of CONFLICTED decisions
+            interactive: Whether to run in interactive mode with prompts for user input
         """
         # Initialize test results storage
         self.test_results = []
@@ -283,6 +285,7 @@ class AgentTestHarness:
         self.trade_cycle = False  # Whether to run full trade cycle (including TradePlanAgent)
         self.trade_log = False  # Whether to save full JSON output of trade cycle test
         self.log_conflict_traces = log_conflict_traces  # Enable conflict logging by default in test mode
+        self.interactive = interactive  # Whether to run in interactive mode
         
         # Check if agent is valid
         if agent_name not in AVAILABLE_AGENTS:
@@ -413,6 +416,58 @@ class AgentTestHarness:
         """Restore original LLM client functionality."""
         if hasattr(self, '_original_llm_query'):
             LLMClient.query = self._original_llm_query
+            
+    def _run_interactive_mode(self):
+        """
+        Run interactive mode by prompting the user for inputs and parameters.
+        """
+        print(f"\n{Fore.CYAN}=== Interactive Mode ===={Style.RESET_ALL}")
+        print(f"Current configuration:")
+        print(f"  Agent: {Fore.YELLOW}{self.agent_name}{Style.RESET_ALL}")
+        print(f"  Symbol: {Fore.YELLOW}{self.symbol}{Style.RESET_ALL}")
+        print(f"  Interval: {Fore.YELLOW}{self.interval}{Style.RESET_ALL}")
+        print(f"  Using mock data: {Fore.YELLOW}{self.use_mock_data}{Style.RESET_ALL}")
+        print(f"  Temperature: {Fore.YELLOW}{self.temperature}{Style.RESET_ALL}")
+        print("")
+        
+        # Ask for symbol modification
+        new_symbol = input(f"Enter a new symbol (or press Enter to keep {self.symbol}): ")
+        if new_symbol.strip():
+            self.symbol = new_symbol.strip()
+            print(f"Symbol updated to: {Fore.GREEN}{self.symbol}{Style.RESET_ALL}")
+        
+        # Ask for interval modification
+        new_interval = input(f"Enter a new interval (or press Enter to keep {self.interval}): ")
+        if new_interval.strip():
+            self.interval = new_interval.strip()
+            print(f"Interval updated to: {Fore.GREEN}{self.interval}{Style.RESET_ALL}")
+            
+        # Ask about using mock data
+        use_mock_response = input(f"Use mock data? (y/n, press Enter to keep {self.use_mock_data}): ").lower()
+        if use_mock_response in ['y', 'yes']:
+            self.use_mock_data = True
+            print(f"Using {Fore.GREEN}mock data{Style.RESET_ALL}")
+        elif use_mock_response in ['n', 'no']:
+            self.use_mock_data = False
+            print(f"Using {Fore.GREEN}real data{Style.RESET_ALL}")
+            
+        # Ask about temperature for LLM
+        try:
+            temp_response = input(f"Enter temperature (0-1, press Enter to keep {self.temperature}): ")
+            if temp_response.strip():
+                self.temperature = float(temp_response.strip())
+                print(f"Temperature updated to: {Fore.GREEN}{self.temperature}{Style.RESET_ALL}")
+        except ValueError:
+            print(f"{Fore.RED}Invalid temperature, keeping {self.temperature}{Style.RESET_ALL}")
+        
+        # Need to reinitialize data provider if settings changed
+        if new_symbol.strip() or use_mock_response in ['y', 'yes', 'n', 'no']:
+            print(f"\n{Fore.CYAN}Reinitializing data provider with new settings...{Style.RESET_ALL}")
+            self._init_data_provider()
+            
+        print(f"\n{Fore.GREEN}Interactive configuration complete{Style.RESET_ALL}")
+        print(f"Running test with: Symbol={self.symbol}, Interval={self.interval}, MockData={self.use_mock_data}, Temp={self.temperature}")
+        print("")
     
     def _create_agent(self) -> BaseAnalystAgent:
         """
@@ -544,9 +599,14 @@ class AgentTestHarness:
         """
         Run the test for the selected agent.
         
+        In interactive mode, it prompts the user for inputs before running the test.
+        
         Returns:
             Dictionary with test results
         """
+        # Handle interactive mode if enabled
+        if self.interactive:
+            self._run_interactive_mode()
         if self.full_cycle and self.agent_name != 'DecisionAgent':
             logger.warning(f"{Fore.YELLOW}Warning: Full decision cycle mode is enabled but agent is not DecisionAgent. "
                          f"Switching target agent to DecisionAgent.{Style.RESET_ALL}")
@@ -1543,6 +1603,8 @@ def parse_args():
                       help='Save full JSON output of trade cycle test')
     parser.add_argument('--mock-portfolio', action='store_true',
                       help='Use mock portfolio for testing')
+    parser.add_argument('--interactive', action='store_true',
+                      help='Run in interactive mode with prompts for user input')
     
     return parser.parse_args()
 
@@ -1564,7 +1626,8 @@ def main():
             interval=args.interval,
             use_mock_data=args.mock_data,
             temperature=args.temperature,
-            explain=args.explain
+            explain=args.explain,
+            interactive=args.interactive
         )
         
         # Configure advanced features

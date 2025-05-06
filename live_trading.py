@@ -142,6 +142,14 @@ class LiveTradingSystem:
         """Initialize all trading system components."""
         # Import here to avoid circular dependencies
         from agents.technical_analyst_agent import TechnicalAnalystAgent
+        from agents.sentiment_analyst_agent import SentimentAnalystAgent
+        from agents.sentiment_aggregator_agent import SentimentAggregatorAgent
+        from agents.liquidity_analyst_agent import LiquidityAnalystAgent
+        from agents.funding_rate_analyst_agent import FundingRateAnalystAgent
+        from agents.open_interest_analyst_agent import OpenInterestAnalystAgent
+        from agents.decision_agent import DecisionAgent
+        from agents.trade_plan_agent import TradePlanAgent
+        from agents.tone_agent import ToneAgent
         from data.feed.data_provider_factory import DataProviderFactory
         from agents.trade_book_manager import TradeBookManager
         from agents.trade_executor_agent import TradeExecutorAgent
@@ -188,10 +196,40 @@ class LiveTradingSystem:
         logger.info("Initialized TradeExecutorAgent")
         
         # Initialize analyst agents
-        self.technical_agent = TechnicalAnalystAgent(data_fetcher=self.data_fetcher)
+        self.technical_agent = TechnicalAnalystAgent()
         logger.info("Initialized Technical Analyst Agent")
         
-        # More agents will be initialized here as they are implemented
+        # Initialize sentiment analyst agent
+        self.sentiment_agent = SentimentAnalystAgent()
+        logger.info("Initialized Sentiment Analyst Agent")
+        
+        # Initialize sentiment aggregator agent
+        self.sentiment_aggregator = SentimentAggregatorAgent()
+        logger.info("Initialized Sentiment Aggregator Agent")
+        
+        # Initialize liquidity analyst agent
+        self.liquidity_agent = LiquidityAnalystAgent()
+        logger.info("Initialized Liquidity Analyst Agent")
+        
+        # Initialize funding rate analyst agent
+        self.funding_rate_agent = FundingRateAnalystAgent()
+        logger.info("Initialized Funding Rate Analyst Agent")
+        
+        # Initialize open interest analyst agent
+        self.open_interest_agent = OpenInterestAnalystAgent()
+        logger.info("Initialized Open Interest Analyst Agent")
+        
+        # Initialize decision agent
+        self.decision_agent = DecisionAgent()
+        logger.info("Initialized Decision Agent")
+        
+        # Initialize trade plan agent
+        self.trade_plan_agent = TradePlanAgent()
+        logger.info("Initialized Trade Plan Agent")
+        
+        # Initialize tone agent
+        self.tone_agent = ToneAgent()
+        logger.info("Initialized Tone Agent")
     
     def run(self):
         """Run the trading system."""
@@ -280,8 +318,11 @@ class LiveTradingSystem:
                 # Make trading decision
                 decision = self._make_decision(analysis_results)
                 
+                # Extract signal (might be under 'signal' or 'action' key)
+                signal = decision.get("signal", decision.get("action", "HOLD"))
+                
                 # Execute the decision if action is required
-                if decision["action"] in ["BUY", "SELL"]:
+                if signal in ["BUY", "SELL"]:
                     self._execute_trade(decision)
                 
                 # Log the decision
@@ -358,12 +399,75 @@ class LiveTradingSystem:
                 interval=self.interval,
                 market_data=market_data
             )
-            results["technical"] = technical_analysis
+            results["technical_analysis"] = technical_analysis
         except Exception as e:
             logger.error(f"Error in technical analysis: {e}")
-            results["technical"] = {"error": str(e)}
+            results["technical_analysis"] = {"error": str(e), "signal": "NEUTRAL", "confidence": 0}
         
-        # More analysis agents will be added here
+        # Run sentiment analysis
+        try:
+            logger.info("Running sentiment analysis")
+            sentiment_analysis = self.sentiment_agent.analyze(
+                symbol=self.symbol,
+                interval=self.interval,
+                market_data=market_data
+            )
+            results["sentiment_analysis"] = sentiment_analysis
+        except Exception as e:
+            logger.error(f"Error in sentiment analysis: {e}")
+            results["sentiment_analysis"] = {"error": str(e), "signal": "NEUTRAL", "confidence": 0}
+        
+        # Run sentiment aggregator
+        try:
+            logger.info("Running sentiment aggregator")
+            sentiment_aggregator_analysis = self.sentiment_aggregator.analyze(
+                symbol=self.symbol,
+                interval=self.interval,
+                market_data=market_data
+            )
+            results["sentiment_aggregator"] = sentiment_aggregator_analysis
+        except Exception as e:
+            logger.error(f"Error in sentiment aggregator: {e}")
+            results["sentiment_aggregator"] = {"error": str(e), "signal": "NEUTRAL", "confidence": 0}
+        
+        # Run liquidity analysis
+        try:
+            logger.info("Running liquidity analysis")
+            liquidity_analysis = self.liquidity_agent.analyze(
+                symbol=self.symbol,
+                interval=self.interval,
+                market_data=market_data
+            )
+            results["liquidity_analysis"] = liquidity_analysis
+        except Exception as e:
+            logger.error(f"Error in liquidity analysis: {e}")
+            results["liquidity_analysis"] = {"error": str(e), "signal": "NEUTRAL", "confidence": 0}
+        
+        # Run funding rate analysis
+        try:
+            logger.info("Running funding rate analysis")
+            funding_rate_analysis = self.funding_rate_agent.analyze(
+                symbol=self.symbol,
+                interval=self.interval,
+                market_data=market_data
+            )
+            results["funding_rate_analysis"] = funding_rate_analysis
+        except Exception as e:
+            logger.error(f"Error in funding rate analysis: {e}")
+            results["funding_rate_analysis"] = {"error": str(e), "signal": "NEUTRAL", "confidence": 0}
+        
+        # Run open interest analysis
+        try:
+            logger.info("Running open interest analysis")
+            open_interest_analysis = self.open_interest_agent.analyze(
+                symbol=self.symbol,
+                interval=self.interval,
+                market_data=market_data
+            )
+            results["open_interest_analysis"] = open_interest_analysis
+        except Exception as e:
+            logger.error(f"Error in open interest analysis: {e}")
+            results["open_interest_analysis"] = {"error": str(e), "signal": "NEUTRAL", "confidence": 0}
         
         return results
     
@@ -371,35 +475,72 @@ class LiveTradingSystem:
         """Make a trading decision based on analysis results."""
         logger.info("Making trading decision")
         
-        # For now, just use technical analysis as the sole decision maker
-        if "technical" in analysis_results and "action" in analysis_results["technical"]:
-            tech_analysis = analysis_results["technical"]
+        try:
+            # Get current price for reference
+            current_price = self._get_current_price()
             
-            decision = {
+            # Use the decision agent to make a weighted decision
+            decision_result = self.decision_agent.make_decision(
+                agent_analyses=analysis_results
+            )
+            
+            # Log the decision details
+            if "signal" in decision_result:
+                signal = decision_result.get("signal", "UNKNOWN")
+                confidence = decision_result.get("confidence", 0)
+                logger.info(f"Decision agent: {signal} with confidence {confidence}%")
+            
+            # Generate trade plan using the TradePlanAgent
+            trade_plan = self.trade_plan_agent.generate_trade_plan(
+                decision=decision_result,
+                market_data={
+                    "symbol": self.symbol,
+                    "interval": self.interval,
+                    "current_price": current_price,
+                    "analysis_results": analysis_results
+                }
+            )
+            
+            # Generate tone summary using the ToneAgent
+            try:
+                tone_summary = self.tone_agent.generate_summary(
+                    analysis_results=analysis_results,
+                    final_decision=trade_plan,
+                    symbol=self.symbol,
+                    interval=self.interval
+                )
+                
+                # Add tone summary to the trade plan output
+                if tone_summary:
+                    trade_plan["tone_summary"] = tone_summary
+                
+            except Exception as e:
+                logger.error(f"Error generating tone summary: {e}")
+                # Continue with the trade plan even if tone summary fails
+            
+            return trade_plan
+            
+        except Exception as e:
+            logger.error(f"Error in decision making process: {e}")
+            logger.exception("Decision error details:")
+            
+            # Fallback to a safe default decision
+            fallback_decision = {
                 "timestamp": datetime.now().isoformat(),
                 "symbol": self.symbol,
-                "action": tech_analysis["action"],
-                "confidence": tech_analysis.get("confidence", 0),
-                "reason": tech_analysis.get("reasoning", "Based on technical analysis"),
-                "analysis": analysis_results
-            }
-            
-            logger.info(f"Decision: {decision['action']} with confidence {decision['confidence']}")
-            return decision
-        else:
-            # Default to HOLD if no analysis available
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "symbol": self.symbol,
-                "action": "HOLD",
+                "signal": "HOLD",
                 "confidence": 0,
-                "reason": "Insufficient analysis data",
-                "analysis": analysis_results
+                "reason": f"Error in decision making: {str(e)}",
+                "analysis_results": analysis_results
             }
+            
+            return fallback_decision
     
     def _execute_trade(self, decision: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a trade based on the decision."""
-        logger.info(f"Executing {decision['action']} trade for {self.symbol}")
+        # Extract signal from decision (might be 'signal' or 'action' depending on agent)
+        signal = decision.get("signal", decision.get("action", "UNKNOWN"))
+        logger.info(f"Executing {signal} trade for {self.symbol}")
         
         # Import here to avoid circular imports
         from agents.trade_executor_agent import TradeExecutorAgent
@@ -432,9 +573,12 @@ class LiveTradingSystem:
         # Let the trade executor handle the decision
         result = self.trade_executor.execute_decision(decision, market_data)
         
-        if result["status"] == "success" and result["action"] != "HOLD":
+        # Extract result signal (might be 'signal' or 'action' depending on agent)
+        result_signal = result.get("signal", result.get("action", "UNKNOWN"))
+        
+        if result["status"] == "success" and result_signal != "HOLD":
             logger.info(
-                f"Trade executed: {result['action']} {self.symbol} "
+                f"Trade executed: {result_signal} {self.symbol} "
                 f"at {result.get('entry_price', 'unknown price')}"
             )
         elif result["status"] == "hold":

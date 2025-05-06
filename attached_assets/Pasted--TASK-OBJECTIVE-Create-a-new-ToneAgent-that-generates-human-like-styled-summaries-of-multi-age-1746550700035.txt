@@ -1,0 +1,75 @@
+# ✅ TASK OBJECTIVE
+Create a new `ToneAgent` that generates human-like, styled summaries of multi-agent trade decisions and integrates it into the full trade cycle test output.
+
+---
+
+## 🔧 Implementation Requirements
+
+1. **Agent File**: Create a new agent class `ToneAgent` in `agents/tone_agent.py`.
+
+2. **Input**: It receives all analysis outputs (signal, confidence, reasoning) and the final decision JSON (as passed to TradePlanAgent).
+
+3. **Agent Tone Profiles**: Simulate each agent's unique "voice" when summarizing their input. Include a 1-sentence comment per agent.
+
+4. **Unified Summary**: At the end, generate an “overall tone summary” that balances all views — this acts as the narrator’s voice.
+
+5. **LLM Call**: Use the Grok model already configured. One LLM call per `ToneAgent.generate_summary()` invocation.
+
+6. **Output Structure**:
+```json
+{
+  "agent_comments": {
+    "TechnicalAnalystAgent": "...",
+    "SentimentAnalystAgent": "...",
+    "LiquidityAnalystAgent": "...",
+    ...
+  },
+  "system_summary": "...",
+  "mood": "bullish | neutral | conflicted | cautious | euphoric"  # optional
+}
+Logging:
+
+Save the ToneAgent output to logs/tone_summary_{symbol}_{timestamp}.json.
+
+Also print it formatted in the console after TradePlanAgent.
+
+Integration:
+
+Hook ToneAgent into the full trade cycle after TradePlanAgent execution.
+
+If decision_agent.signal == "CONFLICTED" or confidence < 70%, include a more cautious tone in system_summary.
+
+🧠 Tone Guide (Simulate Voices)
+python
+Copy
+Edit
+tones = {
+    "TechnicalAnalystAgent": "Analytical and precise. Likes indicators, rarely exaggerates.",
+    "SentimentAnalystAgent": "Emotive, intuitive, speaks in moods. Feels the crowd.",
+    "LiquidityAnalystAgent": "Blunt and tactical. Sees the order book like a battlefield.",
+    "OpenInterestAnalystAgent": "Cautious, looks for consistency or divergence.",
+    "FundingRateAnalystAgent": "Skeptical, sharp. Knows when the herd is paying the wrong price.",
+    "SentimentAggregatorAgent": "Strategic and composed. Thinks big picture, macro framing."
+}
+✅ Example Output (to print & save)
+markdown
+Copy
+Edit
+🎙️ ToneAgent Summary — BTC/USDT (4h)
+
+📣 Agent Voices:
+- TechnicalAnalystAgent: “RSI’s cooling off. Might be early, but I see a setup.”
+- SentimentAnalystAgent: “The mood is lifting — bulls whispering louder.”
+- LiquidityAnalystAgent: “Bids are stacked, resistance thin. I like the odds.”
+- OpenInterestAnalystAgent: “Not much shift yet, but watching closely.”
+- FundingRateAnalystAgent: “Longs are heavy. Either it breaks up, or we trap.”
+- SentimentAggregatorAgent: “Institutions aren’t sold yet. It’s balanced.”
+
+🧠 Summary: Growing bullish momentum with strong undercurrents, but not unanimous. Swing trade with a sharp eye on liquidity traps.
+
+⚙️ Optional Extensions (Not now, but prepare class with hooks):
+Add voice_profiles.json for easy editing
+
+Allow markdown/HTML formatting
+
+Future integration with audio narration (e.g. TTS)

@@ -34,9 +34,16 @@ class TradeValidationStatus(Enum):
     REJECTED = "REJECTED"
 
 
-class PortfolioManagerAgent(\1):
+class PortfolioManagerAgent(BaseAnalystAgent):
     """PortfolioManagerAgent for aGENtrader v0.2.2"""
-\2def __init__(self\3):\4    self.version = "v0.2.2"
+    
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        """Initialize the portfolio manager agent
+        
+        Args:
+            config: Configuration dictionary (optional)
+        """
+        self.version = "v0.2.2"
         super().__init__(agent_name="portfolio_manager")
         
         # Initialize logger
@@ -661,41 +668,169 @@ class PortfolioManagerAgent(\1):
     
     def take_portfolio_snapshot(self) -> Dict[str, Any]:
         """
-        Take a snapshot of the current portfolio state and save it to file.
+        Take a snapshot of the current portfolio state and save it to the log file.
         
         Returns:
-            Portfolio snapshot data
+            Dictionary containing the portfolio snapshot
+        """
+        # Get current timestamp
+        timestamp = datetime.now().isoformat()
+        
+        # Calculate total portfolio value
+        portfolio_value = self.get_portfolio_value()
+        
+        # Calculate total exposure
+        total_exposure = self.get_total_exposure_pct()
+        
+        # Prepare snapshot data
+        snapshot = {
+            "timestamp": timestamp,
+            "portfolio_value": portfolio_value,
+            "current_balance": self.current_balance,
+            "holdings": self.holdings.copy(),
+            "open_positions": len(self.open_positions),
+            "open_positions_data": self.open_positions.copy(),
+            "total_exposure_pct": total_exposure,
+            "asset_exposures": {}
+        }
+        
+        # Add per-asset exposure
+        unique_assets = set()
+        for position in self.open_positions.values():
+            unique_assets.add(position.get('base', ''))
+        
+        for asset in unique_assets:
+            if asset:
+                snapshot["asset_exposures"][asset] = self.get_asset_exposure_pct(asset)
+        
+        # Log the snapshot
+        self.logger.info(f"Portfolio snapshot taken: value={portfolio_value:.2f} {self.base_currency}, "
+                         f"exposure={total_exposure:.2f}%, positions={len(self.open_positions)}")
+        
+        # Save to file
+        try:
+            with open(self.snapshot_file, 'a') as f:
+                f.write(json.dumps(snapshot) + '\n')
+        except Exception as e:
+            self.logger.error(f"Error saving portfolio snapshot: {e}")
+        
+        # Add to history
+        self.allocation_history.append(snapshot)
+        
+        # Trim history if too long
+        if len(self.allocation_history) > 1000:
+            self.allocation_history = self.allocation_history[-1000:]
+        
+        return snapshot
+        
+    def get_trading_config(self):
+        """
+        Get trading configuration from settings file, with fallback to defaults.
+        
+        Returns:
+            Dictionary containing trading configuration
         """
         try:
-            # Update position prices
-            self.update_position_prices()
+            import yaml
+            config_path = os.path.join(parent_dir, "config", "settings.yaml")
             
-            # Get portfolio summary
-            snapshot = self.get_portfolio_summary()
-            
-            # Add open positions details
-            snapshot['open_positions'] = list(self.open_positions.values())
-            
-            # Add timestamp if not present
-            if 'timestamp' not in snapshot:
-                snapshot['timestamp'] = datetime.now().isoformat()
-            
-            # Save to file
-            with open(self.snapshot_file, 'a') as f:
-                f.write(json.dumps(snapshot) + "\n")
-            
-            self.logger.info(f"Portfolio snapshot taken: {len(self.open_positions)} open positions, {snapshot['portfolio_value']:.2f} {self.base_currency}")
-            
-            # Add to history
-            self.allocation_history.append(snapshot)
-            
-            return snapshot
-        
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    return config.get('trading', {})
+            else:
+                self.logger.warning(f"Trading config file not found at {config_path}")
+                return {}
+        except ImportError:
+            self.logger.warning("Could not import yaml, using default trading config")
+            return {}
         except Exception as e:
-            self.logger.error(f"Error taking portfolio snapshot: {e}")
+            self.logger.error(f"Error loading trading config: {e}")
             return {}
     
-    def analyze(self,
+    def get_agent_config(self):
+        """
+        Get portfolio manager specific configuration, with fallback to defaults.
+        
+        Returns:
+            Dictionary containing portfolio manager configuration
+        """
+        try:
+            import yaml
+            config_path = os.path.join(parent_dir, "config", "settings.yaml")
+            
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    return config.get('portfolio_manager', {})
+            else:
+                self.logger.warning(f"Config file not found at {config_path}")
+                return {}
+        except ImportError:
+            self.logger.warning("Could not import yaml, using default portfolio manager config")
+            return {}
+        except Exception as e:
+            self.logger.error(f"Error loading portfolio manager config: {e}")
+            return {}
+            
+    def run(self, *args, **kwargs) -> Dict[str, Any]:
+        """
+        Run the portfolio manager agent.
+        
+        Args:
+            *args: Positional arguments
+            **kwargs: Keyword arguments
+            
+        Returns:
+            Dictionary containing portfolio state and validation result
+        """
+        # Get trade data if provided
+        trade_data = kwargs.get('trade_data', None)
+        
+        # Validate the trade if provided
+        validation_result = {}
+        if trade_data:
+            validation_result = self.validate_trade(trade_data)
+            
+            # If approved, update portfolio with the trade
+            if validation_result.get('status') == TradeValidationStatus.APPROVED.value:
+                self._add_open_position(trade_data)
+        
+        # Update portfolio state
+        self.update_portfolio_state()
+        
+        # Take a snapshot if requested
+        take_snapshot = kwargs.get('take_snapshot', False)
+        if take_snapshot:
+            self.take_portfolio_snapshot()
+        
+        # Prepare result
+        result = {
+            "portfolio_value": self.get_portfolio_value(),
+            "current_balance": self.current_balance,
+            "total_exposure_pct": self.get_total_exposure_pct(),
+            "open_positions_count": len(self.open_positions),
+            "validation_result": validation_result,
+            "version": self.version,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        return result
+        
+    def update_portfolio_state(self) -> None:
+        """
+        Update the portfolio state with current market data.
+        This includes recalculating position values and unrealized PnL.
+        """
+        self.logger.debug("Updating portfolio state")
+        
+        # TODO: Add code to update portfolio state with current market prices
+        # This would involve fetching current prices for all assets in the portfolio
+        # and updating the position values and unrealized PnL
+        
+        pass
+        
+    def analyze(self, 
                symbol: Optional[str] = None,
                interval: Optional[str] = None,
                **kwargs) -> Dict[str, Any]:

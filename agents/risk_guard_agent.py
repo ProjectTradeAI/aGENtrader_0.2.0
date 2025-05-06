@@ -94,23 +94,8 @@ class RiskGuardAgent(BaseAnalystAgent):
         Returns:
             Dictionary containing trading configuration
         """
-        try:
-            import yaml
-            config_path = os.path.join(parent_dir, "config", "settings.yaml")
-            
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    return config.get('trading', {})
-            else:
-                self.logger.warning(f"Trading config file not found at {config_path}")
-                return {}
-        except ImportError:
-            self.logger.warning("Could not import yaml, using default trading config")
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading trading config: {e}")
-            return {}
+        # Use the base agent's load_config_section method
+        return self.load_config_section('trading')
     
     def get_agent_config(self):
         """
@@ -119,23 +104,8 @@ class RiskGuardAgent(BaseAnalystAgent):
         Returns:
             Dictionary containing risk guard configuration
         """
-        try:
-            import yaml
-            config_path = os.path.join(parent_dir, "config", "settings.yaml")
-            
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    return config.get('risk_guard', {})
-            else:
-                self.logger.warning(f"Config file not found at {config_path}")
-                return {}
-        except ImportError:
-            self.logger.warning("Could not import yaml, using default risk guard config")
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading risk guard config: {e}")
-            return {}
+        # Use the base agent's load_config_section method
+        return self.load_config_section('risk_guard')
     
     def evaluate_market_risk(self, market_data: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -27,6 +27,7 @@ agents:
     - OpenInterestAnalyst
     - PortfolioManager
     - RiskGuard
+    - ToneAgent
   
   # Individual agent settings
   liquidity_analyst:
@@ -88,6 +89,16 @@ agents:
     min_confidence_threshold: 0.65
     max_market_movement_pct: 3.0
     max_spread_pct: 1.0
+    
+  tone_agent:
+    enabled: true
+    use_api: true
+    api_model: grok-2-1212
+    temperature: 0.7
+    max_tokens: 1000
+    log_summaries: true
+    summaries_dir: logs/summaries
+    style: balanced  # Options: formal, casual, technical, balanced
 
 # Trading Configuration
 trading:

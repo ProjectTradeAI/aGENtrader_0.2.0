@@ -13,6 +13,14 @@ from typing import Dict, Any, List, Optional, Union, Tuple
 from datetime import datetime
 from abc import ABC, abstractmethod
 
+# Try to import yaml
+try:
+    import yaml
+    YAML_AVAILABLE = True
+except ImportError:
+    YAML_AVAILABLE = False
+    logging.warning("PyYAML not installed. Config loading will use fallback methods.")
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -84,7 +92,121 @@ class BaseAgent:
         Returns:
             Configuration dictionary
         """
-        return {}
+        # Try to load agent-specific configuration
+        return self.load_config_section(self.agent_name)
+        
+    def load_config_section(self, section_name: str) -> Dict[str, Any]:
+        """
+        Load a specific section from the configuration file.
+        
+        Args:
+            section_name: The name of the configuration section to load
+            
+        Returns:
+            Configuration dictionary for the specified section
+        """
+        try:
+            config_data = self.load_config_file()
+            
+            # Check if the section exists at the root level
+            if section_name in config_data:
+                return config_data.get(section_name, {})
+                
+            # Check if it's in the agents section
+            if 'agents' in config_data and section_name in config_data['agents']:
+                return config_data['agents'].get(section_name, {})
+                
+            # For agent names that might have different formats (e.g., portfolio_manager vs portfolio_manager_agent)
+            if 'agents' in config_data:
+                # Try with _agent suffix removed
+                if section_name.endswith('_agent'):
+                    base_name = section_name[:-6]  # Remove '_agent'
+                    if base_name in config_data['agents']:
+                        return config_data['agents'].get(base_name, {})
+                
+                # Try with shortened names
+                for key in config_data['agents'].keys():
+                    if section_name.lower().startswith(key.lower()):
+                        return config_data['agents'].get(key, {})
+                        
+            # Return empty dict if no matching section found
+            logger.warning(f"Configuration section '{section_name}' not found")
+            return {}
+            
+        except Exception as e:
+            logger.warning(f"Error loading config section '{section_name}': {str(e)}")
+            return {}
+            
+    def load_config_file(self) -> Dict[str, Any]:
+        """
+        Load the entire configuration file.
+        
+        Returns:
+            Complete configuration dictionary
+        """
+        # Get configuration file path
+        config_path = self.get_config_path()
+        
+        # If file doesn't exist, return empty dict
+        if not os.path.exists(config_path):
+            logger.warning(f"Configuration file not found at {config_path}")
+            return {}
+            
+        try:
+            # Try to load with YAML if available
+            if YAML_AVAILABLE:
+                with open(config_path, 'r') as f:
+                    return yaml.safe_load(f) or {}
+            else:
+                # Try JSON as fallback
+                try:
+                    with open(config_path, 'r') as f:
+                        return json.load(f)
+                except json.JSONDecodeError:
+                    # If not valid JSON, try parsing as simple key-value pairs
+                    config = {}
+                    with open(config_path, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith('#'):
+                                try:
+                                    key, value = line.split('=', 1)
+                                    config[key.strip()] = value.strip()
+                                except ValueError:
+                                    pass
+                    return config
+        except Exception as e:
+            logger.error(f"Error loading configuration file: {str(e)}")
+            return {}
+    
+    def get_config_path(self) -> str:
+        """
+        Get the path to the configuration file.
+        
+        Returns:
+            Path to the configuration file
+        """
+        # Try to determine project root directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+        
+        # Check for configuration in known locations
+        potential_paths = [
+            os.path.join(project_root, "config", "settings.yaml"),
+            os.path.join(project_root, "config", "settings.yml"),
+            os.path.join(project_root, "config", "config.yaml"),
+            os.path.join(project_root, "config", "config.yml"),
+            os.path.join(project_root, "settings.yaml"),
+            os.path.join(project_root, "config.yaml")
+        ]
+        
+        # Return the first path that exists
+        for path in potential_paths:
+            if os.path.exists(path):
+                return path
+                
+        # Default to settings.yaml in the config directory
+        return os.path.join(project_root, "config", "settings.yaml")
         
     def run(self, symbol: Optional[str] = None, interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
         """

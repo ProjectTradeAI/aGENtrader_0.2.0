@@ -37,3 +37,4 @@ numpy
 pandas
 colorama
 openai
+openai

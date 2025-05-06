@@ -730,23 +730,8 @@ class PortfolioManagerAgent(BaseAnalystAgent):
         Returns:
             Dictionary containing trading configuration
         """
-        try:
-            import yaml
-            config_path = os.path.join(parent_dir, "config", "settings.yaml")
-            
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    return config.get('trading', {})
-            else:
-                self.logger.warning(f"Trading config file not found at {config_path}")
-                return {}
-        except ImportError:
-            self.logger.warning("Could not import yaml, using default trading config")
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading trading config: {e}")
-            return {}
+        # Use the base agent's load_config_section method
+        return self.load_config_section('trading')
     
     def get_agent_config(self):
         """
@@ -755,23 +740,8 @@ class PortfolioManagerAgent(BaseAnalystAgent):
         Returns:
             Dictionary containing portfolio manager configuration
         """
-        try:
-            import yaml
-            config_path = os.path.join(parent_dir, "config", "settings.yaml")
-            
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    return config.get('portfolio_manager', {})
-            else:
-                self.logger.warning(f"Config file not found at {config_path}")
-                return {}
-        except ImportError:
-            self.logger.warning("Could not import yaml, using default portfolio manager config")
-            return {}
-        except Exception as e:
-            self.logger.error(f"Error loading portfolio manager config: {e}")
-            return {}
+        # Use the base agent's load_config_section method
+        return self.load_config_section('portfolio_manager')
             
     def run(self, *args, **kwargs) -> Dict[str, Any]:
         """

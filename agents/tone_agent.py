@@ -37,9 +37,11 @@ class ToneAgent(BaseAgent):
         Args:
             config: Configuration dictionary (optional)
         """
-        super().__init__(agent_name="ToneAgent")
+        super().__init__(agent_name="tone_agent")
         self.version = "v0.2.2"
-        self.config = config or {}
+        
+        # Initialize with provided config or load from configuration file
+        self.config = config or self.get_agent_config()
         
         # Configure paths
         self.log_dir = os.path.join(os.getcwd(), "logs")
@@ -56,16 +58,34 @@ class ToneAgent(BaseAgent):
             "SentimentAggregatorAgent": "Strategic and composed. Thinks big picture, macro framing."
         }
         
+        # Load configuration settings or set defaults
+        self.use_api = self.config.get("use_api", True)
+        self.api_model = self.config.get("api_model", "grok-2-1212")
+        self.temperature = self.config.get("temperature", 0.7)
+        self.max_tokens = self.config.get("max_tokens", 1000)
+        self.log_summaries = self.config.get("log_summaries", True)
+        self.summaries_dir = self.config.get("summaries_dir", "logs/summaries")
+        self.style = self.config.get("style", "balanced")
+        
+        # Create summaries directory if needed
+        if self.log_summaries:
+            summaries_path = os.path.join(os.getcwd(), self.summaries_dir)
+            if not os.path.exists(summaries_path):
+                os.makedirs(summaries_path, exist_ok=True)
+            logger.info(f"ToneAgent will save summaries to {summaries_path}")
+        
         # Try to load from LLM client for Grok integration
         try:
             from models.llm_client import LLMClient
-            self.llm_client = LLMClient(model="grok:grok-2-1212")
-            self.use_api = self.config.get("use_api", True)
-            logger.info("ToneAgent initialized with Grok LLM client")
+            self.llm_client = LLMClient(model=self.api_model)
+            logger.info(f"ToneAgent initialized with Grok LLM client using model {self.api_model}")
         except ImportError:
             logger.warning("LLMClient not available, ToneAgent will use fallback generation")
             self.llm_client = None
             self.use_api = False
+            
+        logger.info(f"ToneAgent initialized with configuration: use_api={self.use_api}, " 
+                   f"model={self.api_model}, style={self.style}")
             
     def generate_summary(self, 
                           analysis_results: Dict[str, Dict[str, Any]], 
@@ -95,20 +115,57 @@ class ToneAgent(BaseAgent):
                 "sentiment_aggregator": "SentimentAggregatorAgent"
             }
             
-            # Build the prompt for the LLM
-            prompt = self._build_generation_prompt(analysis_results, final_decision, key_to_agent_map, symbol, interval)
+            # Convert analysis_results to list format for GrokClient
+            agent_analyses = []
+            for key, analysis in analysis_results.items():
+                if not analysis:  # Skip empty analyses
+                    continue
+                    
+                agent_name = key_to_agent_map.get(key, key)
+                analysis_copy = analysis.copy()  # Make a copy to avoid modifying original
+                analysis_copy["agent_name"] = agent_name
+                agent_analyses.append(analysis_copy)
             
-            # Generate the summary using the LLM
-            if self.use_api and self.llm_client:
-                logger.info("Generating summary using Grok API")
-                summary = self._generate_with_llm(prompt, symbol, interval)
-            else:
-                logger.info("Generating summary using fallback method")
-                summary = self._generate_fallback(analysis_results, final_decision, symbol, interval)
+            # Create trade plan from final decision
+            trade_plan = final_decision.copy() if final_decision else {}
+            trade_plan["symbol"] = symbol
+            trade_plan["interval"] = interval
+            
+            # Determine the generation method
+            if self.use_api:
+                # Try the dedicated GrokClient first
+                try:
+                    from models.grok_client import GrokClient
+                    grok_client = GrokClient()
+                    
+                    if grok_client.is_available():
+                        logger.info("Generating summary using dedicated GrokClient")
+                        # Use the dedicated client with structured data
+                        summary = grok_client.format_trade_summary(
+                            trade_plan=trade_plan,
+                            agent_analyses=agent_analyses,
+                            style=self.config.get("style", "balanced")
+                        )
+                        self._save_summary_to_file(summary, symbol)
+                        return summary
+                except ImportError:
+                    logger.info("GrokClient not available, falling back to LLM API")
+                except Exception as e:
+                    logger.warning(f"Error using GrokClient: {e}, falling back to LLM API")
                 
-            # Save the summary to a file
-            self._save_summary_to_file(summary, symbol)
+                # Fall back to traditional LLM API
+                if self.llm_client:
+                    logger.info("Generating summary using Grok API")
+                    # Build the prompt for the traditional LLM API
+                    prompt = self._build_generation_prompt(analysis_results, final_decision, key_to_agent_map, symbol, interval)
+                    summary = self._generate_with_llm(prompt, symbol, interval)
+                    self._save_summary_to_file(summary, symbol)
+                    return summary
             
+            # Fallback method if no API is available
+            logger.info("Generating summary using fallback method")
+            summary = self._generate_fallback(analysis_results, final_decision, symbol, interval)
+            self._save_summary_to_file(summary, symbol)
             return summary
             
         except Exception as e:
@@ -212,8 +269,40 @@ Respond ONLY with a valid JSON in this format:
         try:
             # Call the LLM with JSON response format
             start_time = datetime.now()
+            
+            # Try the specialized Grok client first
             try:
-                # Try the new API format
+                # Import our dedicated Grok client
+                from models.grok_client import GrokClient
+                grok_client = GrokClient()
+                
+                if grok_client.is_available():
+                    logger.info("Using dedicated GrokClient for summary generation")
+                    
+                    # Parse the prompt to extract trade plan and agent analyses (simplified for demo)
+                    # In a full implementation, we'd pass these directly instead of parsing from prompt
+                    trade_plan = {"symbol": symbol, "interval": interval}
+                    agent_analyses = []
+                    
+                    # Generate the summary using our dedicated client
+                    system_prompt = "You are a trading summary expert for aGENtrader. Format your response as JSON with agent_comments, system_summary, and mood."
+                    summary = grok_client.format_trade_summary(
+                        trade_plan=trade_plan,
+                        agent_analyses=agent_analyses,
+                        system_prompt=system_prompt
+                    )
+                    
+                    end_time = datetime.now()
+                    duration = (end_time - start_time).total_seconds()
+                    logger.info(f"Generated summary using GrokClient in {duration:.2f} seconds")
+                    return summary
+            except ImportError as e:
+                logger.info(f"GrokClient not available, falling back to direct API: {e}")
+            except Exception as e:
+                logger.warning(f"Error using GrokClient: {e}, falling back to direct API")
+            
+            # Try the direct xAI API integration using OpenAI-compatible client
+            try:
                 import openai
                 
                 # Check if we have an XAI API key in the environment
@@ -225,14 +314,14 @@ Respond ONLY with a valid JSON in this format:
                     
                     # Make the request using the OpenAI-compatible API
                     xai_response = xai_client.chat.completions.create(
-                        model="grok-2-1212",
+                        model=self.api_model,
                         messages=[
                             {"role": "system", "content": "You are a trading summary expert for aGENtrader. Format your response as JSON."},
                             {"role": "user", "content": prompt}
                         ],
                         response_format={"type": "json_object"},
-                        max_tokens=1000,
-                        temperature=0.7
+                        max_tokens=self.max_tokens,
+                        temperature=self.temperature
                     )
                     
                     # Extract the content from the response

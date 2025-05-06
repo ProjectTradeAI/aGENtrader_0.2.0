@@ -420,53 +420,166 @@ class AgentTestHarness:
     def _run_interactive_mode(self):
         """
         Run interactive mode by prompting the user for inputs and parameters.
+        Inspired by the original test_agent_individual.py interactive mode.
         """
-        print(f"\n{Fore.CYAN}=== Interactive Mode ===={Style.RESET_ALL}")
-        print(f"Current configuration:")
-        print(f"  Agent: {Fore.YELLOW}{self.agent_name}{Style.RESET_ALL}")
-        print(f"  Symbol: {Fore.YELLOW}{self.symbol}{Style.RESET_ALL}")
-        print(f"  Interval: {Fore.YELLOW}{self.interval}{Style.RESET_ALL}")
-        print(f"  Using mock data: {Fore.YELLOW}{self.use_mock_data}{Style.RESET_ALL}")
-        print(f"  Temperature: {Fore.YELLOW}{self.temperature}{Style.RESET_ALL}")
-        print("")
+        print(f"\n{Fore.CYAN}=== aGENtrader Agent Test Interactive Mode ===={Style.RESET_ALL}")
         
-        # Ask for symbol modification
-        new_symbol = input(f"Enter a new symbol (or press Enter to keep {self.symbol}): ")
-        if new_symbol.strip():
-            self.symbol = new_symbol.strip()
-            print(f"Symbol updated to: {Fore.GREEN}{self.symbol}{Style.RESET_ALL}")
+        # Get available agents
+        available_agents = sorted([agent for agent, cls in AVAILABLE_AGENTS.items() if cls is not None])
         
-        # Ask for interval modification
-        new_interval = input(f"Enter a new interval (or press Enter to keep {self.interval}): ")
-        if new_interval.strip():
-            self.interval = new_interval.strip()
-            print(f"Interval updated to: {Fore.GREEN}{self.interval}{Style.RESET_ALL}")
+        if not available_agents:
+            print(f"{Fore.RED}No implemented agents found.{Style.RESET_ALL}")
+            return
+        
+        # Add the full decision cycle and full trade cycle options
+        display_agents = [
+            "All Agents (Full Decision Cycle)", 
+            "Full Trade Cycle Test (All Agents + TradePlanAgent)"
+        ] + available_agents
             
-        # Ask about using mock data
-        use_mock_response = input(f"Use mock data? (y/n, press Enter to keep {self.use_mock_data}): ").lower()
-        if use_mock_response in ['y', 'yes']:
-            self.use_mock_data = True
-            print(f"Using {Fore.GREEN}mock data{Style.RESET_ALL}")
-        elif use_mock_response in ['n', 'no']:
-            self.use_mock_data = False
-            print(f"Using {Fore.GREEN}real data{Style.RESET_ALL}")
+        # Show available agents
+        print(f"{Fore.GREEN}Available Agents:{Style.RESET_ALL}")
+        for i, agent in enumerate(display_agents):
+            print(f"{i+1}. {agent}")
             
-        # Ask about temperature for LLM
+        # Safe input function that handles EOFError (when stdin is not available)
+        def safe_input(prompt, default=None):
+            try:
+                return input(prompt)
+            except EOFError:
+                print(f"{Fore.RED}Interactive input not available. Using default value.{Style.RESET_ALL}")
+                return default
+            
+        # Select agent
         try:
-            temp_response = input(f"Enter temperature (0-1, press Enter to keep {self.temperature}): ")
-            if temp_response.strip():
-                self.temperature = float(temp_response.strip())
-                print(f"Temperature updated to: {Fore.GREEN}{self.temperature}{Style.RESET_ALL}")
+            agent_input = safe_input(f"\n{Fore.YELLOW}Select agent (1-{len(display_agents)}): {Style.RESET_ALL}", "1")
+            if agent_input is None:
+                print(f"{Fore.RED}Interactive mode failed. Keeping current agent.{Style.RESET_ALL}")
+                return
+                
+            agent_idx = int(agent_input) - 1
+            if agent_idx < 0 or agent_idx >= len(display_agents):
+                print(f"{Fore.RED}Invalid selection. Using current agent.{Style.RESET_ALL}")
+            else:
+                if agent_idx == 0:
+                    # User selected "All Agents (Full Decision Cycle)"
+                    self.full_cycle = True
+                    self.trade_cycle = False
+                    self.agent_name = "DecisionAgent"  # We'll use the DecisionAgent as the main entry point
+                    self.agent_class = AVAILABLE_AGENTS[self.agent_name]
+                    print(f"{Fore.CYAN}Running full agent decision cycle using DecisionAgent{Style.RESET_ALL}")
+                elif agent_idx == 1:
+                    # User selected "Full Trade Cycle Test"
+                    self.full_cycle = True
+                    self.trade_cycle = True
+                    self.agent_name = "DecisionAgent"  # Still use DecisionAgent as entry point
+                    self.agent_class = AVAILABLE_AGENTS[self.agent_name]
+                    print(f"{Fore.CYAN}Running FULL TRADE CYCLE test (All Agents + TradePlanAgent){Style.RESET_ALL}")
+                    
+                    # Ask if user wants to save trade logs
+                    save_trade_log = safe_input(f"{Fore.YELLOW}Save detailed trade plan JSON logs? (y/n, default: n): {Style.RESET_ALL}", "n").lower()
+                    self.trade_log = save_trade_log.startswith('y')
+                    if self.trade_log:
+                        print(f"{Fore.CYAN}Full trade plan logs will be saved to the logs directory{Style.RESET_ALL}")
+                else:
+                    # User selected a specific agent
+                    self.full_cycle = False
+                    self.trade_cycle = False
+                    self.agent_name = available_agents[agent_idx - 2]  # Subtract 2 to account for both special options
+                    self.agent_class = AVAILABLE_AGENTS[self.agent_name]
         except ValueError:
-            print(f"{Fore.RED}Invalid temperature, keeping {self.temperature}{Style.RESET_ALL}")
-        
-        # Need to reinitialize data provider if settings changed
-        if new_symbol.strip() or use_mock_response in ['y', 'yes', 'n', 'no']:
-            print(f"\n{Fore.CYAN}Reinitializing data provider with new settings...{Style.RESET_ALL}")
-            self._init_data_provider()
+            print(f"{Fore.RED}Invalid input. Keeping current agent.{Style.RESET_ALL}")
             
-        print(f"\n{Fore.GREEN}Interactive configuration complete{Style.RESET_ALL}")
-        print(f"Running test with: Symbol={self.symbol}, Interval={self.interval}, MockData={self.use_mock_data}, Temp={self.temperature}")
+        # Select symbol
+        symbol = safe_input(f"\n{Fore.YELLOW}Enter trading symbol (default: {self.symbol}): {Style.RESET_ALL}", "")
+        if symbol and symbol.strip():
+            self.symbol = symbol
+        
+        # Select interval
+        intervals = ["1m", "3m", "5m", "15m", "30m", "1h", "2h", "4h", "6h", "12h", "1d", "3d", "1w", "1M"]
+        print(f"\n{Fore.GREEN}Available Intervals:{Style.RESET_ALL}")
+        for i, interval in enumerate(intervals):
+            print(f"{i+1}. {interval}")
+            
+        try:
+            interval_input = safe_input(f"\n{Fore.YELLOW}Select interval (1-{len(intervals)}, default: current): {Style.RESET_ALL}", "")
+            if interval_input and interval_input.strip():
+                interval_idx = int(interval_input) - 1
+                if interval_idx >= 0 and interval_idx < len(intervals):
+                    self.interval = intervals[interval_idx]
+                else:
+                    print(f"{Fore.RED}Invalid selection. Keeping current interval.{Style.RESET_ALL}")
+        except ValueError:
+            print(f"{Fore.RED}Invalid input. Keeping current interval.{Style.RESET_ALL}")
+            
+        # Select data source
+        data_source = safe_input(f"\n{Fore.YELLOW}Use mock data? (y/n, current: {self.use_mock_data}): {Style.RESET_ALL}", "").lower()
+        if data_source.startswith("y"):
+            self.use_mock_data = True
+        elif data_source.startswith("n"):
+            self.use_mock_data = False
+            
+        # Check if we're using a sentiment agent
+        is_sentiment_agent = self.agent_name == 'SentimentAnalystAgent' or self.agent_name == 'SentimentAggregatorAgent'
+        
+        # Ask about dynamic temperature for sentiment agents
+        if is_sentiment_agent:
+            dynamic_temp = safe_input(f"\n{Fore.YELLOW}Use dynamic temperature randomization for sentiment agent? (y/n, default: n): {Style.RESET_ALL}", "n").lower()
+            if dynamic_temp.startswith('y'):
+                print(f"{Fore.CYAN}Using dynamic temperature (0.6-0.9 range) for {self.agent_name}{Style.RESET_ALL}")
+                # Store dynamic temperature flag in data_override
+                if 'analyze_params' not in self.data_override:
+                    self.data_override['analyze_params'] = {}
+                self.data_override['analyze_params']['dynamic_temperature'] = True
+            else:
+                temp = safe_input(f"\n{Fore.YELLOW}LLM temperature (0.0-1.0, current: {self.temperature}): {Style.RESET_ALL}", "")
+                try:
+                    if temp and temp.strip():
+                        self.temperature = float(temp)
+                        if self.temperature < 0.0 or self.temperature > 1.0:
+                            print(f"{Fore.RED}Invalid temperature. Using 0.0.{Style.RESET_ALL}")
+                            self.temperature = 0.0
+                except ValueError:
+                    print(f"{Fore.RED}Invalid input. Keeping current temperature.{Style.RESET_ALL}")
+        else:
+            # For non-sentiment agents, just ask for temperature
+            temp = safe_input(f"\n{Fore.YELLOW}LLM temperature (0.0-1.0, current: {self.temperature}): {Style.RESET_ALL}", "")
+            try:
+                if temp and temp.strip():
+                    self.temperature = float(temp)
+                    if self.temperature < 0.0 or self.temperature > 1.0:
+                        print(f"{Fore.RED}Invalid temperature. Using 0.0.{Style.RESET_ALL}")
+                        self.temperature = 0.0
+            except ValueError:
+                print(f"{Fore.RED}Invalid input. Keeping current temperature.{Style.RESET_ALL}")
+                
+        # Ask about explain mode
+        explain = safe_input(f"\n{Fore.YELLOW}Show detailed explanation? (y/n, current: {self.explain}): {Style.RESET_ALL}", "").lower()
+        if explain.startswith("y"):
+            self.explain = True
+        elif explain.startswith("n"):
+            self.explain = False
+            
+        # If agent or parameters changed, we need to reinitialize data provider
+        print(f"\n{Fore.CYAN}Reinitializing data provider with new settings...{Style.RESET_ALL}")
+        self._init_data_provider()
+            
+        print(f"\n{Fore.GREEN}Test Configuration:{Style.RESET_ALL}")
+        print(f"Agent:       {self.agent_name}")
+        print(f"Symbol:      {self.symbol}")
+        print(f"Interval:    {self.interval}")
+        print(f"Data Source: {'Mock' if self.use_mock_data else 'Live'}")
+        print(f"Temperature: {self.temperature}")
+        print(f"Explain:     {'Yes' if self.explain else 'No'}")
+        print(f"Full Cycle:  {'Yes' if self.full_cycle else 'No'}")
+        print(f"Trade Cycle: {'Yes' if self.trade_cycle else 'No'}")
+        
+        confirm = safe_input(f"\n{Fore.YELLOW}Proceed with this configuration? (y/n, default: y): {Style.RESET_ALL}", "y").lower()
+        if confirm.startswith("n"):
+            print(f"{Fore.RED}Test cancelled. Exiting...{Style.RESET_ALL}")
+            sys.exit(0)
+            
+        print(f"\n{Fore.GREEN}Running test with selected configuration...{Style.RESET_ALL}")
         print("")
     
     def _create_agent(self) -> BaseAnalystAgent:
@@ -826,12 +939,40 @@ class AgentTestHarness:
             for key, agent_class in analyst_agents.items():
                 if agent_class:
                     logger.info(f"{Fore.CYAN}Running analysis for {key.replace('_', ' ').title()}{Style.RESET_ALL}")
-                    agent = agent_class(
-                        data_provider=self.data_provider,
-                        symbol=self.symbol,
-                        interval=self.interval,
-                        use_cache=False
-                    )
+                    
+                    # Different agents have different parameter naming conventions
+                    if key == 'technical_analysis':
+                        # TechnicalAnalystAgent takes data_fetcher
+                        agent = agent_class(
+                            data_fetcher=self.data_provider,
+                            config={
+                                'symbol': self.symbol,
+                                'interval': self.interval,
+                                'use_cache': False
+                            }
+                        )
+                    elif key in ['sentiment_analysis', 'sentiment_aggregator_analysis']:
+                        # Sentiment-related agents just take a config
+                        agent = agent_class(
+                            config={
+                                'symbol': self.symbol,
+                                'interval': self.interval,
+                                'use_cache': False,
+                                'temperature': self.temperature,
+                                'data_provider': self.data_provider
+                            }
+                        )
+                    else:
+                        # Other analyst agents
+                        agent = agent_class(
+                            data_fetcher=self.data_provider,
+                            config={
+                                'symbol': self.symbol,
+                                'interval': self.interval,
+                                'use_cache': False
+                            }
+                        )
+                        
                     try:
                         result = agent.analyze(symbol=self.symbol, interval=self.interval)
                         analyst_results[key] = result
@@ -1018,9 +1159,9 @@ class AgentTestHarness:
                     )
                 elif key in ['sentiment_analysis', 'sentiment_aggregator_analysis']:
                     agent = agent_class(
-                        data_fetcher=self.data_provider,
                         config={"symbol": self.symbol, "interval": self.interval, 
-                                "use_cache": False, "temperature": self.temperature}
+                                "use_cache": False, "temperature": self.temperature,
+                                "data_provider": self.data_provider}
                     )
                 else:
                     agent = agent_class(
@@ -1096,7 +1237,7 @@ class AgentTestHarness:
                 trade_plan = trade_plan_agent.generate_trade_plan(
                     decision=decision,
                     market_data=market_data,
-                    portfolio_data=portfolio
+                    analyst_outputs=analyst_results
                 )
             except Exception as e:
                 logger.error(f"{Fore.RED}Error generating trade plan: {str(e)}{Style.RESET_ALL}")
@@ -1585,26 +1726,33 @@ def parse_args():
                       help='Time interval for analysis (default: 1h)')
     
     # Test configuration
-    parser.add_argument('--mock-data', action='store_true',
-                      help='Use mock data instead of real API')
+    parser.add_argument('--mock-data', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Use mock data instead of real API (--mock-data or --mock-data=true)')
     parser.add_argument('--repeat', type=int, default=1,
                       help='Number of times to repeat the test (default: 1)')
     parser.add_argument('--temperature', type=float, default=0.0,
                       help='Temperature setting for LLM to control randomness (default: 0.0)')
-    parser.add_argument('--explain', action='store_true',
-                      help='Print detailed explanations')
+    parser.add_argument('--explain', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Print detailed explanations (--explain or --explain=true)')
     
     # Advanced features
-    parser.add_argument('--full-cycle', action='store_true',
-                      help='Run full decision cycle with all agents')
-    parser.add_argument('--trade-cycle', action='store_true',
-                      help='Run full trade cycle (analysis, decision, plan)')
-    parser.add_argument('--trade-log', action='store_true',
-                      help='Save full JSON output of trade cycle test')
-    parser.add_argument('--mock-portfolio', action='store_true',
-                      help='Use mock portfolio for testing')
-    parser.add_argument('--interactive', action='store_true',
-                      help='Run in interactive mode with prompts for user input')
+    parser.add_argument('--full-cycle', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Run full decision cycle with all agents (--full-cycle or --full-cycle=true)')
+    parser.add_argument('--trade-cycle', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Run full trade cycle (analysis, decision, plan) (--trade-cycle or --trade-cycle=true)')
+    parser.add_argument('--trade-log', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Save full JSON output of trade cycle test (--trade-log or --trade-log=true)')
+    parser.add_argument('--mock-portfolio', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Use mock portfolio for testing (--mock-portfolio or --mock-portfolio=true)')
+    parser.add_argument('--interactive', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Run in interactive mode with prompts for user input (--interactive or --interactive=true)')
     
     return parser.parse_args()
 

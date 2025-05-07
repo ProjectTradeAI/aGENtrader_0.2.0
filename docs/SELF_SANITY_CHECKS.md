@@ -1,121 +1,93 @@
-# Self-Sanity Checks for aGENtrader v0.2.2
+# Self-Sanity Checks
 
 ## Overview
 
-Self-sanity checks are a critical feature in aGENtrader v0.2.2 that ensures the quality and reliability of agent outputs throughout the decision-making pipeline. These checks validate various aspects of agent outputs to prevent incorrect, inconsistent, or malformed data from propagating through the system.
+Self-sanity checks provide a critical validation layer within the aGENtrader system to ensure data consistency and prevent invalid outputs from propagating through the decision-making pipeline. These checks help maintain system reliability by detecting and filtering problematic inputs before they impact trading decisions.
 
-## Implementation
+## Implementation Details
 
-The sanity check system is implemented in the following components:
+### Validation Levels
 
-1. `utils/sanity_check.py`: Contains utility functions for performing various types of sanity checks
-2. `agents/base_agent.py`: Integrates sanity checks into the agent lifecycle
+The system implements several validation levels:
 
-## Sanity Check Types
+1. **Required Field Validation**: Ensures all essential fields are present in agent outputs.
+2. **Action Format Validation**: Verifies that signals/actions conform to the expected vocabulary.
+3. **Confidence Score Validation**: Ensures confidence scores are within valid ranges (0-100).
+4. **Numeric Field Validation**: Checks that numeric values are non-NaN and within reasonable ranges.
 
-The system performs the following types of checks on agent outputs:
+### Integration Points
 
-### Required Field Validation
+Self-sanity checks are integrated at key points in the agent workflow:
 
-Ensures that all required fields are present in the agent output:
-- `agent_name`: Name of the agent generating the output
-- `timestamp`: Timestamp when the analysis/decision was made
-- `signal`: Trading signal (BUY, SELL, HOLD, NEUTRAL, etc.)
-- `confidence`: Confidence score for the signal
+- **BaseAgent.sanitize_output()**: Called automatically before any agent returns results, providing a first layer of validation.
+- **DecisionAgent.make_decision()**: Filters out analyses that fail sanity checks to prevent them from influencing the final decision.
 
-### Action Format Validation
+## Testing Sanity Checks
 
-Validates that the action format in the agent output is correct:
-- Action must be one of: BUY, SELL, HOLD, NEUTRAL, CONFLICTED
-- The recommendation object must contain an action field
+The testing harness provides comprehensive tools for testing and evaluating the sanity check functionality:
 
-### Confidence Score Validation
+### Command Line Options
 
-Ensures that confidence scores are valid:
-- Confidence must be a numeric value (int or float)
-- Confidence must be between 0 and 100
-- Confidence must not be NaN or Infinity
-
-### Numeric Field Validation
-
-Validates that numeric fields contain valid numbers:
-- Fields like confidence, score, value, probability must be numeric
-- They must not be NaN or Infinity
-
-### Data Array Validation
-
-Ensures that data arrays are non-empty and contain valid values:
-- Arrays must be non-empty
-- Arrays should not contain all zeros (potential data issue)
-- Arrays should not contain NaN or Infinity values
-
-## Integration with Agent Pipeline
-
-### BaseAgent
-
-The `BaseAgent` class applies sanity checks to all agent outputs through the `sanitize_output` method, which:
-1. Adds missing metadata (agent_name, timestamp)
-2. Runs all sanity checks on the output
-3. Sets the `passed_sanity_check` flag based on the check results
-
-### DecisionAgent
-
-The `BaseDecisionAgent` class filters analysis inputs to include only those that passed sanity checks:
-1. Filters out analyses that failed their own sanity checks
-2. Issues a warning if all analyses failed sanity checks
-3. Applies sanity checks to its own output
-
-## Handling Failed Checks
-
-When an analysis fails sanity checks:
-1. The agent sets `passed_sanity_check: false` in its output
-2. The failed analysis is excluded from decision making
-3. Warning logs are generated with details about the failure
-
-Error response objects from agents automatically have `passed_sanity_check: false`.
-
-## Fallback Behavior
-
-If the sanity check utilities are not available (import fails), the system falls back to basic validation in the `BaseAgent` class, which includes:
-1. Checking that output is not empty
-2. Basic validation of recommendation and confidence
-3. Setting the `passed_sanity_check` flag accordingly
-
-## Example
-
-```python
-# Example of an output that passes all sanity checks
-valid_output = {
-    "agent_name": "TechnicalAnalystAgent",
-    "timestamp": "2025-05-06T12:34:56.789Z",
-    "signal": "BUY",
-    "confidence": 85,
-    "reasoning": "Moving averages and RSI indicate a bullish trend",
-    "recommendation": {
-        "action": "BUY",
-        "confidence": 85
-    }
-}
-
-# Example of an output that fails sanity checks
-invalid_output = {
-    "agent_name": "SentimentAnalystAgent",
-    "timestamp": "2025-05-06T12:34:56.789Z",
-    # Missing signal
-    "confidence": "invalid",  # Not a number
-    "reasoning": "Sentiment analysis shows mixed signals"
-}
+```bash
+python3 tests/test_harness.py --sanity-check-test --full-cycle --symbol BTC/USDT --interval 1h
 ```
 
-## Testing
+Key parameters:
+- `--sanity-check-test`: Enables sanity check testing mode
+- `--full-cycle`: Runs full decision cycle with all agents
+- `--trade-cycle`: Runs full trade cycle (analysis, decision, and trade planning)
 
-The sanity check system is tested in:
-1. `tests/test_sanity_checks.py`: Unit tests for individual sanity check functions
-2. `tests/test_decision_agent_sanity.py`: Integration tests for sanity checks in the decision pipeline
+### How Sanity Check Testing Works
 
-## Best Practices
+When sanity check testing is enabled:
 
-1. Always check the `passed_sanity_check` flag before using agent outputs
-2. Log and report sanity check failures for debugging
-3. Add custom sanity checks in agent subclasses as needed for domain-specific validation
-4. Update required fields and validation rules as the system evolves
+1. The test harness injects invalid data (with missing fields, invalid signals, etc.) into the analysis results
+2. The DecisionAgent should filter out these invalid analyses
+3. The test output shows which analyses passed or failed sanity checks
+4. The summary report includes a "Sanity Check" status for each analysis
+
+### Example Test Output
+
+```
+## Technical Analysis
+  Signal:      BUY
+  Confidence:  65%
+  Sanity Check: ✓ Passed
+
+## Invalid Analysis
+  Signal:      INVALID_SIGNAL
+  Confidence:  150%
+  Sanity Check: ✗ Failed: Invalid signal type: INVALID_SIGNAL
+```
+
+## Implementation Benefits
+
+1. **Robust Decision Making**: Prevents invalid or corrupted data from influencing trading decisions.
+2. **Early Error Detection**: Identifies problematic analyses before they can affect downstream components.
+3. **Debugging Support**: Provides clear feedback on why analyses were rejected.
+4. **System Integrity**: Ensures all components operate with reliable, validated data.
+
+## Configuration
+
+Sanity check thresholds and rules can be adjusted in `utils/sanity_check.py`.
+
+Key configuration options:
+- `VALID_SIGNALS`: Set of allowed signal values
+- `MIN_CONFIDENCE`: Minimum allowed confidence score (default: 0)
+- `MAX_CONFIDENCE`: Maximum allowed confidence score (default: 100)
+- `REQUIRED_FIELDS`: Essential fields that must be present in analysis output
+
+## Error Handling
+
+When an analysis fails sanity checks:
+1. The problematic analysis is marked with `passed_sanity_check = False`
+2. An error message is attached via `sanity_check_error` field
+3. The DecisionAgent filters out the analysis from consideration
+4. The error is logged for debugging purposes
+
+## Future Enhancements
+
+Planned enhancements to the sanity check system:
+1. **Confidence-Based Filtering**: Adjustable thresholds based on market conditions
+2. **Historical Validation**: Compare outputs against historical patterns
+3. **Cross-Agent Validation**: Cross-check analyses for consistency across agents

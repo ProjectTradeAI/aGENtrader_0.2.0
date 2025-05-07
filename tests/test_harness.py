@@ -18,7 +18,13 @@ Usage:
     --mock-data \
     --temperature 0.0 \
     --explain \
-    --repeat 3
+    --repeat 3 \
+    --sanity-check-test
+
+Advanced testing options:
+  --sanity-check-test  Injects invalid data to test sanity check filtering
+  --full-cycle         Run a complete decision cycle with all analyst agents
+  --trade-cycle        Run full trade cycle (analysis, decision, plan)
 """
 
 import os
@@ -993,6 +999,38 @@ class AgentTestHarness:
         # Now run the decision agent with the analysis results
         logger.info(f"{Fore.CYAN}Running final decision analysis with DecisionAgent{Style.RESET_ALL}")
         
+        # Check if we should run a sanity check test
+        sanity_check_test = self.data_override.get('run_sanity_check_test', False)
+        if sanity_check_test:
+            logger.info(f"{Fore.YELLOW}Running SANITY CHECK TEST - Introducing invalid data to test filtering{Style.RESET_ALL}")
+            # Inject an invalid analysis that should be filtered by sanity checks
+            invalid_analysis_key = 'test_invalid_analysis'
+            invalid_analysis = {
+                'signal': 'INVALID_SIGNAL',  # Invalid signal type
+                'confidence': 150,           # Invalid confidence (over 100)
+                'reasoning': 'This is an invalid analysis that should be filtered by sanity checks',
+                'timestamp': datetime.now().isoformat()
+            }
+            analyst_results[invalid_analysis_key] = invalid_analysis
+            
+            # Also corrupt one of the existing analysis results (if any exist)
+            if analyst_results:
+                # Pick first key to modify
+                corrupt_key = next(iter(analyst_results.keys()))
+                if corrupt_key and isinstance(analyst_results[corrupt_key], dict):
+                    logger.info(f"{Fore.YELLOW}Corrupting existing analysis '{corrupt_key}' to test sanity checks{Style.RESET_ALL}")
+                    # Make a copy to avoid modifying the original
+                    corrupt_analysis = analyst_results[corrupt_key].copy()
+                    # Remove required fields
+                    if 'reasoning' in corrupt_analysis:
+                        del corrupt_analysis['reasoning']
+                    # Set passed_sanity_check = False directly to simulate a failed check
+                    corrupt_analysis['passed_sanity_check'] = False
+                    corrupt_analysis['sanity_check_error'] = 'Missing required field: reasoning'
+                    
+                    # Replace with corrupted version
+                    analyst_results[corrupt_key] = corrupt_analysis
+        
         try:
             # Combine results for the make_decision method
             analysis_params = {
@@ -1001,7 +1039,14 @@ class AgentTestHarness:
                 "interval": self.interval
             }
             
+            logger.info(f"{Fore.CYAN}Running decision agent with {len(analyst_results)} analysis results{Style.RESET_ALL}")
             decision_result = decision_agent.make_decision(**analysis_params)
+            
+            # Check if decision was filtered by sanity checks
+            if decision_result.get('passed_sanity_check', True):
+                logger.info(f"{Fore.GREEN}Decision PASSED sanity checks{Style.RESET_ALL}")
+            else:
+                logger.warning(f"{Fore.RED}Decision FAILED sanity checks: {decision_result.get('sanity_check_error', 'Unknown error')}{Style.RESET_ALL}")
             
             # Add to all results
             all_results['decision'] = {
@@ -1197,13 +1242,62 @@ class AgentTestHarness:
         # DecisionAgent has a simpler initialization
         decision_agent = DecisionAgent(allow_conflict_state=True)
         
+        # Inject invalid analyses for sanity check testing if requested
+        sanity_check_test = self.data_override.get('run_sanity_check_test', False)
+        if sanity_check_test:
+            logger.info(f"{Fore.YELLOW}Running SANITY CHECK TEST - Introducing invalid data to test filtering{Style.RESET_ALL}")
+            # Inject an invalid analysis that should be filtered by sanity checks
+            invalid_analysis_key = 'test_invalid_analysis'
+            invalid_analysis = {
+                'signal': 'INVALID_SIGNAL',  # Invalid signal type
+                'confidence': 150,           # Invalid confidence (over 100)
+                'reasoning': 'This is an invalid analysis that should be filtered by sanity checks',
+                'timestamp': datetime.now().isoformat()
+            }
+            analyst_results[invalid_analysis_key] = invalid_analysis
+            logger.info(f"{Fore.YELLOW}Injected invalid analysis with key '{invalid_analysis_key}'{Style.RESET_ALL}")
+            
+            # Also corrupt one of the existing analysis results (if any exist)
+            if analyst_results:
+                # Pick first key to modify
+                corrupt_key = next(iter(analyst_results.keys()))
+                if corrupt_key and isinstance(analyst_results[corrupt_key], dict):
+                    logger.info(f"{Fore.YELLOW}Corrupting existing analysis '{corrupt_key}' to test sanity checks{Style.RESET_ALL}")
+                    # Make a copy to avoid modifying the original
+                    corrupt_analysis = analyst_results[corrupt_key].copy()
+                    # Remove required fields
+                    if 'reasoning' in corrupt_analysis:
+                        del corrupt_analysis['reasoning']
+                    # Set passed_sanity_check = False directly to simulate a failed check
+                    corrupt_analysis['passed_sanity_check'] = False
+                    corrupt_analysis['sanity_check_error'] = 'Missing required field: reasoning'
+                    
+                    # Replace with corrupted version
+                    analyst_results[corrupt_key] = corrupt_analysis
+        
         try:
+            # Log the number of analyses being submitted
+            logger.info(f"{Fore.CYAN}Running decision agent with {len(analyst_results)} analysis results{Style.RESET_ALL}")
+            
             # DecisionAgent uses make_decision instead of analyze
             decision = decision_agent.make_decision(
                 agent_analyses=analyst_results,
                 symbol=self.symbol,
                 interval=self.interval
             )
+            
+            # Check if decision was filtered by sanity checks
+            if decision.get('passed_sanity_check', True):
+                logger.info(f"{Fore.GREEN}Decision PASSED sanity checks{Style.RESET_ALL}")
+            else:
+                logger.warning(f"{Fore.RED}Decision FAILED sanity checks: {decision.get('sanity_check_error', 'Unknown error')}{Style.RESET_ALL}")
+                
+            # Print the number of analyses that contributed to the decision
+            if 'contributing_agents' in decision:
+                logger.info(f"{Fore.CYAN}Decision based on {len(decision['contributing_agents'])} contributing agents{Style.RESET_ALL}")
+                rejected_count = len(analyst_results) - len(decision['contributing_agents'])
+                if rejected_count > 0:
+                    logger.info(f"{Fore.YELLOW}{rejected_count} analyses were rejected by filters/sanity checks{Style.RESET_ALL}")
         except Exception as e:
             logger.error(f"{Fore.RED}Error running decision analysis: {str(e)}{Style.RESET_ALL}")
             return {
@@ -1366,9 +1460,21 @@ class AgentTestHarness:
             else:
                 agent_confidence_color = Fore.RED
                 
-            print(f"\n{Fore.WHITE}{agent_name.replace('_', ' ').title()}{Style.RESET_ALL}")
-            print(f"  Signal:     {agent_signal_color}{agent_signal}{Style.RESET_ALL}")
-            print(f"  Confidence: {agent_confidence_color}{agent_confidence}%{Style.RESET_ALL}")
+            # Add sanity check status if available
+            sanity_check_passed = analysis.get('passed_sanity_check', True)
+            sanity_check_error = analysis.get('sanity_check_error', None)
+            
+            if sanity_check_passed:
+                agent_name_color = Fore.WHITE
+                sanity_status = f"{Fore.GREEN}✓ Passed{Style.RESET_ALL}"
+            else:
+                agent_name_color = Fore.RED
+                sanity_status = f"{Fore.RED}✗ Failed: {sanity_check_error}{Style.RESET_ALL}"
+            
+            print(f"\n{agent_name_color}{agent_name.replace('_', ' ').title()}{Style.RESET_ALL}")
+            print(f"  Signal:      {agent_signal_color}{agent_signal}{Style.RESET_ALL}")
+            print(f"  Confidence:  {agent_confidence_color}{agent_confidence}%{Style.RESET_ALL}")
+            print(f"  Sanity Check: {sanity_status}")
             
             # Check if we have a styled tone for this agent
             agent_tone = self.get_agent_tone_for_display(agent_name)
@@ -1895,6 +2001,9 @@ def parse_args():
     parser.add_argument('--mock-portfolio', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
                       default=False, nargs='?', const=True,
                       help='Use mock portfolio for testing (--mock-portfolio or --mock-portfolio=true)')
+    parser.add_argument('--sanity-check-test', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
+                      default=False, nargs='?', const=True,
+                      help='Run sanity check tests by injecting invalid data (--sanity-check-test or --sanity-check-test=true)')
     parser.add_argument('--interactive', type=lambda x: (str(x).lower() in ['true', '1', 'yes', 'y']),
                       default=False, nargs='?', const=True,
                       help='Run in interactive mode with prompts for user input (--interactive or --interactive=true)')
@@ -1927,6 +2036,11 @@ def main():
         harness.full_cycle = args.full_cycle
         harness.trade_cycle = args.trade_cycle
         harness.trade_log = args.trade_log
+        
+        # Set up sanity check testing if requested
+        if args.sanity_check_test:
+            print(f"{Fore.CYAN}Sanity check testing enabled - will inject invalid data to test filtering{Style.RESET_ALL}")
+            harness.data_override['run_sanity_check_test'] = True
         
         # Add mock portfolio if needed
         if args.mock_portfolio:

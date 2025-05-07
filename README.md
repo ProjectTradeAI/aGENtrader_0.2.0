@@ -4,6 +4,8 @@ An advanced multi-agent AI trading platform with sophisticated deployment and wo
 
 ## Recent Updates
 
+- **2025-05-07**: Implemented agent-level self-sanity checks to ensure data validity throughout the decision-making process
+- **2025-05-07**: Added test harness support for sanity check validation with `--sanity-check-test` option
 - **2025-05-06**: Added CI integration with version tag validation to ensure consistent versioning across all components
 - **2025-05-06**: Updated system version to v0.2.2 with standardized version tracking in all agent outputs
 - **2025-04-30**: Implemented unified agent architecture with standardized interfaces and improved testability (branch: v2.2.1)
@@ -12,7 +14,6 @@ An advanced multi-agent AI trading platform with sophisticated deployment and wo
 - **2025-04-29**: Enhanced LLM client with improved error diagnostics and environment detection
 - **2025-04-29**: Implemented agent-specific LLM routing - Sentiment agents now use Grok, others use Mistral
 - **2025-04-29**: Fixed validation script to properly detect Binance API initialization by matching the correct log pattern
-- **2025-04-28**: Upgraded from Mixtral to Mistral as the default LLM due to EC2 memory constraints
 
 ## Repository Structure
 
@@ -74,6 +75,7 @@ The agent system follows a standardized architecture with interfaces and base cl
 For details on using or implementing agents, see:
 - [Agent Migration Guide](docs/AGENT_MIGRATION_GUIDE.md)
 - [Development Notes](docs/DEV_NOTES.md)
+- [Self-Sanity Checks](docs/SELF_SANITY_CHECKS.md)
 - [Test Suite Documentation](tests/README.md)
 
 #### LLM Model Selection Strategy
@@ -97,6 +99,7 @@ The system can fetch data from multiple sources:
 - **Live Trading**: Core trading functionality that integrates all specialist agents
 - **Trigger Scheduler**: Manages scheduled triggers for different timeframes
 - **Ollama Health Check**: Automatic LLM service management with environment-specific detection
+- **Self-Sanity Checks**: Validation system that ensures data integrity throughout the decision pipeline
 
 #### Ollama Health Check System
 

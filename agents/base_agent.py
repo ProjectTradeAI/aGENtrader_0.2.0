@@ -21,6 +21,14 @@ except ImportError:
     YAML_AVAILABLE = False
     logging.warning("PyYAML not installed. Config loading will use fallback methods.")
 
+# Import sanity check utilities
+try:
+    from utils.sanity_check import sanitize_agent_output, filter_passed_sanity_checks
+    SANITY_CHECKS_AVAILABLE = True
+except ImportError:
+    SANITY_CHECKS_AVAILABLE = False
+    logging.warning("Sanity check utilities not available. Falling back to basic validation.")
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
@@ -77,13 +85,83 @@ class BaseAgent:
         Returns:
             Error response dictionary
         """
-        return {
+        response = {
             "error": True,
             "error_code": error_code,
             "message": error_message,
             "timestamp": datetime.now().isoformat(),
-            "agent": self.agent_name
+            "agent": self.agent_name,
+            "passed_sanity_check": False
         }
+        return response
+        
+    def sanitize_output(self, output: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Apply sanity checks to the agent output and add passed_sanity_check flag.
+        
+        Args:
+            output: The agent output dictionary
+            
+        Returns:
+            Sanitized output with passed_sanity_check flag
+        """
+        # Add agent name and timestamp if not present
+        if 'agent_name' not in output:
+            output['agent_name'] = self.agent_name
+            
+        if 'timestamp' not in output:
+            output['timestamp'] = datetime.now().isoformat()
+            
+        # If output already has passed_sanity_check, respect it
+        if 'passed_sanity_check' in output:
+            return output
+            
+        # Check for error response, which never passes sanity check
+        if output.get('error', False):
+            output['passed_sanity_check'] = False
+            return output
+            
+        # If sanity check utilities are available, use them
+        if SANITY_CHECKS_AVAILABLE:
+            try:
+                return sanitize_agent_output(output)
+            except Exception as e:
+                logger.warning(f"Error during sanity check for {self.agent_name}: {str(e)}")
+                output['passed_sanity_check'] = False
+                return output
+        else:
+            # Basic sanity check if utilities aren't available
+            if not output:
+                output['passed_sanity_check'] = False
+                return output
+                
+            # Ensure recommendation exists if this is a decision agent
+            if 'recommendation' in output:
+                recommendation = output.get('recommendation', {})
+                if not isinstance(recommendation, dict) or not recommendation:
+                    output['passed_sanity_check'] = False
+                    return output
+                    
+                action = recommendation.get('action')
+                confidence = recommendation.get('confidence')
+                
+                if not action or not confidence:
+                    output['passed_sanity_check'] = False
+                    return output
+                    
+                # Check confidence is a number and in valid range
+                try:
+                    confidence_value = float(confidence)
+                    if confidence_value < 0 or confidence_value > 100:
+                        output['passed_sanity_check'] = False
+                        return output
+                except (ValueError, TypeError):
+                    output['passed_sanity_check'] = False
+                    return output
+            
+            # If we get here, basic checks passed
+            output['passed_sanity_check'] = True
+            return output
     
     def get_agent_config(self) -> Dict[str, Any]:
         """
@@ -240,9 +318,13 @@ class BaseAgent:
             **kwargs: Additional parameters
             
         Returns:
-            Analysis results
+            Analysis results with sanity checks applied
         """
-        return self.analyze(symbol=symbol, interval=interval, **kwargs)
+        # Get the analysis results
+        result = self.analyze(symbol=symbol, interval=interval, **kwargs)
+        
+        # Apply sanity checks to the result
+        return self.sanitize_output(result)
     
     def analyze(self, symbol: Optional[str] = None, market_data: Optional[Dict[str, Any]] = None, 
                 interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
@@ -390,9 +472,22 @@ class BaseDecisionAgent(BaseAgent, DecisionAgentInterface):
             **kwargs: Additional parameters
             
         Returns:
-            Decision results
+            Decision results with sanity checks applied
         """
-        return self.make_decision(symbol=symbol, interval=interval, analyses=analyses)
+        # Filter analyses to include only those that passed sanity checks
+        if SANITY_CHECKS_AVAILABLE:
+            filtered_analyses = filter_passed_sanity_checks(analyses)
+            if not filtered_analyses:
+                logger.warning("All analyses failed sanity checks. Decision making may be unreliable.")
+            else:
+                analyses = filtered_analyses
+                logger.info(f"Using {len(analyses)} analyses that passed sanity checks")
+        
+        # Get the decision results
+        result = self.make_decision(symbol=symbol, interval=interval, analyses=analyses)
+        
+        # Apply sanity checks to the result
+        return self.sanitize_output(result)
     
     def make_decision(self, symbol: str, interval: str, analyses: List[Dict[str, Any]]) -> Dict[str, Any]:
         """

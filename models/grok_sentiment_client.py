@@ -48,6 +48,9 @@ class GrokSentimentClient:
         self.model = model
         self.temperature = temperature
         
+        # Add an enabled flag that sentiment_analyst_agent.py checks
+        self.enabled = True
+        
         # Record initialization status
         self.initialized = self.client.initialized
         
@@ -128,6 +131,91 @@ class GrokSentimentClient:
             "sentiment_label": sentiment_label,
             "source": "grok_sentiment"
         }
+    
+    def analyze_market_news(
+        self,
+        news_items: List[str],
+        temperature: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze sentiment from a list of news headlines or articles.
+        
+        Args:
+            news_items: List of news headlines or articles
+            temperature: Optional temperature override
+            
+        Returns:
+            Dictionary with market news sentiment analysis
+        """
+        # Ensure temperature is valid (must be positive for Grok API)
+        if temperature is not None and temperature < 0:
+            # Handle negative temperature specially
+            import random
+            temperature = 0.6 + (random.random() * 0.3)  # Random between 0.6-0.9
+            logger.info(f"Converting negative temperature to valid value: {temperature:.2f}")
+            
+        # Combine news items into a single context
+        context = "\n".join([f"- {item}" for item in news_items])
+        
+        prompt = f"""
+        Analyze the market sentiment in these news items:
+        
+        {context}
+        
+        As a market sentiment analyst, evaluate the overall tone of these news items and determine:
+        1. The general market sentiment (bullish, bearish, or neutral)
+        2. The strength of that sentiment (on a scale of 0-100)
+        3. The key points supporting your analysis
+        4. Your confidence in this assessment (0-100%)
+        
+        Return ONLY a valid JSON object with this structure:
+        {{
+            "sentiment_label": "bullish"/"bearish"/"neutral",
+            "sentiment_score": [0-100],
+            "key_points": [list of main points affecting sentiment],
+            "confidence": [0-100],
+            "reasoning": "explanation of your analysis"
+        }}
+        """
+        
+        try:
+            # Use lower temperature for more consistent results
+            actual_temp = temperature if temperature is not None else 0.5
+            response_str = self.client.generate(prompt, temperature=actual_temp, json_response=True)
+            
+            # Parse JSON response
+            try:
+                result = json.loads(response_str)
+                
+                # Validate required fields
+                required_fields = ["sentiment_label", "sentiment_score", "confidence", "reasoning"]
+                for field in required_fields:
+                    if field not in result:
+                        result[field] = "unknown" if field != "sentiment_score" and field != "confidence" else 50
+                
+                # Convert sentiment analysis to a tradable signal
+                signal_result = self.convert_sentiment_to_signal(result)
+                
+                # Return the complete result
+                return signal_result
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Error decoding market news sentiment JSON: {str(e)}")
+                return {
+                    "signal": "NEUTRAL",
+                    "confidence": 50,
+                    "reasoning": f"Error parsing market news sentiment: {str(e)}",
+                    "error": True
+                }
+                
+        except Exception as e:
+            logger.error(f"Error analyzing market news sentiment: {str(e)}")
+            return {
+                "signal": "NEUTRAL",
+                "confidence": 50,
+                "reasoning": f"Error analyzing market news: {str(e)}",
+                "error": True
+            }
     
     def analyze_and_get_signal(
         self, 

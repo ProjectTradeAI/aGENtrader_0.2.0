@@ -176,6 +176,12 @@ class GrokClient:
         Returns:
             Dictionary with sentiment analysis results
         """
+        # Ensure temperature is valid (must be positive for Grok API)
+        if temperature is not None and temperature < 0:
+            # Handle negative temperature specially
+            import random
+            temperature = 0.6 + (random.random() * 0.3)  # Random between 0.6-0.9
+            logger.info(f"Converting negative temperature to valid value: {temperature:.2f}")
         # Construct sentiment analysis prompt
         prompt = f"""
         Analyze the market sentiment in the following text.
@@ -243,6 +249,16 @@ class GrokClient:
         except Exception as e:
             logger.error(f"Error during sentiment analysis: {str(e)}")
             raise ValueError(f"Sentiment analysis failed: {str(e)}")
+            
+        # Default return in case all other paths fail
+        return {
+            "sentiment_score": 50,
+            "sentiment_label": "neutral",
+            "confidence": 0,
+            "reasoning": "Failed to complete sentiment analysis",
+            "error": "Processing error",
+            "timestamp": time.time()
+        }
 
 # Example usage
 if __name__ == "__main__":

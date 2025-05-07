@@ -210,10 +210,18 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             market_data = {}
             
         # Extract temperature parameter, default to -1 (dynamic temperature)
-        temperature = kwargs.get('temperature', -1)
-        if temperature == -1:
-            self.logger.info("Using dynamic temperature (random between 0.6-0.9)")
+        temperature_param = kwargs.get('temperature', -1)
+        
+        # Convert negative temperature (flag for dynamic) to a valid positive value
+        # Grok API requires temperature to be positive
+        if temperature_param == -1 or temperature_param < 0:
+            # Use random temperature between 0.6-0.9 for dynamic behavior
+            import random
+            temperature = 0.6 + (random.random() * 0.3)  # Random between 0.6-0.9
+            self.logger.info(f"Using dynamic temperature: {temperature:.2f}")
         else:
+            # Use the provided temperature, ensuring it's positive
+            temperature = max(0.01, temperature_param)  # Minimum 0.01
             self.logger.info(f"Using fixed temperature: {temperature}")
             
         # Handle the case where symbol is passed directly

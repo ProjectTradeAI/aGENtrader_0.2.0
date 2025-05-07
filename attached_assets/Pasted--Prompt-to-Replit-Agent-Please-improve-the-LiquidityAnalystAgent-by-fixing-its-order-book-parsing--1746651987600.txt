@@ -1,0 +1,48 @@
+# Prompt to Replit Agent
+
+Please improve the LiquidityAnalystAgent by fixing its order book parsing logic and adding a self-sanity validation mechanism. Here are the tasks:
+
+---
+
+## 1. 📉 Improve Liquidity Zone Analysis
+
+- Fetch at least the top **50–100 levels** of the Binance order book for both bids and asks.
+- Parse and group price levels into **clusters** to detect realistic support and resistance zones.
+- Identify:
+  - `support_clusters`: Price zones with above-average bid volume density.
+  - `resistance_clusters`: Price zones with above-average ask volume density.
+  - `gaps`: Areas in the order book where volume is significantly lower (potential slippage risks).
+- Use weighted averages or price bins (e.g., 5–10 USD ranges) to form clusters.
+- Avoid using just the top-of-book data (Level 1).
+
+---
+
+## 2. ✅ Add `agent_sane` Field for Self-Sanity Validation
+
+- Introduce a `agent_sane` boolean flag in the agent’s output JSON.
+- The agent should perform sanity checks on liquidity data such as:
+  - There are **at least 3 distinct support/resistance zones**.
+  - Bid/ask ratios are not extreme (e.g., >100 or <0.01).
+  - Gaps and clusters make sense over a realistic range (e.g., not just 0.01 USD difference).
+- If any critical anomaly is detected, set `agent_sane = false` and downgrade the confidence (e.g., auto-set to 50% or less).
+- Log a warning in this case: `"⚠️ LiquidityAnalystAgent detected abnormal liquidity structure. Sanity check failed."`
+
+---
+
+## 3. 🧪 Update Test Scripts
+
+- Update `test_agent_individual.py` and `test_agent_trace.py` to support and display the new `agent_sane` flag.
+- Ensure fallback handling is tested (e.g., for when `agent_sane = false`).
+
+---
+
+## 4. 📂 Logs and Outputs
+
+- Include the new sanity field in:
+  - `agent_trace.jsonl`
+  - `decision log output`
+  - `ToneAgent` summaries (optional note like “Sanity Check: ⚠️ Failed”)
+
+---
+
+Let me know once this is implemented. We’ll review and then enable this sanity mechanism across all agents iteratively. 

@@ -63,13 +63,21 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             'wide_spread': 0.5      # 0.5%+ spread considered wide
         })
         
-        # Set the depth levels to analyze in the order book
-        self.depth_levels = self.config.get('depth_levels', 20)
+        # Set the depth levels to analyze in the order book (increased for better analysis)
+        self.depth_levels = self.config.get('depth_levels', 100)
         
-        # Set confidence thresholds
-        self.high_confidence = 80   # For very clear liquidity conditions
-        self.medium_confidence = 65 # For moderate liquidity signals
-        self.low_confidence = 50    # For weak liquidity signals
+        # Price bin size for clustering (in % of price)
+        self.price_bin_size_pct = self.config.get('price_bin_size_pct', 0.2)
+        
+        # Sanity check parameters
+        self.min_liquidity_zones = self.config.get('min_liquidity_zones', 3)
+        self.max_bid_ask_ratio = self.config.get('max_bid_ask_ratio', 100.0)
+        self.min_bid_ask_ratio = self.config.get('min_bid_ask_ratio', 0.01)
+        
+        # Signal confidence levels
+        self.high_confidence = self.config.get('high_confidence', 80)
+        self.medium_confidence = self.config.get('medium_confidence', 65)
+        self.low_confidence = self.config.get('low_confidence', 50)
         
     def analyze(
         self, 
@@ -179,7 +187,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                     explanation += f" (confidence adjusted due to conflicting market signals)"
                     confidence = normalized_confidence
             
-            # Prepare results with entry and stop-loss zones
+            # Prepare results with entry and stop-loss zones and sanity status
             results = {
                 "agent": self.name,
                 "timestamp": datetime.now().isoformat(),
@@ -194,6 +202,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 "entry_zone": analysis_result.get("suggested_entry"),
                 "stop_loss_zone": analysis_result.get("suggested_stop_loss"),
                 "liquidity_zones": analysis_result.get("liquidity_zones", {}),
+                "agent_sane": analysis_result.get("agent_sane", True),
+                "sanity_message": analysis_result.get("sanity_message"),
                 "status": "success"
             }
             
@@ -209,7 +219,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 decision_logger.log_decision(
                     agent_name=self.name,
                     signal=signal,
-                    confidence=confidence,
+                    confidence=int(confidence),  # Cast to int to satisfy type requirements
                     reason=explanation,
                     symbol=symbol_str,
                     price=float(current_price),
@@ -219,6 +229,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                         "entry_zone": analysis_result.get("suggested_entry"),
                         "stop_loss_zone": analysis_result.get("suggested_stop_loss"),
                         "liquidity_zones": analysis_result.get("liquidity_zones", {}),
+                        "agent_sane": analysis_result.get("agent_sane", True),
+                        "sanity_message": analysis_result.get("sanity_message"),
                         "metrics": analysis_result
                     }
                 )
@@ -266,7 +278,9 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                     "gaps": []
                 },
                 "suggested_entry": None,
-                "suggested_stop_loss": None
+                "suggested_stop_loss": None,
+                "agent_sane": False,
+                "sanity_message": "Empty order book data"
             }
         
         # Calculate bid-ask spread
@@ -296,52 +310,110 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         # Combined liquidity score
         liquidity_score = (depth_score * 0.5) + (spread_score * 0.3) + (balance_score * 0.2)
         
+        # Convert all bids and asks to float format for better analysis
+        processed_bids = [[float(price), float(volume)] for price, volume in bids]
+        processed_asks = [[float(price), float(volume)] for price, volume in asks]
+        
         # Extract top bid and ask levels for display
-        top_bids = [[float(price), float(volume)] for price, volume in bids[:10]]
-        top_asks = [[float(price), float(volume)] for price, volume in asks[:10]]
+        top_bids = processed_bids[:10]
+        top_asks = processed_asks[:10]
         
-        # Calculate total volume at each level
-        bid_volumes = [vol for _, vol in top_bids]
-        ask_volumes = [vol for _, vol in top_asks]
+        # Create price bins for clustering to identify support/resistance zones
+        current_price = (best_bid + best_ask) / 2
+        bin_size = current_price * (self.price_bin_size_pct / 100)
         
-        # Calculate volume-weighted average for normalization
-        avg_bid_volume = sum(bid_volumes) / len(bid_volumes) if bid_volumes else 0
-        avg_ask_volume = sum(ask_volumes) / len(ask_volumes) if ask_volumes else 0
+        # Create bid bins to cluster orders at similar price levels
+        bid_bins = {}
+        for price, volume in processed_bids:
+            bin_key = int(price / bin_size)
+            if bin_key not in bid_bins:
+                bid_bins[bin_key] = {
+                    'total_volume': 0,
+                    'avg_price': 0,
+                    'levels': []
+                }
+            bid_bins[bin_key]['total_volume'] += volume
+            bid_bins[bin_key]['levels'].append((price, volume))
         
-        # Define liquidity zone thresholds
-        volume_cluster_threshold = 1.5  # Price levels with 1.5x average volume
-        gap_threshold = 0.5  # Price levels with less than 0.5x average volume
+        # Calculate average price for each bid bin (weighted by volume)
+        for bin_key in bid_bins:
+            total_weighted_price = sum(price * volume for price, volume in bid_bins[bin_key]['levels'])
+            total_volume = bid_bins[bin_key]['total_volume']
+            bid_bins[bin_key]['avg_price'] = total_weighted_price / total_volume if total_volume > 0 else 0
+        
+        # Create ask bins using the same binning approach
+        ask_bins = {}
+        for price, volume in processed_asks:
+            bin_key = int(price / bin_size)
+            if bin_key not in ask_bins:
+                ask_bins[bin_key] = {
+                    'total_volume': 0,
+                    'avg_price': 0,
+                    'levels': []
+                }
+            ask_bins[bin_key]['total_volume'] += volume
+            ask_bins[bin_key]['levels'].append((price, volume))
+        
+        # Calculate average price for each ask bin (weighted by volume)
+        for bin_key in ask_bins:
+            total_weighted_price = sum(price * volume for price, volume in ask_bins[bin_key]['levels'])
+            total_volume = ask_bins[bin_key]['total_volume']
+            ask_bins[bin_key]['avg_price'] = total_weighted_price / total_volume if total_volume > 0 else 0
+        
+        # Calculate average bin volume for normalization
+        avg_bid_bin_volume = sum(b['total_volume'] for b in bid_bins.values()) / len(bid_bins) if bid_bins else 0
+        avg_ask_bin_volume = sum(b['total_volume'] for b in ask_bins.values()) / len(ask_bins) if ask_bins else 0
+        
+        # Define cluster thresholds based on averages
+        bid_cluster_threshold = avg_bid_bin_volume * 1.8  # 1.8x average for significant support
+        ask_cluster_threshold = avg_ask_bin_volume * 1.8  # 1.8x average for significant resistance
+        bid_gap_threshold = avg_bid_bin_volume * 0.3     # 0.3x average for bid gaps
+        ask_gap_threshold = avg_ask_bin_volume * 0.3     # 0.3x average for ask gaps
         
         # Identify support clusters (significant bid walls)
         support_clusters = []
-        for i, (price, volume) in enumerate(top_bids):
-            if volume > avg_bid_volume * volume_cluster_threshold:
-                support_clusters.append(price)
-                logger.debug(f"Support cluster detected at {price} with volume {volume}")
+        for bin_key, bin_data in sorted(bid_bins.items(), reverse=True):  # Sort by price descending
+            if bin_data['total_volume'] > bid_cluster_threshold:
+                support_clusters.append({
+                    'price': bin_data['avg_price'],
+                    'volume': bin_data['total_volume'],
+                    'strength': bin_data['total_volume'] / avg_bid_bin_volume if avg_bid_bin_volume > 0 else 1.0
+                })
+                logger.debug(f"Support cluster detected at {bin_data['avg_price']:.2f} with volume {bin_data['total_volume']:.2f}")
         
         # Identify resistance clusters (significant ask walls)
         resistance_clusters = []
-        for i, (price, volume) in enumerate(top_asks):
-            if volume > avg_ask_volume * volume_cluster_threshold:
-                resistance_clusters.append(price)
-                logger.debug(f"Resistance cluster detected at {price} with volume {volume}")
+        for bin_key, bin_data in sorted(ask_bins.items()):  # Sort by price ascending
+            if bin_data['total_volume'] > ask_cluster_threshold:
+                resistance_clusters.append({
+                    'price': bin_data['avg_price'],
+                    'volume': bin_data['total_volume'],
+                    'strength': bin_data['total_volume'] / avg_ask_bin_volume if avg_ask_bin_volume > 0 else 1.0
+                })
+                logger.debug(f"Resistance cluster detected at {bin_data['avg_price']:.2f} with volume {bin_data['total_volume']:.2f}")
         
-        # Identify liquidity gaps (areas with low volume on both sides)
+        # Sort the clusters by price
+        support_clusters = sorted(support_clusters, key=lambda x: x['price'], reverse=True)  # Descending
+        resistance_clusters = sorted(resistance_clusters, key=lambda x: x['price'])  # Ascending
+        
+        # Extract just the prices for backward compatibility
+        support_cluster_prices = [cluster['price'] for cluster in support_clusters]
+        resistance_cluster_prices = [cluster['price'] for cluster in resistance_clusters]
+        
+        # Identify liquidity gaps (areas with low volume)
         gaps = []
         
         # Check for gaps in bid side
-        for i in range(1, len(top_bids)):
-            current_price, current_vol = top_bids[i]
-            if current_vol < avg_bid_volume * gap_threshold:
-                gaps.append(current_price)
-                logger.debug(f"Liquidity gap detected at bid {current_price} with volume {current_vol}")
+        for bin_key, bin_data in sorted(bid_bins.items(), reverse=True):
+            if bin_data['total_volume'] < bid_gap_threshold:
+                gaps.append(bin_data['avg_price'])
+                logger.debug(f"Liquidity gap detected at bid {bin_data['avg_price']:.2f} with volume {bin_data['total_volume']:.2f}")
                 
         # Check for gaps in ask side
-        for i in range(1, len(top_asks)):
-            current_price, current_vol = top_asks[i]
-            if current_vol < avg_ask_volume * gap_threshold:
-                gaps.append(current_price)
-                logger.debug(f"Liquidity gap detected at ask {current_price} with volume {current_vol}")
+        for bin_key, bin_data in sorted(ask_bins.items()):
+            if bin_data['total_volume'] < ask_gap_threshold:
+                gaps.append(bin_data['avg_price'])
+                logger.debug(f"Liquidity gap detected at ask {bin_data['avg_price']:.2f} with volume {bin_data['total_volume']:.2f}")
         
         # Determine suggested entry zones based on liquidity clusters
         suggested_entry = None
@@ -349,41 +421,65 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
         # For BUY signals, entry is typically just above a strong support
         # and stop loss is below the support
-        if bid_ask_ratio > 1.0 and support_clusters:
+        if bid_ask_ratio > 1.0 and support_cluster_prices:
             # Entry slightly above strongest support
-            suggested_entry = support_clusters[0] * 1.001  # 0.1% above support
+            suggested_entry = support_cluster_prices[0] * 1.001  # 0.1% above support
             
             # Find nearest gap below support for stop loss
-            suitable_gaps = [gap for gap in gaps if gap < support_clusters[0]]
+            suitable_gaps = [gap for gap in gaps if gap < support_cluster_prices[0]]
             if suitable_gaps:
                 # Use the closest gap below support
                 suggested_stop_loss = max(suitable_gaps)
             else:
                 # Fallback: use a fixed percentage below support
-                suggested_stop_loss = support_clusters[0] * 0.99  # 1% below support
+                suggested_stop_loss = support_cluster_prices[0] * 0.99  # 1% below support
                 
         # For SELL signals, entry is typically just below a strong resistance
         # and stop loss is above the resistance
-        elif bid_ask_ratio < 1.0 and resistance_clusters:
-            # Entry slightly below weakest resistance
-            suggested_entry = resistance_clusters[0] * 0.999  # 0.1% below resistance
+        elif bid_ask_ratio < 1.0 and resistance_cluster_prices:
+            # Entry slightly below strongest resistance
+            suggested_entry = resistance_cluster_prices[0] * 0.999  # 0.1% below resistance
             
             # Find nearest gap above resistance for stop loss
-            suitable_gaps = [gap for gap in gaps if gap > resistance_clusters[0]]
+            suitable_gaps = [gap for gap in gaps if gap > resistance_cluster_prices[0]]
             if suitable_gaps:
                 # Use the closest gap above resistance
                 suggested_stop_loss = min(suitable_gaps)
             else:
                 # Fallback: use a fixed percentage above resistance
-                suggested_stop_loss = resistance_clusters[0] * 1.01  # 1% above resistance
-        
+                suggested_stop_loss = resistance_cluster_prices[0] * 1.01  # 1% above resistance
+                
+        # Package liquidity zones with detailed information
         liquidity_zones = {
-            "support_clusters": support_clusters,
-            "resistance_clusters": resistance_clusters,
+            "support_clusters": [
+                {
+                    "price": cluster['price'],
+                    "volume": cluster['volume'],
+                    "strength": cluster['strength']
+                } for cluster in support_clusters
+            ],
+            "resistance_clusters": [
+                {
+                    "price": cluster['price'],
+                    "volume": cluster['volume'],
+                    "strength": cluster['strength']
+                } for cluster in resistance_clusters
+            ],
+            "support_prices": support_cluster_prices,
+            "resistance_prices": resistance_cluster_prices,
             "gaps": gaps
         }
         
-        return {
+        # Perform sanity check on the results
+        agent_sane, sanity_message = self._perform_sanity_check(
+            support_clusters=support_clusters,
+            resistance_clusters=resistance_clusters, 
+            gaps=gaps,
+            bid_ask_ratio=bid_ask_ratio
+        )
+        
+        # Return results with detailed metrics
+        result = {
             "best_bid": best_bid,
             "best_ask": best_ask,
             "spread": spread,
@@ -400,9 +496,92 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             "top_asks": top_asks[:5],  # Top 5 ask levels for display
             "liquidity_zones": liquidity_zones,
             "suggested_entry": suggested_entry,
-            "suggested_stop_loss": suggested_stop_loss
+            "suggested_stop_loss": suggested_stop_loss,
+            "agent_sane": agent_sane,
+            "sanity_message": sanity_message if not agent_sane else None
         }
+        
+        if not agent_sane:
+            logger.warning(f"⚠️ LiquidityAnalystAgent detected abnormal liquidity structure. Sanity check failed: {sanity_message}")
+        
+        return result
     
+    def _perform_sanity_check(
+        self, 
+        support_clusters: List[Dict[str, Any]], 
+        resistance_clusters: List[Dict[str, Any]], 
+        gaps: List[float],
+        bid_ask_ratio: float
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Perform sanity checks on the liquidity analysis results.
+        
+        Args:
+            support_clusters: List of detected support clusters
+            resistance_clusters: List of detected resistance clusters
+            gaps: List of detected liquidity gaps
+            bid_ask_ratio: Ratio of bid to ask depth
+            
+        Returns:
+            Tuple of (is_sane, error_message) where error_message is None if is_sane is True
+        """
+        # Check 1: Are there at least a minimum number of support/resistance zones?
+        total_zones = len(support_clusters) + len(resistance_clusters)
+        if total_zones < self.min_liquidity_zones:
+            return False, f"Too few liquidity zones detected: {total_zones} (minimum: {self.min_liquidity_zones})"
+        
+        # Check 2: Are the bid/ask ratios within reasonable ranges?
+        if bid_ask_ratio > self.max_bid_ask_ratio:
+            return False, f"Bid/ask ratio too extreme (high): {bid_ask_ratio:.2f} (max allowed: {self.max_bid_ask_ratio})"
+        
+        if bid_ask_ratio < self.min_bid_ask_ratio:
+            return False, f"Bid/ask ratio too extreme (low): {bid_ask_ratio:.2f} (min allowed: {self.min_bid_ask_ratio})"
+        
+        # Check 3: Ensure that the price differences between clusters make sense
+        if len(support_clusters) >= 2:
+            # Calculate the percentage differences between adjacent support clusters
+            support_prices = [c['price'] for c in support_clusters]
+            
+            # Get min and max price
+            min_support = min(support_prices)
+            max_support = max(support_prices)
+            
+            # Check if the total price range is unreasonably small
+            support_range_pct = ((max_support - min_support) / min_support) * 100
+            if support_range_pct < 0.1:  # Less than 0.1% range
+                return False, f"Support clusters too tightly packed: {support_range_pct:.2f}% range"
+        
+        if len(resistance_clusters) >= 2:
+            # Calculate the percentage differences between adjacent resistance clusters
+            resistance_prices = [c['price'] for c in resistance_clusters]
+            
+            # Get min and max price
+            min_resistance = min(resistance_prices)
+            max_resistance = max(resistance_prices)
+            
+            # Check if the total price range is unreasonably small
+            resistance_range_pct = ((max_resistance - min_resistance) / min_resistance) * 100
+            if resistance_range_pct < 0.1:  # Less than 0.1% range
+                return False, f"Resistance clusters too tightly packed: {resistance_range_pct:.2f}% range"
+        
+        # Check 4: Evaluate the volumes - are any volumes unrealistically high?
+        for cluster in support_clusters:
+            # Flag clusters with excessive strength
+            if cluster['strength'] > 10:  # 10x average volume
+                return False, f"Unrealistic support volume spike detected: {cluster['strength']:.2f}x average"
+        
+        for cluster in resistance_clusters:
+            # Flag clusters with excessive strength
+            if cluster['strength'] > 10:  # 10x average volume
+                return False, f"Unrealistic resistance volume spike detected: {cluster['strength']:.2f}x average"
+        
+        # Check 5: Ensure gaps are not too frequent (more gaps than clusters suggest data quality issues)
+        if len(gaps) > total_zones * 3:
+            return False, f"Too many liquidity gaps detected: {len(gaps)} (vs {total_zones} clusters)"
+        
+        # All checks passed, the result is sane
+        return True, None
+        
     def _generate_signal(self, metrics: Dict[str, Any]) -> Tuple[str, int, str]:
         """
         Generate a trading signal based on liquidity analysis.
@@ -442,6 +621,16 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         signal = "NEUTRAL"
         confidence = 50
         explanation = "Market liquidity is balanced"
+        
+        # Check sanity status first
+        agent_sane = metrics.get('agent_sane', True)
+        sanity_message = metrics.get('sanity_message', None)
+        
+        # If sanity check failed, downgrade confidence and add warning
+        if not agent_sane:
+            explanation = f"⚠️ Abnormal liquidity structure detected: {sanity_message}. "
+            explanation += "Defaulting to NEUTRAL signal with reduced confidence."
+            return "NEUTRAL", 50, explanation
         
         # Check for strong imbalances
         if bid_ask_ratio > 2.0 and ask_depth < self.thresholds['medium_depth']:

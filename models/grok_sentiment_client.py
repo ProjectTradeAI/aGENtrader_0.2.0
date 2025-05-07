@@ -101,11 +101,26 @@ class GrokSentimentClient:
                     {
                         "role": "system",
                         "content": (
-                            "You are a financial sentiment analysis expert. Analyze the sentiment of the "
-                            "text and provide a rating from 1 to 5 stars (5 being most positive), a confidence "
-                            "score between 0 and 1, and a brief explanation. Categorize the sentiment as "
-                            "'positive', 'neutral', or 'negative'. Respond with JSON in this format: "
-                            "{ 'rating': number, 'confidence': number, 'sentiment': string, 'reasoning': string }"
+                            "You are a cryptocurrency market sentiment expert providing detailed, specific analysis. "
+                            "IMPORTANT: Avoid generic observations like 'the text is factual in nature.' "
+                            "Be specific, decisive, and reference actual content in your analysis.\n\n"
+                            
+                            "ANALYZE THE PROVIDED TEXT AND DELIVER THE FOLLOWING:\n"
+                            "1. A rating from 1 to 5 (1=very bearish, 3=neutral, 5=very bullish)\n"
+                            "2. A confidence score between 0 and 1 based on the specificity and relevance of the data\n"
+                            "3. A clear sentiment classification as 'bullish', 'neutral', or 'bearish'\n"
+                            "4. A detailed reasoning that references specific indicators, metrics, or statements\n\n"
+                            
+                            "GUIDELINES:\n"
+                            "- Identify any contradictions between price action and sentiment indicators\n"
+                            "- Explicitly note when technical factors contradict fundamental factors\n"
+                            "- Prioritize specificity over generalization in your analysis\n"
+                            "- If the data shows mixed signals, explain the contradiction\n"
+                            "- Include specific data points that influenced your conclusion\n\n"
+                            
+                            "Respond with JSON in this format: "
+                            "{ 'rating': number, 'confidence': number, 'sentiment': string, 'reasoning': string, "
+                            "'key_factors': [string, string], 'contradictions': string }"
                         )
                     },
                     {
@@ -199,16 +214,25 @@ class GrokSentimentClient:
                     {
                         "role": "system",
                         "content": (
-                            "You are a financial market analyst specializing in crypto sentiment analysis. "
-                            "Analyze the following news items and provide: "
-                            "1. An overall market sentiment (positive, neutral, or negative) "
-                            "2. A confidence score from 0-1 "
-                            "3. Individual sentiment for each news item (positive, neutral, or negative) "
-                            "4. A rating from 1-5 for each item "
-                            "5. A brief summary of the overall sentiment implications "
+                            "You are a crypto market sentiment expert providing detailed, specific analysis. "
+                            "IMPORTANT: Avoid generic observations like 'the text is factual in nature.' Be specific and decisive.\n\n"
+                            
+                            "ANALYZE THE NEWS ITEMS AND PROVIDE:\n"
+                            "1. An overall market sentiment (bullish, neutral, or bearish) with specific justification\n"
+                            "2. A confidence score from 0-1 based on the quality and consistency of the data\n"
+                            "3. Individual sentiment analysis for each news item (bullish, neutral, or bearish)\n"
+                            "4. A rating from 1-5 for each item (1=very bearish, 3=neutral, 5=very bullish)\n"
+                            "5. A specific summary that references actual content, not generic observations\n\n"
+                            
+                            "GUIDELINES:\n"
+                            "- Identify any contradictions between different news items\n"
+                            "- Note when news is suggesting a trend change or continuation\n"
+                            "- Consider market impact beyond just the factual content\n"
+                            "- Be critical and interpretive, not just descriptive\n\n"
+                            
                             "Respond with JSON formatted as: "
                             "{ 'overall_sentiment': string, 'confidence': number, 'summary': string, "
-                            "'items': [{ 'text': string, 'sentiment': string, 'rating': number }] }"
+                            "'items': [{ 'text': string, 'sentiment': string, 'rating': number, 'reasoning': string }] }"
                         )
                     },
                     {
@@ -268,7 +292,7 @@ class GrokSentimentClient:
             sentiment_result: The result from analyze_sentiment or analyze_market_news
             
         Returns:
-            Dictionary with signal, confidence, and reasoning fields
+            Dictionary with signal, confidence, reasoning, and additional metadata fields
         """
         # Extract data from sentiment result
         if "overall_sentiment" in sentiment_result:
@@ -276,30 +300,59 @@ class GrokSentimentClient:
             sentiment = sentiment_result.get("overall_sentiment", "neutral").lower()
             confidence = sentiment_result.get("confidence", 0.5)
             reasoning = sentiment_result.get("summary", "No summary provided")
+            
+            # Extract additional metadata if available
+            items = sentiment_result.get("items", [])
+            total_ratings = sum(item.get("rating", 3) for item in items) if items else 0
+            avg_rating = total_ratings / len(items) if items else 3
+            
+            # Collect key signals from news items
+            key_signals = []
+            for item in items[:3]:  # Use top 3 items
+                if "text" in item and "sentiment" in item:
+                    key_signals.append(f"{item['text'][:50]}... ({item['sentiment']})")
         else:
             # This is from analyze_sentiment
             sentiment = sentiment_result.get("sentiment", "neutral").lower()
             confidence = sentiment_result.get("confidence", 0.5)
             reasoning = sentiment_result.get("reasoning", "No reasoning provided")
+            avg_rating = sentiment_result.get("rating", 3)
             
-        # Convert sentiment to signal
+            # Collect key factors if available
+            key_signals = sentiment_result.get("key_factors", [])
+            
+            # Get contradictions if available
+            contradictions = sentiment_result.get("contradictions", "")
+            if contradictions and len(contradictions) > 5:
+                if "reasoning" in sentiment_result:
+                    reasoning += f" Contradictions: {contradictions}"
+            
+        # Convert sentiment to signal based on updated sentiment naming
         signal_mapping = {
             "positive": "BUY",
-            "neutral": "HOLD",
+            "bullish": "BUY",
+            "neutral": "NEUTRAL",  # Changed from HOLD to NEUTRAL for consistency
+            "bearish": "SELL",
             "negative": "SELL"
         }
         
-        signal = signal_mapping.get(sentiment, "HOLD")
+        # Map sentiment to signal, defaulting to NEUTRAL
+        signal = signal_mapping.get(sentiment.lower(), "NEUTRAL")
         
         # Scale confidence to percentage (0-100)
         confidence_pct = int(confidence * 100)
         
-        # Include actual_temperature if it exists in the sentiment_result
+        # Create result with enhanced information
         result = {
             "signal": signal,
             "confidence": confidence_pct,
-            "reasoning": reasoning
+            "reasoning": reasoning,
+            "rating": avg_rating  # Include the numerical rating
         }
+        
+        # Add key signals if we have them
+        if key_signals:
+            result["key_signals"] = key_signals
         
         # Add timestamp and request_id for traceability
         result["timestamp"] = datetime.now().isoformat()
@@ -308,5 +361,9 @@ class GrokSentimentClient:
         # Add actual_temperature if available
         if "actual_temperature" in sentiment_result:
             result["actual_temperature"] = sentiment_result["actual_temperature"]
+        
+        # Add source information for debugging
+        source_type = "market_news" if "overall_sentiment" in sentiment_result else "text_sentiment"
+        result["source_type"] = source_type
         
         return result

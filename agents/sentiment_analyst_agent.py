@@ -58,8 +58,18 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         # Initialize Grok client if available
         self.grok_client = GrokSentimentClient() if GrokSentimentClient else None
         
-        if self.grok_client and not self.grok_client.enabled:
-            self.logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
+        # Add convenience properties to the client for compatibility
+        if self.grok_client:
+            # Add enabled property if it doesn't exist
+            if not hasattr(self.grok_client, 'enabled'):
+                self.grok_client.enabled = self.grok_client.initialized
+            
+            # Add analyze_market_news method if it doesn't exist
+            if not hasattr(self.grok_client, 'analyze_market_news'):
+                self.grok_client.analyze_market_news = self.grok_client.analyze_sentiment
+                
+            if not self.grok_client.enabled:
+                self.logger.warning("Grok client not enabled. Check XAI_API_KEY and OpenAI package.")
         
         # Agent-specific configuration
         self.config = config or {}
@@ -393,26 +403,36 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             if not sentiments:
                 self.logger.info("No specific sentiment data provided, analyzing general market sentiment")
                 
-                # Gather rich context data for enhanced sentiment analysis
-                if isinstance(symbol, dict) and 'symbol' in symbol:
-                    symbol_str = symbol['symbol']
+                # Gather rich context data for enhanced sentiment analysis using market_context_helper
+                from utils.market_context_helper import get_symbol_from_context, enrich_context_for_agent
+                
+                # Get the symbol and base asset
+                symbol_str = get_symbol_from_context(market_data, default_symbol='BTC/USDT')
+                if isinstance(symbol, str):
+                    symbol_str = symbol  # Override from argument if provided as string
+                
+                # Extract base asset from symbol
+                if '/' in symbol_str:
+                    base_asset = symbol_str.split('/')[0]
                 else:
-                    symbol_str = str(symbol) if symbol is not None else 'BTC/USDT'
-                base_asset = symbol_str.split('/')[0] if '/' in symbol_str else symbol_str
+                    base_asset = symbol_str
                 
-                # Extract price data if available
-                current_price = 0.0
-                price_change_24h = 0.0
-                price_change_1h = 0.0
+                # Enrich market data with sentiment-specific context
+                enriched_market_data = enrich_context_for_agent(market_data, agent_type="sentiment", default_symbol=symbol_str)
+                
+                # Extract price data from enriched market data
+                from utils.market_context_helper import get_price_from_context, get_price_change_from_context
+                
+                # Get pricing data from enriched market context
+                current_price = get_price_from_context(enriched_market_data, default_price=0.0)
+                price_change_24h = get_price_change_from_context(enriched_market_data, period="24h", default_change=0.0)
+                price_change_1h = get_price_change_from_context(enriched_market_data, period="1h", default_change=0.0)
+                
+                # Try to get volume change
                 volume_change = 0.0
-                
-                # Try to get pricing data from market_data or from data_fetcher
-                if market_data:
-                    if isinstance(market_data, dict):
-                        current_price = market_data.get('price', market_data.get('close', 0.0))
-                        price_change_24h = market_data.get('price_change_24h', market_data.get('change_percent', 0.0))
-                        price_change_1h = market_data.get('price_change_1h', 0.0)
-                        volume_change = market_data.get('volume_change_24h', market_data.get('volume_change', 0.0))
+                if isinstance(enriched_market_data, dict):
+                    volume_change = enriched_market_data.get('volume_change_24h', 
+                                  enriched_market_data.get('volume_change', 0.0))
                 
                 # If we have a data_fetcher, try to get the latest data
                 if self.data_fetcher and current_price == 0.0:

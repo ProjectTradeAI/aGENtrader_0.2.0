@@ -391,13 +391,67 @@ class LiveTradingSystem:
         """Run all analysis agents on the market data."""
         results = {}
         
+        # Create a unified MarketContext to ensure consistent data across agents
+        from core.market_context import MarketContext
+        
+        # Get current price from market data
+        current_price = 0.0
+        if market_data and isinstance(market_data, dict):
+            if "price" in market_data:
+                current_price = market_data.get("price", 0.0)
+            elif "ticker" in market_data and isinstance(market_data["ticker"], dict):
+                current_price = market_data["ticker"].get("price", market_data["ticker"].get("last", 0.0))
+            elif "close" in market_data:
+                current_price = market_data.get("close", 0.0)
+                
+        # Initialize the shared market context
+        market_context = MarketContext(
+            symbol=self.symbol,
+            timestamp=datetime.now(),
+            price=current_price
+        )
+        
+        # Extract additional data from market_data
+        if market_data and isinstance(market_data, dict):
+            # Extract price changes if available
+            day_change = market_data.get('price_change_24h', market_data.get('day_change', 0.0))
+            hour_change = market_data.get('price_change_1h', market_data.get('hour_change', 0.0))
+            volume = market_data.get('volume', 0.0)
+            volume_change = market_data.get('volume_change_24h', market_data.get('volume_change', 0.0))
+            
+            # Update market context
+            market_context.day_change = float(day_change)
+            market_context.hour_change = float(hour_change)
+            market_context.volume = float(volume)
+            market_context.volume_change = float(volume_change)
+            
+            # Update aliases
+            market_context.price_change_24h = market_context.day_change
+            market_context.price_change_1h = market_context.hour_change
+            market_context.volume_change_24h = market_context.volume_change
+        
+        # Extract OHLCV data if available to enrich the context
+        if market_data and isinstance(market_data, dict):
+            ohlcv_1h = market_data.get("ohlcv_1h") or market_data.get("ohlcv")
+            ohlcv_24h = market_data.get("ohlcv_24h") or market_data.get("ohlcv")
+            
+            if ohlcv_1h or ohlcv_24h:
+                market_context.enrich_with_ohlcv(ohlcv_1h, ohlcv_24h)
+                
+        # Log the market context for debugging
+        logger.info(f"Created unified market context for all agents: {market_context}")
+        
+        # Add market context to the market_data dictionary
+        market_data_with_context = {**market_data} if market_data else {}
+        market_data_with_context["market_context"] = market_context
+        
         # Run technical analysis
         try:
             logger.info("Running technical analysis")
             technical_analysis = self.technical_agent.analyze(
                 symbol=self.symbol,
                 interval=self.interval,
-                market_data=market_data
+                market_data=market_data_with_context
             )
             results["technical_analysis"] = technical_analysis
         except Exception as e:
@@ -410,7 +464,7 @@ class LiveTradingSystem:
             sentiment_analysis = self.sentiment_agent.analyze(
                 symbol=self.symbol,
                 interval=self.interval,
-                market_data=market_data
+                market_data=market_data_with_context
             )
             results["sentiment_analysis"] = sentiment_analysis
         except Exception as e:
@@ -423,7 +477,7 @@ class LiveTradingSystem:
             sentiment_aggregator_analysis = self.sentiment_aggregator.analyze(
                 symbol=self.symbol,
                 interval=self.interval,
-                market_data=market_data
+                market_data=market_data_with_context
             )
             results["sentiment_aggregator"] = sentiment_aggregator_analysis
         except Exception as e:
@@ -436,7 +490,7 @@ class LiveTradingSystem:
             liquidity_analysis = self.liquidity_agent.analyze(
                 symbol=self.symbol,
                 interval=self.interval,
-                market_data=market_data
+                market_data=market_data_with_context
             )
             results["liquidity_analysis"] = liquidity_analysis
         except Exception as e:
@@ -449,7 +503,7 @@ class LiveTradingSystem:
             funding_rate_analysis = self.funding_rate_agent.analyze(
                 symbol=self.symbol,
                 interval=self.interval,
-                market_data=market_data
+                market_data=market_data_with_context
             )
             results["funding_rate_analysis"] = funding_rate_analysis
         except Exception as e:
@@ -462,12 +516,15 @@ class LiveTradingSystem:
             open_interest_analysis = self.open_interest_agent.analyze(
                 symbol=self.symbol,
                 interval=self.interval,
-                market_data=market_data
+                market_data=market_data_with_context
             )
             results["open_interest_analysis"] = open_interest_analysis
         except Exception as e:
             logger.error(f"Error in open interest analysis: {e}")
             results["open_interest_analysis"] = {"error": str(e), "signal": "NEUTRAL", "confidence": 0}
+        
+        # Add the market context to the results for the decision agent to use
+        results["market_context"] = market_context.as_dict()
         
         return results
     
@@ -479,9 +536,17 @@ class LiveTradingSystem:
             # Get current price for reference
             current_price = self._get_current_price()
             
+            # Check if market_context is in the analysis results
+            market_context_dict = None
+            if "market_context" in analysis_results:
+                market_context_dict = analysis_results["market_context"]
+                logger.info(f"Using market context in decision making: {market_context_dict}")
+            
             # Use the decision agent to make a weighted decision
             decision_result = self.decision_agent.make_decision(
-                agent_analyses=analysis_results
+                agent_analyses=analysis_results,
+                symbol=self.symbol,
+                interval=self.interval
             )
             
             # Log the decision details
@@ -491,14 +556,21 @@ class LiveTradingSystem:
                 logger.info(f"Decision agent: {signal} with confidence {confidence}%")
             
             # Generate trade plan using the TradePlanAgent
+            # Also pass market_context if available
+            market_data_for_trade_plan = {
+                "symbol": self.symbol,
+                "interval": self.interval,
+                "current_price": current_price,
+                "analysis_results": analysis_results
+            }
+            
+            # Add market context to the trade plan data if available
+            if market_context_dict:
+                market_data_for_trade_plan["market_context"] = market_context_dict
+                
             trade_plan = self.trade_plan_agent.generate_trade_plan(
                 decision=decision_result,
-                market_data={
-                    "symbol": self.symbol,
-                    "interval": self.interval,
-                    "current_price": current_price,
-                    "analysis_results": analysis_results
-                }
+                market_data=market_data_for_trade_plan
             )
             
             # Generate tone summary using the ToneAgent

@@ -1,369 +1,188 @@
 """
-aGENtrader v2 Grok Sentiment Analysis Client
+aGENtrader v0.2.2 - Grok Sentiment Client Module
 
-This module interfaces with xAI's Grok API to provide sentiment analysis 
-on market-related text content. It uses the same patterns and practices as 
-the OpenAI API for easy integration.
+This module provides specialized sentiment analysis functionality using the 
+Grok model, extending the base GrokClient with sentiment-specific methods.
 """
+
 import os
-import logging
 import json
-import random
-import uuid
-from datetime import datetime
-from typing import Dict, Any, List, Optional, Union
+import logging
+from typing import Dict, Any, List, Optional, Tuple, Union
 import time
 
-# Try to import OpenAI client which is used for the xAI API
-try:
-    import openai
-    from openai import OpenAI
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    logging.warning("OpenAI package not available; Grok sentiment analysis will not function")
+# Import the base GrokClient
+from models.grok_client import GrokClient
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("GrokSentimentClient")
+logger = logging.getLogger("grok_sentiment_client")
 
 class GrokSentimentClient:
     """
-    Client for interfacing with xAI's Grok API for sentiment analysis.
-    
-    This class provides methods to analyze text for sentiment and extract
-    key insights using Grok models.
+    Specialized client for sentiment analysis using xAI's Grok models.
+    Extends GrokClient with specific sentiment analysis capabilities.
     """
     
-    def __init__(self):
-        """Initialize the Grok sentiment client."""
-        # Check API key availability
-        self.api_key = os.environ.get("XAI_API_KEY")
-        
-        if not self.api_key:
-            logger.warning("XAI_API_KEY not available in environment. Grok sentiment analysis disabled.")
-            self.enabled = False
-            return
-            
-        if not OPENAI_AVAILABLE:
-            logger.warning("OpenAI package not installed. Grok sentiment analysis disabled.")
-            self.enabled = False
-            return
-            
-        # Initialize OpenAI client with the xAI base URL
-        try:
-            self.client = OpenAI(
-                base_url="https://api.x.ai/v1",
-                api_key=self.api_key
-            )
-            logger.info("Grok sentiment client initialized successfully")
-            self.enabled = True
-        except Exception as e:
-            logger.error(f"Failed to initialize Grok client: {str(e)}")
-            self.enabled = False
-    
-    def analyze_sentiment(self, text: str, temperature: float = 0.7) -> Dict[str, Any]:
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "grok-2-1212",
+        temperature: float = 0.5
+    ):
         """
-        Analyze the sentiment of a text.
+        Initialize the Grok sentiment client.
         
         Args:
-            text: The text to analyze
-            temperature: The temperature to use for generation (0.0 to 1.0)
-            
-        Returns:
-            Dictionary containing sentiment analysis with keys:
-            - rating: 1-5 star rating (5 being most positive)
-            - confidence: 0-1 confidence score
-            - sentiment: 'positive', 'neutral', or 'negative'
-            - reasoning: Brief explanation of the sentiment
-            - actual_temperature: The temperature that was actually used
+            api_key: xAI API key (defaults to XAI_API_KEY environment variable)
+            model: Grok model to use (default: grok-2-1212)
+            temperature: Sampling temperature (default: 0.5, lower for more consistent results)
         """
-        if not self.enabled:
-            logger.warning("Grok sentiment analysis is disabled. Returning neutral sentiment.")
-            return {
-                "rating": 3,
-                "confidence": 0.5,
-                "sentiment": "neutral",
-                "reasoning": "Grok sentiment analysis is disabled.",
-                "actual_temperature": 0.0
-            }
-            
-        try:
-            # Handle dynamic temperature (-1 means use random temperature between 0.6 and 0.9)
-            actual_temperature = temperature
-            if temperature == -1:
-                actual_temperature = round(0.6 + 0.3 * random.random(), 2)  # Random between 0.6 and 0.9
-                logger.info(f"Using dynamic temperature: {actual_temperature}")
-            
-            response = self.client.chat.completions.create(
-                model="grok-2-1212",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a cryptocurrency market sentiment expert providing detailed, specific analysis. "
-                            "IMPORTANT: Avoid generic observations like 'the text is factual in nature.' "
-                            "Be specific, decisive, and reference actual content in your analysis.\n\n"
-                            
-                            "ANALYZE THE PROVIDED TEXT AND DELIVER THE FOLLOWING:\n"
-                            "1. A rating from 1 to 5 (1=very bearish, 3=neutral, 5=very bullish)\n"
-                            "2. A confidence score between 0 and 1 based on the specificity and relevance of the data\n"
-                            "3. A clear sentiment classification as 'bullish', 'neutral', or 'bearish'\n"
-                            "4. A detailed reasoning that references specific indicators, metrics, or statements\n\n"
-                            
-                            "GUIDELINES:\n"
-                            "- Identify any contradictions between price action and sentiment indicators\n"
-                            "- Explicitly note when technical factors contradict fundamental factors\n"
-                            "- Prioritize specificity over generalization in your analysis\n"
-                            "- If the data shows mixed signals, explain the contradiction\n"
-                            "- Include specific data points that influenced your conclusion\n\n"
-                            
-                            "Respond with JSON in this format: "
-                            "{ 'rating': number, 'confidence': number, 'sentiment': string, 'reasoning': string, "
-                            "'key_factors': [string, string], 'contradictions': string }"
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": text
-                    }
-                ],
-                response_format={"type": "json_object"},
-                temperature=actual_temperature
-            )
-            
-            # Check for empty or invalid response
-            if not response or not response.choices or not response.choices[0].message or not response.choices[0].message.content:
-                raise ValueError("Empty or invalid response received from Grok API")
-            
-            content = response.choices[0].message.content
-            
-            # Check if content is valid before parsing JSON
-            if not content or not content.strip():
-                raise ValueError("Empty content received from Grok API")
-                
-            try:
-                result = json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from Grok API: {e}, Content: {content[:100]}...")
-                raise ValueError(f"Invalid JSON format in API response: {str(e)}")
-            
-            # Validate response format and enforce constraints
-            rating = int(max(1, min(5, round(result.get("rating", 3)))))
-            confidence = float(max(0, min(1, result.get("confidence", 0.5))))
-            sentiment = result.get("sentiment", "neutral").lower()
-            
-            # Ensure sentiment is one of the valid values
-            if sentiment not in ["positive", "neutral", "negative"]:
-                sentiment = "neutral"
-                
-            reasoning = result.get("reasoning", "No reasoning provided")
-                
-            return {
-                "rating": rating,
-                "confidence": confidence,
-                "sentiment": sentiment,
-                "reasoning": reasoning,
-                "actual_temperature": actual_temperature
-            }
-                
-        except Exception as e:
-            logger.error(f"Error during sentiment analysis: {str(e)}")
-            # Return neutral sentiment on error with the actual_temperature
-            return {
-                "rating": 3,
-                "confidence": 0.5,
-                "sentiment": "neutral",
-                "reasoning": f"Error during analysis: {str(e)}",
-                "actual_temperature": temperature  # Use the requested temperature even if it failed
-            }
-    
-    def analyze_market_news(self, news_items: List[str], temperature: float = 0.7) -> Dict[str, Any]:
-        """
-        Analyze sentiment from a list of market news items.
+        # Initialize the base Grok client
+        self.client = GrokClient(
+            api_key=api_key,
+            model=model,
+            temperature=temperature,
+            max_tokens=2048  # Larger context for sentiment analysis
+        )
         
-        Args:
-            news_items: List of news headlines or short articles
-            temperature: The temperature to use for generation (0.0 to 1.0 or -1 for dynamic)
-            
-        Returns:
-            Dictionary with overall sentiment analysis and 
-            individual sentiment for each news item
-        """
-        if not self.enabled:
-            logger.warning("Grok sentiment analysis is disabled. Returning neutral sentiment.")
-            return {
-                "overall_sentiment": "neutral",
-                "confidence": 0.5,
-                "items": [{"text": item, "sentiment": "neutral", "rating": 3} for item in news_items]
-            }
-            
-        try:
-            # Combine news items into a single prompt
-            combined_text = "\n".join([f"- {item}" for item in news_items])
-            
-            # Handle dynamic temperature (-1 means use random temperature between 0.6 and 0.9)
-            actual_temperature = temperature
-            if temperature == -1:
-                actual_temperature = round(0.6 + 0.3 * random.random(), 2)  # Random between 0.6 and 0.9
-                logger.info(f"Using dynamic temperature for news analysis: {actual_temperature}")
-            
-            response = self.client.chat.completions.create(
-                model="grok-2-1212",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a crypto market sentiment expert providing detailed, specific analysis. "
-                            "IMPORTANT: Avoid generic observations like 'the text is factual in nature.' Be specific and decisive.\n\n"
-                            
-                            "ANALYZE THE NEWS ITEMS AND PROVIDE:\n"
-                            "1. An overall market sentiment (bullish, neutral, or bearish) with specific justification\n"
-                            "2. A confidence score from 0-1 based on the quality and consistency of the data\n"
-                            "3. Individual sentiment analysis for each news item (bullish, neutral, or bearish)\n"
-                            "4. A rating from 1-5 for each item (1=very bearish, 3=neutral, 5=very bullish)\n"
-                            "5. A specific summary that references actual content, not generic observations\n\n"
-                            
-                            "GUIDELINES:\n"
-                            "- Identify any contradictions between different news items\n"
-                            "- Note when news is suggesting a trend change or continuation\n"
-                            "- Consider market impact beyond just the factual content\n"
-                            "- Be critical and interpretive, not just descriptive\n\n"
-                            
-                            "Respond with JSON formatted as: "
-                            "{ 'overall_sentiment': string, 'confidence': number, 'summary': string, "
-                            "'items': [{ 'text': string, 'sentiment': string, 'rating': number, 'reasoning': string }] }"
-                        )
-                    },
-                    {
-                        "role": "user",
-                        "content": f"Analyze these market news items:\n{combined_text}"
-                    }
-                ],
-                response_format={"type": "json_object"},
-                temperature=actual_temperature
-            )
-            
-            # Check for empty or invalid response
-            if not response or not response.choices or not response.choices[0].message or not response.choices[0].message.content:
-                raise ValueError("Empty or invalid response received from Grok API")
-            
-            content = response.choices[0].message.content
-            
-            # Check if content is valid before parsing JSON
-            if not content or not content.strip():
-                raise ValueError("Empty content received from Grok API")
-                
-            try:
-                result = json.loads(content)
-            except json.JSONDecodeError as e:
-                logger.error(f"Failed to parse JSON from Grok API: {e}, Content: {content[:100]}...")
-                raise ValueError(f"Invalid JSON format in API response: {str(e)}")
-            
-            # Add actual temperature to the result for tracking
-            result["actual_temperature"] = actual_temperature
-            
-            # Add unique request ID and timestamp
-            result["request_id"] = str(uuid.uuid4())
-            result["timestamp"] = datetime.now().isoformat()
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error during market news analysis: {str(e)}")
-            # Return neutral sentiment on error
-            error_result = {
-                "overall_sentiment": "neutral",
-                "confidence": 0.5,
-                "summary": f"Error during analysis: {str(e)}",
-                "items": [{"text": item, "sentiment": "neutral", "rating": 3} for item in news_items],
-                "actual_temperature": temperature,  # Use the requested temperature value
-                "request_id": str(uuid.uuid4()),
-                "timestamp": datetime.now().isoformat(),
-                "error": str(e)
-            }
-            return error_result
-            
-    def convert_sentiment_to_signal(self, sentiment_result: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Convert sentiment analysis result to a trading signal format.
+        self.model = model
+        self.temperature = temperature
         
-        Args:
-            sentiment_result: The result from analyze_sentiment or analyze_market_news
-            
-        Returns:
-            Dictionary with signal, confidence, reasoning, and additional metadata fields
-        """
-        # Extract data from sentiment result
-        if "overall_sentiment" in sentiment_result:
-            # This is from analyze_market_news
-            sentiment = sentiment_result.get("overall_sentiment", "neutral").lower()
-            confidence = sentiment_result.get("confidence", 0.5)
-            reasoning = sentiment_result.get("summary", "No summary provided")
-            
-            # Extract additional metadata if available
-            items = sentiment_result.get("items", [])
-            total_ratings = sum(item.get("rating", 3) for item in items) if items else 0
-            avg_rating = total_ratings / len(items) if items else 3
-            
-            # Collect key signals from news items
-            key_signals = []
-            for item in items[:3]:  # Use top 3 items
-                if "text" in item and "sentiment" in item:
-                    key_signals.append(f"{item['text'][:50]}... ({item['sentiment']})")
+        # Record initialization status
+        self.initialized = self.client.initialized
+        
+        if self.initialized:
+            logger.info(f"GrokSentimentClient initialized with model {model}")
         else:
-            # This is from analyze_sentiment
-            sentiment = sentiment_result.get("sentiment", "neutral").lower()
-            confidence = sentiment_result.get("confidence", 0.5)
-            reasoning = sentiment_result.get("reasoning", "No reasoning provided")
-            avg_rating = sentiment_result.get("rating", 3)
-            
-            # Collect key factors if available
-            key_signals = sentiment_result.get("key_factors", [])
-            
-            # Get contradictions if available
-            contradictions = sentiment_result.get("contradictions", "")
-            if contradictions and len(contradictions) > 5:
-                if "reasoning" in sentiment_result:
-                    reasoning += f" Contradictions: {contradictions}"
-            
-        # Convert sentiment to signal based on updated sentiment naming
-        signal_mapping = {
-            "positive": "BUY",
-            "bullish": "BUY",
-            "neutral": "NEUTRAL",  # Changed from HOLD to NEUTRAL for consistency
-            "bearish": "SELL",
-            "negative": "SELL"
-        }
+            logger.warning("GrokSentimentClient initialization failed. Check API key and client.")
+    
+    def analyze_sentiment(
+        self, 
+        text: str,
+        temperature: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze sentiment in the provided text.
         
-        # Map sentiment to signal, defaulting to NEUTRAL
-        signal = signal_mapping.get(sentiment.lower(), "NEUTRAL")
+        Args:
+            text: Text to analyze for sentiment
+            temperature: Optional temperature override
+            
+        Returns:
+            Dictionary with sentiment analysis results
+        """
+        return self.client.analyze_sentiment(text, temperature)
+    
+    def convert_sentiment_to_signal(self, sentiment_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert a sentiment analysis result to a trading signal format.
         
-        # Scale confidence to percentage (0-100)
-        confidence_pct = int(confidence * 100)
+        Args:
+            sentiment_data: Dictionary with sentiment analysis results
+            
+        Returns:
+            Dictionary with trading signal format
+        """
+        if not sentiment_data:
+            return {
+                "signal": "NEUTRAL",
+                "confidence": 50,
+                "reasoning": "No sentiment data available"
+            }
+            
+        # Extract sentiment score and label
+        sentiment_score = sentiment_data.get("sentiment_score", 50)
+        sentiment_label = sentiment_data.get("sentiment_label", "neutral").lower()
+        confidence = sentiment_data.get("confidence", 60)
+        reasoning = sentiment_data.get("reasoning", "")
         
-        # Create result with enhanced information
-        result = {
+        # Map sentiment to trading signal
+        signal = "NEUTRAL"
+        if sentiment_label == "bullish" or sentiment_score >= 65:
+            signal = "BUY"
+        elif sentiment_label == "bearish" or sentiment_score <= 35:
+            signal = "SELL"
+            
+        # If sentiment is close to neutral but has high confidence, still use NEUTRAL
+        if sentiment_score > 40 and sentiment_score < 60:
+            signal = "NEUTRAL"
+            
+        # If very close to neutral (45-55), reduce confidence
+        if 45 <= sentiment_score <= 55:
+            confidence = min(confidence, 70)
+            
+        # Scale confidence based on how extreme the sentiment is
+        if signal != "NEUTRAL":
+            # Stronger sentiment should have higher confidence
+            sentiment_strength = abs(sentiment_score - 50) / 50  # 0.0 to 1.0
+            # Blend original confidence with sentiment strength
+            confidence = (confidence * 0.7) + (sentiment_strength * 100 * 0.3)
+            # Ensure within bounds
+            confidence = max(min(confidence, 100), 0)
+            
+        return {
             "signal": signal,
-            "confidence": confidence_pct,
+            "confidence": round(confidence),
             "reasoning": reasoning,
-            "rating": avg_rating  # Include the numerical rating
+            "sentiment_score": sentiment_score,
+            "sentiment_label": sentiment_label,
+            "source": "grok_sentiment"
         }
+    
+    def analyze_and_get_signal(
+        self, 
+        text: str,
+        temperature: Optional[float] = None
+    ) -> Dict[str, Any]:
+        """
+        Analyze sentiment and convert directly to a trading signal.
         
-        # Add key signals if we have them
-        if key_signals:
-            result["key_signals"] = key_signals
-        
-        # Add timestamp and request_id for traceability
-        result["timestamp"] = datetime.now().isoformat()
-        result["request_id"] = str(uuid.uuid4())
-        
-        # Add actual_temperature if available
-        if "actual_temperature" in sentiment_result:
-            result["actual_temperature"] = sentiment_result["actual_temperature"]
-        
-        # Add source information for debugging
-        source_type = "market_news" if "overall_sentiment" in sentiment_result else "text_sentiment"
-        result["source_type"] = source_type
-        
-        return result
+        Args:
+            text: Text to analyze for sentiment
+            temperature: Optional temperature override
+            
+        Returns:
+            Dictionary with trading signal format
+        """
+        try:
+            # First analyze sentiment
+            sentiment_result = self.analyze_sentiment(text, temperature)
+            
+            # Then convert to signal format
+            return self.convert_sentiment_to_signal(sentiment_result)
+            
+        except Exception as e:
+            logger.error(f"Error in analyze_and_get_signal: {str(e)}")
+            return {
+                "signal": "NEUTRAL",
+                "confidence": 50,
+                "reasoning": f"Error analyzing sentiment: {str(e)}",
+                "error": True
+            }
+
+# Example usage
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    
+    # Test sentiment client
+    client = GrokSentimentClient()
+    
+    test_texts = [
+        "Bitcoin has surged 15% over the past week, with on-chain metrics showing strong accumulation from institutional investors. Exchange outflows have reached yearly highs.",
+        "Market sentiment for cryptocurrencies remains mixed as Bitcoin consolidates around the $48,000 level. Volume has been declining and the RSI shows neutral momentum.",
+        "Analysts are increasingly bearish on Bitcoin following the break of critical support at $42,000. Rising interest rates and regulatory concerns have dampened investor enthusiasm."
+    ]
+    
+    for i, text in enumerate(test_texts):
+        try:
+            print(f"\nTest {i+1}:")
+            print(f"Text: {text[:50]}...")
+            
+            # Get signal
+            result = client.analyze_and_get_signal(text)
+            print(f"Signal: {result['signal']}")
+            print(f"Confidence: {result['confidence']}%")
+            print(f"Reasoning: {result['reasoning'][:100]}...")
+            
+        except Exception as e:
+            print(f"Error: {e}")

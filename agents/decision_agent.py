@@ -25,6 +25,7 @@ sys.path.append(parent_dir)
 
 # Import required modules
 from models.llm_client import LLMClient
+from core.market_context import MarketContext
 
 # Import error handling utilities
 from utils.error_handler import (
@@ -296,6 +297,77 @@ class DecisionAgent:
             interval = interval or self.default_interval
             # Update the instance variable for interval (needed for conflict logging)
             self.interval = interval
+            
+            # Create or update market context
+            # Initialize MarketContext with basic information
+            current_price = 0.0
+            # Try to find the current price from market_data or analyst results
+            if market_data and isinstance(market_data, dict):
+                if "price" in market_data:
+                    current_price = market_data.get("price", 0.0)
+                elif "ticker" in market_data and isinstance(market_data["ticker"], dict):
+                    current_price = market_data["ticker"].get("price", 0.0)
+                elif "close" in market_data:
+                    current_price = market_data.get("close", 0.0)
+            
+            # If we still don't have price, try to get it from analyst results
+            if current_price == 0.0:
+                # Check for price in technical_analysis result
+                if "technical_analysis" in agent_analyses and isinstance(agent_analyses["technical_analysis"], dict):
+                    tech_analysis = agent_analyses["technical_analysis"]
+                    if "current_price" in tech_analysis:
+                        current_price = tech_analysis.get("current_price", 0.0)
+                
+            # Create a unified market context
+            market_context = MarketContext(
+                symbol=symbol,
+                timestamp=datetime.now(),
+                price=current_price
+            )
+            
+            # Extract additional data from market_data if available
+            if market_data and isinstance(market_data, dict):
+                # Look for price change data
+                day_change = market_data.get('price_change_24h', 
+                            market_data.get('day_change', 0.0))
+                hour_change = market_data.get('price_change_1h',
+                             market_data.get('hour_change', 0.0))
+                
+                # Update market context with these values
+                market_context.day_change = float(day_change)
+                market_context.hour_change = float(hour_change)
+                market_context.price_change_24h = market_context.day_change
+                market_context.price_change_1h = market_context.hour_change
+            
+            # Extract any OHLCV data if available in market_data to enrich context
+            if market_data and isinstance(market_data, dict):
+                # Look for 1h and 24h OHLCV data
+                ohlcv_1h = None
+                ohlcv_24h = None
+                
+                if "ohlcv" in market_data:
+                    # If there's a single OHLCV dataset, use it for both timeframes
+                    ohlcv_data = market_data.get("ohlcv")
+                    if isinstance(ohlcv_data, list) and len(ohlcv_data) > 0:
+                        # Use the same dataset for both timeframes if specific ones aren't available
+                        ohlcv_1h = ohlcv_data
+                        ohlcv_24h = ohlcv_data
+                
+                # Check for specific timeframe data
+                if "ohlcv_1h" in market_data:
+                    ohlcv_1h = market_data.get("ohlcv_1h")
+                if "ohlcv_24h" in market_data:
+                    ohlcv_24h = market_data.get("ohlcv_24h")
+                    
+                # Enrich context with OHLCV data if available
+                if ohlcv_1h or ohlcv_24h:
+                    market_context.enrich_with_ohlcv(ohlcv_1h, ohlcv_24h)
+            
+            # Log the created market context
+            self.logger.info(f"Created unified market context: {market_context}")
+            
+            # Store the current price for reference
+            self.current_price = market_context.price
             
             # Use provided agent weights if specified, otherwise use config weights
             agent_weights = agent_weights_override or self.agent_weights
@@ -1164,9 +1236,45 @@ class DecisionAgent:
         """
         self.logger.info("Making LLM-based decision from multiple analyses")
         
+        # Extract market context if available
+        market_context_data = None
+        market_context_description = ""
+        
+        if "market_context" in agent_analyses:
+            market_context_data = agent_analyses["market_context"]
+            # Generate a market context description for the LLM
+            if isinstance(market_context_data, dict):
+                self.logger.info(f"Using market context in LLM decision: {market_context_data}")
+                
+                # Extract key market data for the prompt
+                price = market_context_data.get("price", 0.0)
+                timestamp = market_context_data.get("timestamp", "unknown")
+                market_phase = market_context_data.get("market_phase", "unknown")
+                change_24h_pct = market_context_data.get("change_24h_pct", 0.0)
+                volume_24h = market_context_data.get("volume_24h", 0.0)
+                volatility = market_context_data.get("volatility", "unknown")
+                
+                # Format the market context description
+                market_context_description = f"""
+                CURRENT MARKET CONTEXT:
+                - Symbol: {symbol}
+                - Current Price: {price}
+                - Timestamp: {timestamp}
+                - 24h Change: {change_24h_pct}%
+                - 24h Volume: {volume_24h}
+                - Volatility: {volatility}
+                - Market Phase: {market_phase}
+                """
+        
         # Prepare agent contributions
         agent_contributions = {}
-        for analysis_key in agent_analyses.keys():
+        filtered_analyses = agent_analyses.copy()
+        
+        # Remove market_context from agent_analyses to avoid passing too much data to LLM
+        if "market_context" in filtered_analyses:
+            del filtered_analyses["market_context"]
+            
+        for analysis_key in filtered_analyses.keys():
             agent_name = self._get_agent_name_from_analysis_key(analysis_key)
             agent_weight = self.agent_weights.get(agent_name, 1.0)
             if agent_name not in self.agent_weights:
@@ -1196,21 +1304,24 @@ class DecisionAgent:
             prompt = f"""
             As a trading decision agent, analyze the following inputs from specialized agents:
             
-            {json.dumps(agent_analyses, indent=2)}
+            {json.dumps(filtered_analyses, indent=2)}
             
-            Based on this analysis, make a trading decision for {symbol} with one of these actions: BUY, SELL, or HOLD.
+            {market_context_description}
+            
+            Based on this analysis and market context, make a trading decision for {symbol} with one of these actions: BUY, SELL, or HOLD.
             
             Assign a confidence score (0-100) to your decision, considering:
             - The quality and consistency of the data
             - Agreement or disagreement between different analyses
             - Strength of the signals
+            - The current market context
             
             Format your response as a JSON object with the following structure:
             {{
                 "action": "[BUY/SELL/HOLD]",
                 "pair": "{symbol}",
                 "confidence": [0-100],
-                "reason": "[concise explanation of decision]"
+                "reason": "[concise explanation of decision with reference to market context]"
             }}
             
             Only return a valid JSON object, nothing else.

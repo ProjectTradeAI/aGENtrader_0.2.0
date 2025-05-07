@@ -1,231 +1,270 @@
 """
-Grok Client Module for aGENtrader v0.2.2
+aGENtrader v0.2.2 - Grok Client Module
 
-This module provides a client for interacting with xAI's Grok API,
-following similar patterns to OpenAI's API structure.
+This module provides integration with xAI's Grok models for AI text generation,
+following a similar pattern to OpenAI's API but using the xAI endpoints.
 """
 
 import os
 import json
 import logging
+import requests
 from typing import Dict, Any, List, Optional, Union
+import time
 
-import openai
-from openai import OpenAI
+# Import OpenAI for SDK compatibility
+try:
+    import openai
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
 
 # Configure logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("grok_client")
 
 class GrokClient:
     """
-    Client for interacting with xAI's Grok API.
-    
-    This client follows similar patterns to OpenAI's API structure,
-    making it familiar for developers who have worked with OpenAI's services.
+    Client for interacting with xAI's Grok models.
+    Uses OpenAI's Python SDK with xAI's base URL.
     """
     
-    def __init__(self):
-        """Initialize the Grok client"""
-        self.api_key = os.environ.get("XAI_API_KEY")
-        self.base_url = "https://api.x.ai/v1"
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        model: str = "grok-2-1212",
+        temperature: float = 0.7,
+        max_tokens: int = 1024,
+        timeout: int = 60
+    ):
+        """
+        Initialize the Grok client.
         
+        Args:
+            api_key: xAI API key (defaults to XAI_API_KEY environment variable)
+            model: Grok model to use (default: grok-2-1212)
+            temperature: Sampling temperature (default: 0.7)
+            max_tokens: Maximum tokens in completion (default: 1024)
+            timeout: Request timeout in seconds (default: 60)
+        """
+        self.api_key = api_key or os.environ.get("XAI_API_KEY", "")
         if not self.api_key:
-            logger.warning("XAI_API_KEY not found in environment variables")
+            logger.warning("No xAI API key provided. Set XAI_API_KEY environment variable or pass api_key parameter.")
             
+        self.model = model
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        
+        # Initialize OpenAI client if available
         self.client = None
-        if self.api_key:
-            self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
-    
-    def is_available(self) -> bool:
-        """
-        Check if the Grok API is available
+        if OPENAI_AVAILABLE:
+            self.client = OpenAI(
+                api_key=self.api_key,
+                base_url="https://api.x.ai/v1"
+            )
+        else:
+            logger.warning("OpenAI SDK not available. Install with 'pip install openai' or 'npm install openai'")
+            
+        # Record initialization status
+        self.initialized = bool(self.api_key and (self.client or not OPENAI_AVAILABLE))
+        logger.info(f"GrokClient initialized with model {model}, SDK available: {OPENAI_AVAILABLE}")
         
-        Returns:
-            bool: True if API key is configured, False otherwise
+    def generate(
+        self,
+        prompt: str,
+        model: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        json_response: bool = False
+    ) -> str:
         """
-        return self.client is not None
-    
-    def summarize_text(self, text: str) -> str:
-        """
-        Summarize text using Grok model
+        Generate text using Grok model.
         
         Args:
-            text: Text to summarize
+            prompt: Text prompt to generate from
+            model: Override default model if provided
+            temperature: Override default temperature if provided
+            max_tokens: Override default max_tokens if provided
+            json_response: Whether to request and parse a JSON response
             
         Returns:
-            Summarized text
+            Generated text string
         """
-        if not self.is_available():
-            raise ValueError("Grok API is not available. Please check XAI_API_KEY.")
+        if not self.initialized:
+            raise ValueError("GrokClient not properly initialized. Check API key and dependencies.")
             
-        prompt = f"Please summarize the following text concisely while maintaining key points:\n\n{text}"
+        model = model or self.model
+        temperature = temperature if temperature is not None else self.temperature
+        max_tokens = max_tokens or self.max_tokens
         
-        try:
-            response = self.client.chat.completions.create(
-                model="grok-2-1212",
-                messages=[{"role": "user", "content": prompt}],
-            )
-            
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"Error summarizing text with Grok: {e}")
-            raise
-    
-    def analyze_sentiment(self, text: str) -> Dict[str, Any]:
-        """
-        Analyze sentiment of text using Grok model
+        # SDK-based approach (preferred)
+        if self.client:
+            try:
+                response_format = {"type": "json_object"} if json_response else None
+                
+                response = self.client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    response_format=response_format
+                )
+                
+                return response.choices[0].message.content
+                
+            except Exception as e:
+                logger.error(f"Error using Grok via SDK: {str(e)}")
+                raise ValueError(f"Grok API error: {str(e)}")
         
-        Args:
-            text: Text to analyze
-            
-        Returns:
-            Dictionary containing sentiment analysis results
-        """
-        if not self.is_available():
-            raise ValueError("Grok API is not available. Please check XAI_API_KEY.")
-            
-        try:
-            response = self.client.chat.completions.create(
-                model="grok-2-1212",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a sentiment analysis expert. Analyze the sentiment of the text and provide a rating from 1 to 5 stars and a confidence score between 0 and 1. Respond with JSON in this format: { 'rating': number, 'confidence': number }"
-                    },
-                    {
-                        "role": "user",
-                        "content": text,
-                    },
-                ],
-                response_format={"type": "json_object"},
-            )
-            
-            result = json.loads(response.choices[0].message.content)
-            
-            return {
-                "rating": max(1, min(5, round(result.get("rating", 3)))),
-                "confidence": max(0, min(1, result.get("confidence", 0.5))),
+        # Fallback to direct API calls if SDK not available
+        else:
+            # Construct API URL and headers
+            api_url = "https://api.x.ai/v1/chat/completions"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}"
             }
-        except Exception as e:
-            logger.error(f"Error analyzing sentiment with Grok: {e}")
-            raise
-    
-    def format_trade_summary(self, 
-                            trade_plan: Dict[str, Any], 
-                            agent_analyses: List[Dict[str, Any]],
-                            system_prompt: Optional[str] = None,
-                            style: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Generate a stylized trade summary using Grok model
-        
-        Args:
-            trade_plan: Dictionary containing trade plan details
-            agent_analyses: List of dictionaries containing agent analyses
-            system_prompt: Optional custom system prompt
-            style: Optional style specification (formal, casual, technical)
             
-        Returns:
-            Dictionary containing formatted summary
-        """
-        if not self.is_available():
-            raise ValueError("Grok API is not available. Please check XAI_API_KEY.")
+            # Construct request body
+            request_body = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": temperature,
+                "max_tokens": max_tokens
+            }
             
-        # Default system prompt if none provided
-        if not system_prompt:
-            system_prompt = (
-                "You are a trading summary expert for aGENtrader. "
-                "Your task is to create a summary of a trading decision with distinct voices for different analyst agents. "
-                "Format your response as JSON with keys: agent_comments, system_summary, and mood."
-            )
-            
-        # Add style guidance if provided
-        if style:
-            if style.lower() == "formal":
-                system_prompt += " Use professional, precise language appropriate for financial reports."
-            elif style.lower() == "casual":
-                system_prompt += " Use conversational, accessible language as if explaining to a friend."
-            elif style.lower() == "technical":
-                system_prompt += " Use detailed technical language with specific trading terminology."
-            
-        # Create a structured prompt
-        user_prompt = "Here is the trading plan and agent analyses to summarize:\n\n"
-        user_prompt += f"TRADE PLAN: {json.dumps(trade_plan, indent=2)}\n\n"
-        user_prompt += f"AGENT ANALYSES: {json.dumps(agent_analyses, indent=2)}\n\n"
-        user_prompt += "Create a summary with these components:\n"
-        user_prompt += "1. agent_comments: Comments from each agent with distinct voices\n"
-        user_prompt += "2. system_summary: Overall trade summary and rationale\n"
-        user_prompt += "3. mood: The overall market sentiment (bullish/bearish/neutral)"
-        
-        try:
-            response = self.client.chat.completions.create(
-                model="grok-2-1212",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"},
-                max_tokens=1500,
-                temperature=0.7
-            )
-            
-            # Parse the JSON response
-            result = json.loads(response.choices[0].message.content)
-            
-            # Ensure expected keys are present
-            required_keys = ["agent_comments", "system_summary", "mood"]
-            for key in required_keys:
-                if key not in result:
-                    result[key] = f"Missing {key} in response"
+            if json_response:
+                request_body["response_format"] = {"type": "json_object"}
+                
+            try:
+                response = requests.post(
+                    api_url,
+                    headers=headers,
+                    json=request_body,
+                    timeout=self.timeout
+                )
+                
+                # Check for successful response
+                if response.status_code == 200:
+                    try:
+                        data = response.json()
+                        return data["choices"][0]["message"]["content"]
+                    except (KeyError, IndexError) as e:
+                        logger.error(f"Error parsing Grok response: {str(e)}")
+                        raise ValueError(f"Failed to parse Grok response: {str(e)}")
+                else:
+                    logger.error(f"Grok API error: {response.status_code}, {response.text}")
+                    raise ValueError(f"Grok API returned error {response.status_code}: {response.text}")
                     
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error generating trade summary with Grok: {e}")
-            # Return a basic fallback response
-            return {
-                "agent_comments": f"Error generating agent comments: {str(e)}",
-                "system_summary": "Unable to generate summary due to API error",
-                "mood": "neutral"
-            }
+            except requests.RequestException as e:
+                logger.error(f"Request error using Grok API: {str(e)}")
+                raise ValueError(f"Grok API request failed: {str(e)}")
     
-    def analyze_image(self, base64_image: str) -> str:
+    def analyze_sentiment(
+        self,
+        text: str,
+        temperature: Optional[float] = None
+    ) -> Dict[str, Any]:
         """
-        Analyze image using Grok vision model
+        Analyze sentiment in provided text.
         
         Args:
-            base64_image: Base64-encoded image
+            text: Text to analyze for sentiment
+            temperature: Optional temperature override
             
         Returns:
-            Image analysis text
+            Dictionary with sentiment analysis results
         """
-        if not self.is_available():
-            raise ValueError("Grok API is not available. Please check XAI_API_KEY.")
-            
+        # Construct sentiment analysis prompt
+        prompt = f"""
+        Analyze the market sentiment in the following text.
+        
+        Text: {text}
+        
+        Provide a detailed analysis including:
+        1. Overall sentiment score (0-100, where 0 is extremely bearish, 50 is neutral, 100 is extremely bullish)
+        2. Key factors influencing the sentiment
+        3. Confidence in your assessment (0-100%)
+        4. Potential sentiment biases in the data
+        
+        Return your analysis as a JSON object with the following structure:
+        {{
+            "sentiment_score": [0-100],
+            "sentiment_label": "bearish"/"neutral"/"bullish",
+            "key_factors": [list of factors],
+            "confidence": [0-100],
+            "biases": [list of potential biases],
+            "reasoning": "detailed explanation of sentiment assessment"
+        }}
+        
+        Only return a valid JSON object, nothing else.
+        """
+        
         try:
-            response = self.client.chat.completions.create(
-                model="grok-2-vision-1212",
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Analyze this image in detail and describe its key elements, context, and any notable aspects."
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{base64_image}"
-                                }
-                            }
-                        ],
-                    },
-                ],
-                max_tokens=500,
-            )
+            temperature = temperature if temperature is not None else 0.4  # Lower temperature for more consistent results
+            response_str = self.generate(prompt, temperature=temperature, json_response=True)
             
-            return response.choices[0].message.content
+            # Parse JSON response
+            if isinstance(response_str, str):
+                try:
+                    result = json.loads(response_str)
+                    
+                    # Validate required fields
+                    required_fields = ["sentiment_score", "sentiment_label", "confidence", "reasoning"]
+                    for field in required_fields:
+                        if field not in result:
+                            raise ValueError(f"Missing required field '{field}' in sentiment analysis response")
+                            
+                    # Normalize response
+                    result["sentiment_score"] = max(0, min(100, result["sentiment_score"]))
+                    result["confidence"] = max(0, min(100, result["confidence"]))
+                    
+                    # Map sentiment_label to standard format if needed
+                    if result["sentiment_label"].lower() not in ["bullish", "bearish", "neutral"]:
+                        # Map other labels to our standard ones
+                        score = result["sentiment_score"]
+                        if score >= 60:
+                            result["sentiment_label"] = "bullish"
+                        elif score <= 40:
+                            result["sentiment_label"] = "bearish"
+                        else:
+                            result["sentiment_label"] = "neutral"
+                    
+                    # Add timestamp
+                    result["timestamp"] = time.time()
+                    
+                    return result
+                    
+                except json.JSONDecodeError as e:
+                    logger.error(f"Error decoding sentiment analysis JSON: {str(e)}")
+                    raise ValueError(f"Invalid sentiment analysis response format: {str(e)}")
             
         except Exception as e:
-            logger.error(f"Error analyzing image with Grok: {e}")
-            raise
+            logger.error(f"Error during sentiment analysis: {str(e)}")
+            raise ValueError(f"Sentiment analysis failed: {str(e)}")
+
+# Example usage
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    
+    # Test Grok client
+    client = GrokClient()
+    
+    # Test generation
+    try:
+        response = client.generate(
+            "What factors are currently affecting Bitcoin price?"
+        )
+        print(f"Grok response: {response}")
+    except Exception as e:
+        print(f"Generation error: {e}")
+    
+    # Test sentiment analysis
+    try:
+        sentiment = client.analyze_sentiment(
+            "Bitcoin has been showing strong signs of recovery amid institutional adoption, with positive on-chain metrics and decreasing selling pressure."
+        )
+        print(f"Sentiment analysis: {json.dumps(sentiment, indent=2)}")
+    except Exception as e:
+        print(f"Sentiment analysis error: {e}")

@@ -39,13 +39,14 @@ logger = logging.getLogger("SentimentAnalystAgent")
 class SentimentAnalystAgent(BaseAnalystAgent):
     """SentimentAnalystAgent for aGENtrader v0.2.2"""
     
-    def __init__(self, sentiment_provider=None, config=None):
+    def __init__(self, sentiment_provider=None, config=None, data_fetcher=None):
         """
         Initialize the sentiment analyst agent.
         
         Args:
             sentiment_provider: Provider for sentiment data
             config: Configuration dictionary
+            data_fetcher: Data fetcher for market data (optional)
         """
         self.version = "v0.2.2"
         super().__init__("SentimentAnalystAgent")
@@ -63,6 +64,7 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         # Agent-specific configuration
         self.config = config or {}
         self.data_sources = self.config.get("data_sources", ["news", "social"])
+        self.data_fetcher = data_fetcher  # Store the data fetcher
         
         # Sanity check configurations
         self.min_confidence_threshold = self.config.get("min_confidence_threshold", 40)
@@ -779,22 +781,24 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             "description": self.description,
             "config": self.config,
             "data_sources": self.data_sources,
-            "grok_available": self.grok_client is not None and self.grok_client.enabled
+            "grok_available": self.grok_client is not None and self.grok_client.enabled,
+            "has_data_fetcher": self.data_fetcher is not None
         }
         
     @classmethod
-    def from_dict(cls, state_dict: Dict[str, Any]) -> 'SentimentAnalystAgent':
+    def from_dict(cls, state_dict: Dict[str, Any], data_fetcher=None) -> 'SentimentAnalystAgent':
         """
         Create agent instance from dictionary.
         
         Args:
             state_dict: Dictionary containing agent state
+            data_fetcher: Optional data fetcher to pass to the new instance
             
         Returns:
             New SentimentAnalystAgent instance
         """
         config = state_dict.get("config", {})
-        return cls(config=config)
+        return cls(config=config, data_fetcher=data_fetcher)
 
 # For testing purposes
 if __name__ == "__main__":

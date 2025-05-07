@@ -64,6 +64,13 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         self.config = config or {}
         self.data_sources = self.config.get("data_sources", ["news", "social"])
         
+        # Sanity check configurations
+        self.min_confidence_threshold = self.config.get("min_confidence_threshold", 40)
+        self.max_confidence_threshold = self.config.get("max_confidence_threshold", 95)
+        self.max_sentiment_volatility = self.config.get("max_sentiment_volatility", 50)
+        self.min_source_count = self.config.get("min_source_count", 2)
+        self.max_data_age_hours = self.config.get("max_data_age_hours", 24)
+        
         self.logger.info(f"Sentiment Analyst Agent initialized with {len(self.data_sources)} data sources")
         
     def get_agent_config(self) -> Dict[str, Any]:
@@ -440,7 +447,37 @@ class SentimentAnalystAgent(BaseAnalystAgent):
                         "sources_analyzed": len(sentiments),
                         "additional_sources": sentiments[1:]
                     }
+                
+                # Add full sentiment data for sanity checking
+                signal_result["full_sentiment_data"] = {
+                    "sentiment_score": primary_sentiment.get("sentiment_score", 50),
+                    "sentiment_history": sentiments,
+                    "sources": [s.get("source", "unknown") for s in sentiments]
+                }
+                
+                # Add contributing sources list
+                signal_result["contributing_sources"] = [s.get("source", "api") for s in sentiments]
                     
+                # Perform sanity check on the result
+                agent_sane, sanity_message = self._perform_sanity_check(signal_result)
+                
+                # Add sanity check results to output
+                signal_result["agent_sane"] = agent_sane
+                signal_result["sanity_message"] = sanity_message if not agent_sane else None
+                
+                # If not sane, downgrade confidence
+                if not agent_sane:
+                    # Log warning about failed sanity check
+                    self.logger.warning(f"⚠️ SentimentAnalystAgent sanity check failed: {sanity_message}")
+                    
+                    # Adjust confidence downward for unreliable sentiment
+                    original_confidence = signal_result.get("confidence", 50)
+                    signal_result["confidence"] = max(30, original_confidence - 25)  # Reduce confidence but keep minimum 30%
+                    
+                    # Add note about confidence adjustment to reasoning
+                    if "reasoning" in signal_result:
+                        signal_result["reasoning"] += f" (Note: confidence reduced due to sanity check failure)"
+                
                 return signal_result
             else:
                 # Fallback in case sentiment analysis failed
@@ -516,6 +553,77 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             "key_insight": "API error prevented sentiment analysis"
         }
             
+    def _perform_sanity_check(
+        self, 
+        sentiment_result: Dict[str, Any]
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Perform sanity checks on the sentiment analysis results.
+        
+        Args:
+            sentiment_result: Dictionary containing sentiment analysis results
+            
+        Returns:
+            Tuple of (is_sane, error_message) where error_message is None if is_sane is True
+        """
+        # Extract key values for validation
+        signal = sentiment_result.get("signal", "NEUTRAL")
+        confidence = sentiment_result.get("confidence", 0)
+        contributing_sources = sentiment_result.get("contributing_sources", [])
+        sentiment_data = sentiment_result.get("full_sentiment_data", {})
+        timestamp_str = sentiment_result.get("timestamp", "")
+        
+        # Check 1: Confidence within reasonable bounds
+        if confidence < self.min_confidence_threshold:
+            return False, f"Confidence too low: {confidence}% (minimum: {self.min_confidence_threshold}%)"
+        
+        if confidence > self.max_confidence_threshold:
+            return False, f"Confidence unrealistically high: {confidence}% (maximum: {self.max_confidence_threshold}%)"
+            
+        # Check 2: Minimum number of contributing sources
+        if len(contributing_sources) < self.min_source_count:
+            return False, f"Too few contributing sources: {len(contributing_sources)} (minimum: {self.min_source_count})"
+            
+        # Check 3: Data age check (if timestamp is provided)
+        if timestamp_str:
+            try:
+                timestamp = datetime.fromisoformat(timestamp_str)
+                current_time = datetime.now()
+                age_hours = (current_time - timestamp).total_seconds() / 3600
+                
+                if age_hours > self.max_data_age_hours:
+                    return False, f"Sentiment data too old: {age_hours:.1f} hours (maximum: {self.max_data_age_hours} hours)"
+            except (ValueError, TypeError):
+                # If timestamp parsing fails, just skip this check
+                pass
+                
+        # Check 4: Sentiment volatility/stability check
+        if "sentiment_history" in sentiment_data and len(sentiment_data["sentiment_history"]) >= 2:
+            history = sentiment_data["sentiment_history"]
+            
+            # Calculate volatility as standard deviation or max change
+            sentiment_values = [entry.get("value", 0) for entry in history if "value" in entry]
+            
+            if len(sentiment_values) >= 2:
+                max_change = max(sentiment_values) - min(sentiment_values)
+                
+                if max_change > self.max_sentiment_volatility:
+                    return False, f"Sentiment volatility too high: {max_change:.1f} (maximum: {self.max_sentiment_volatility})"
+                    
+        # Check 5: Validate signal consistency with sentiment data
+        if "sentiment_score" in sentiment_data:
+            sentiment_score = sentiment_data["sentiment_score"]
+            
+            # Check if signal matches sentiment score direction
+            if sentiment_score > 70 and signal == "SELL":
+                return False, f"Signal/sentiment mismatch: SELL signal with positive sentiment score {sentiment_score}"
+                
+            if sentiment_score < 30 and signal == "BUY":
+                return False, f"Signal/sentiment mismatch: BUY signal with negative sentiment score {sentiment_score}"
+                
+        # All checks passed or skipped
+        return True, None
+    
     def _fallback_analysis(self, symbol=None) -> Dict[str, Any]:
         """
         Provide fallback sentiment analysis when Grok is unavailable.
@@ -622,7 +730,8 @@ class SentimentAnalystAgent(BaseAnalystAgent):
         request_id = f"{hash(timestamp.isoformat() + symbol_str) % 10000:04d}"
         self.logger.info(f"Analysis #{request_id}: Generated dynamic fallback sentiment for {symbol_str}: {signal} ({confidence}%)")
         
-        return {
+        # Create the result dictionary
+        result = {
             "signal": signal,
             "confidence": confidence,
             "reasoning": reasoning,
@@ -630,8 +739,33 @@ class SentimentAnalystAgent(BaseAnalystAgent):
             "request_id": request_id,
             "key_insight": f"Market sentiment appears {sentiment_desc} with {confidence}% confidence",
             "contributing_sources": ["price_action", "technical_indicators", "market_conditions"],
-            "error_details": None
+            "error_details": None,
+            "full_sentiment_data": {
+                "sentiment_score": 50 + (rand_seed % 40) - 20,  # Random score between 30-70
+                "sentiment_history": []  # No history in fallback mode
+            }
         }
+        
+        # Perform sanity check on the result
+        agent_sane, sanity_message = self._perform_sanity_check(result)
+        
+        # Add sanity check results to output
+        result["agent_sane"] = agent_sane
+        result["sanity_message"] = sanity_message if not agent_sane else None
+        
+        # If not sane, downgrade confidence
+        if not agent_sane:
+            # Log warning about failed sanity check
+            self.logger.warning(f"⚠️ SentimentAnalystAgent sanity check failed: {sanity_message}")
+            
+            # Adjust confidence downward for unreliable sentiment
+            original_confidence = result["confidence"]
+            result["confidence"] = max(30, original_confidence - 25)  # Reduce confidence but keep minimum 30%
+            
+            # Add note about confidence adjustment to reasoning
+            result["reasoning"] += f" (Note: confidence reduced due to sanity check failure)"
+        
+        return result
         
     def to_dict(self) -> Dict[str, Any]:
         """

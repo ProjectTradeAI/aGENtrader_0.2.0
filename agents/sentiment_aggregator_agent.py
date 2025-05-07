@@ -68,6 +68,14 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         # Configure sentiment data storage
         self.sentiment_log_path = os.path.join('logs', 'sentiment_feed.jsonl')
         os.makedirs(os.path.dirname(self.sentiment_log_path), exist_ok=True)
+        
+        # Sanity check configurations
+        self.min_confidence_threshold = self.config.get("min_confidence_threshold", 40)
+        self.max_confidence_threshold = self.config.get("max_confidence_threshold", 95)
+        self.max_sentiment_divergence = self.config.get("max_sentiment_divergence", 70)
+        self.min_source_count = self.config.get("min_source_count", 2)
+        self.max_data_age_hours = self.config.get("max_data_age_hours", 24)
+        self.max_conflict_score = self.config.get("max_conflict_score", 80)
     
     def analyze(self, symbol: Optional[str] = None, market_data: Optional[Dict[str, Any]] = None, 
                interval: Optional[str] = None, **kwargs) -> Dict[str, Any]:
@@ -237,6 +245,26 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             except Exception as e:
                 logger.warning(f"Failed to log decision: {str(e)}")
                 
+            # Perform sanity check on the results
+            agent_sane, sanity_message = self._perform_sanity_check(results)
+            
+            # Add sanity check results to output
+            results["agent_sane"] = agent_sane
+            results["sanity_message"] = sanity_message if not agent_sane else None
+            
+            # If not sane, downgrade confidence
+            if not agent_sane:
+                # Log warning about failed sanity check
+                logger.warning(f"⚠️ SentimentAggregatorAgent sanity check failed: {sanity_message}")
+                
+                # Adjust confidence downward for unreliable sentiment
+                original_confidence = results.get("confidence", 50)
+                results["confidence"] = max(30, original_confidence - 25)  # Reduce confidence but keep minimum 30%
+                
+                # Add note about confidence adjustment to analysis_summary
+                if "analysis_summary" in results:
+                    results["analysis_summary"] += f" (Note: confidence reduced due to sanity check failure)"
+            
             # Return results
             return results
             
@@ -279,32 +307,7 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
         """
         return self.analyze(symbol=symbol, interval=interval, **kwargs)
         
-    def _get_trading_config(self) -> Dict[str, Any]:
-        """
-        Get trading configuration from settings file.
-        
-        Returns:
-            Trading configuration dictionary
-        """
-        try:
-            # Try to load from config/settings.yaml first
-            config_path = "config/settings.yaml"
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    return config.get('trading', {})
-            
-            # Fallback to config/default.json
-            config_path = "config/default.json"
-            if os.path.exists(config_path):
-                with open(config_path, 'r') as f:
-                    config = json.load(f)
-                    return config.get('trading', {})
-        except Exception as e:
-            logger.error(f"Error loading trading config: {str(e)}")
-            
-        # Return empty dict if config couldn't be loaded
-        return {}
+    # _get_trading_config method has been moved to get_trading_config to avoid duplication
     
     def _fetch_market_data_text(self, symbol) -> str:
         """
@@ -557,9 +560,10 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
                 }
             }
             
-    def validate_input(self, symbol: str, interval: str) -> bool:
+    # Stub for backward compatibility, replaced by more complete implementation below
+    def validate_input_stub(self, symbol: str, interval: str) -> bool:
         """
-        Validate input parameters.
+        Validate input parameters (deprecated).
         
         Args:
             symbol: Trading symbol
@@ -610,6 +614,66 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             
         # If we got here, input is valid
         return True
+        
+    def _perform_sanity_check(
+        self, 
+        sentiment_result: Dict[str, Any]
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Perform sanity checks on the sentiment aggregator results.
+        
+        Args:
+            sentiment_result: Dictionary containing sentiment analysis results
+            
+        Returns:
+            Tuple of (is_sane, error_message) where error_message is None if is_sane is True
+        """
+        # Extract key values for validation
+        symbol = sentiment_result.get("symbol", "")
+        signal = sentiment_result.get("signal", "NEUTRAL")
+        confidence = sentiment_result.get("confidence", 0)
+        sentiment_score = sentiment_result.get("sentiment_score", 3)
+        contributing_sources = sentiment_result.get("contributing_sources", [])
+        timestamp_str = sentiment_result.get("timestamp", "")
+        
+        # Check 1: Confidence within reasonable bounds
+        if confidence < self.min_confidence_threshold:
+            return False, f"Confidence too low: {confidence}% (minimum: {self.min_confidence_threshold}%)"
+        
+        if confidence > self.max_confidence_threshold:
+            return False, f"Confidence unrealistically high: {confidence}% (maximum: {self.max_confidence_threshold}%)"
+            
+        # Check 2: Minimum number of contributing sources
+        if len(contributing_sources) < self.min_source_count:
+            return False, f"Too few contributing sources: {len(contributing_sources)} (minimum: {self.min_source_count})"
+            
+        # Check 3: Data age check (if timestamp is provided)
+        if timestamp_str:
+            try:
+                timestamp = datetime.fromisoformat(timestamp_str)
+                current_time = datetime.now()
+                age_hours = (current_time - timestamp).total_seconds() / 3600
+                
+                if age_hours > self.max_data_age_hours:
+                    return False, f"Sentiment data too old: {age_hours:.1f} hours (maximum: {self.max_data_age_hours} hours)"
+            except (ValueError, TypeError):
+                # If timestamp parsing fails, just skip this check
+                pass
+                
+        # Check 4: Sentiment and signal consistency check
+        if sentiment_score > 4 and signal != "BUY":
+            return False, f"Signal/sentiment mismatch: {signal} signal with high sentiment score {sentiment_score}"
+            
+        if sentiment_score < 2 and signal != "SELL":
+            return False, f"Signal/sentiment mismatch: {signal} signal with low sentiment score {sentiment_score}"
+            
+        # Check 5: Sentiment signals validity check
+        sentiment_signals = sentiment_result.get("sentiment_signals", [])
+        if not sentiment_signals or len(sentiment_signals) == 0:
+            return False, "Missing sentiment signals data"
+            
+        # All checks passed or skipped
+        return True, None
         
     def _api_error_response(self, symbol, error_type: str = "api_error", interval: Optional[str] = None) -> Dict[str, Any]:
         """
@@ -672,7 +736,9 @@ class SentimentAggregatorAgent(BaseAnalystAgent):
             "execution_time_seconds": 0.0,
             "status": "error",
             "error_type": error_type,
-            "error_reason": reason
+            "error_reason": reason,
+            "agent_sane": False,  # API errors are never "sane"
+            "sanity_message": f"API error: {error_type}"
         }
             
     def _log_sentiment_data(self, symbol, sentiment_result: Dict[str, Any]) -> None:

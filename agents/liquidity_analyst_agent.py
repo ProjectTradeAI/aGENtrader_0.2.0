@@ -10,6 +10,7 @@ import time
 import json
 import logging
 import math
+import re
 from typing import Dict, Any, List, Optional, Tuple, Union
 from datetime import datetime
 
@@ -94,7 +95,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             market_data: Pre-fetched market data (optional)
             interval: Time interval (used for consistency, but less relevant for liquidity)
             **kwargs: Additional parameters
-            
+                - market_context: MarketContext object containing current market data
+                
         Returns:
             Liquidity analysis results
         """
@@ -126,6 +128,15 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             symbol = symbol.replace('_', '/')
             
         try:
+            # Extract market context if available
+            market_context = None
+            if market_data and isinstance(market_data, dict) and market_data.get("market_context"):
+                market_context = market_data.get("market_context")
+                logger.info(f"Using market context from market_data")
+            elif kwargs.get("market_context"):
+                market_context = kwargs.get("market_context")
+                logger.info(f"Using market context from kwargs")
+            
             # Check if we have pre-fetched market data or need to fetch it
             order_book = None
             if market_data and isinstance(market_data, dict) and market_data.get("order_book"):
@@ -156,20 +167,40 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 )
                 
             # Analyze the order book
-            analysis_result = self._analyze_order_book(order_book)
+            logger.info(f"Starting order book analysis for {symbol}")
+            analysis_result = self._analyze_order_book(order_book, market_context)
             
-            # Get the current price from the order book midpoint
-            best_bid = float(order_book['bids'][0][0]) if order_book['bids'] else 0
-            best_ask = float(order_book['asks'][0][0]) if order_book['asks'] else 0
+            # Add more debugging for large orders detection
+            liquidity_zones = analysis_result.get('liquidity_zones', {})
+            large_bids = liquidity_zones.get('large_bids', [])
+            large_asks = liquidity_zones.get('large_asks', [])
             
-            if best_bid == 0 or best_ask == 0:
-                logger.warning(f"Invalid bid/ask prices: bid={best_bid}, ask={best_ask}")
-                current_price = best_bid or best_ask  # Use whichever one is non-zero
+            logger.info(f"Liquidity analysis completed with {len(large_bids)} large bids, {len(large_asks)} large asks")
+            for bid in large_bids[:3]:  # Log top 3 large bids
+                logger.info(f"Large bid detected: price={bid.get('price', 'N/A')}, volume={bid.get('volume', 'N/A')}, ratio={bid.get('ratio', 'N/A')}")
+            for ask in large_asks[:3]:  # Log top 3 large asks
+                logger.info(f"Large ask detected: price={ask.get('price', 'N/A')}, volume={ask.get('volume', 'N/A')}, ratio={ask.get('ratio', 'N/A')}")
+            
+            # Get the current price - prefer market_context, fallback to order book midpoint
+            current_price = None
+            
+            # Try to get price from market_context
+            if market_context and hasattr(market_context, 'price') and market_context.price:
+                current_price = market_context.price
+                logger.info(f"Using price from market context: {current_price}")
             else:
-                current_price = (best_bid + best_ask) / 2
+                # Fallback to order book midpoint
+                best_bid = float(order_book['bids'][0][0]) if order_book['bids'] else 0
+                best_ask = float(order_book['asks'][0][0]) if order_book['asks'] else 0
+                
+                if best_bid == 0 or best_ask == 0:
+                    logger.warning(f"Invalid bid/ask prices: bid={best_bid}, ask={best_ask}")
+                    current_price = best_bid or best_ask  # Use whichever one is non-zero
+                else:
+                    current_price = (best_bid + best_ask) / 2
             
             # Generate a trading signal based on the liquidity analysis
-            signal, confidence, explanation = self._generate_signal(analysis_result)
+            signal, confidence, explanation = self._generate_signal(analysis_result, market_context)
             
             execution_time = time.time() - start_time
             
@@ -247,13 +278,14 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 f"Error analyzing liquidity: {str(e)}"
             )
     
-    def _analyze_order_book(self, order_book: Dict[str, Any]) -> Dict[str, Any]:
+    def _analyze_order_book(self, order_book: Dict[str, Any], market_context=None) -> Dict[str, Any]:
         """
         Analyze the order book to extract liquidity metrics and identify 
         liquidity-based entry and stop-loss zones.
         
         Args:
             order_book: Dictionary containing 'bids' and 'asks' arrays
+            market_context: Optional MarketContext object containing additional market data
             
         Returns:
             Dictionary of liquidity metrics including support/resistance clusters
@@ -320,7 +352,130 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
         # Create price bins for clustering to identify support/resistance zones
         current_price = (best_bid + best_ask) / 2
-        bin_size = current_price * (self.price_bin_size_pct / 100)
+        
+        # Dynamic bin sizing based on volatility if market_context is available
+        if market_context and hasattr(market_context, 'volatility_1h') and market_context.volatility_1h:
+            # Adjust bin size based on 1h volatility - more volatile markets need wider bins
+            volatility_factor = min(3.0, max(0.5, market_context.volatility_1h))
+            dynamic_bin_size_pct = self.price_bin_size_pct * volatility_factor
+            logger.info(f"Using dynamic bin size: {dynamic_bin_size_pct:.4f}% based on volatility factor {volatility_factor:.2f}")
+            bin_size = current_price * (dynamic_bin_size_pct / 100)
+        else:
+            # Use default bin size if no market context or volatility available
+            bin_size = current_price * (self.price_bin_size_pct / 100)
+            
+        # Advanced order book pattern heuristics for institutional order detection
+        # We'll identify potential institutional orders using multiple techniques
+        large_bids = []
+        large_asks = []
+        
+        # Debug information about order book structure
+        logger.info(f"Order book analysis - processed {len(processed_bids)} bids and {len(processed_asks)} asks")
+        logger.info(f"Bid volume range: min={min([b[1] for b in processed_bids]):.2f}, max={max([b[1] for b in processed_bids]):.2f}")
+        logger.info(f"Ask volume range: min={min([a[1] for a in processed_asks]):.2f}, max={max([a[1] for a in processed_asks]):.2f}")
+        
+        # TECHNIQUE 1: Detect orders significantly larger than neighbors (localized volume peaks)
+        # Look for orders that are at least 2x larger than the average of nearby orders (reduced from 3x)
+        large_volume_threshold = 2.0  # Reduced from 3.0 to detect more potential institutional orders
+        
+        for i in range(1, len(processed_bids)-1):
+            avg_neighbor_volume = (processed_bids[i-1][1] + processed_bids[i+1][1]) / 2
+            if processed_bids[i][1] > avg_neighbor_volume * large_volume_threshold:
+                large_bids.append({
+                    'price': processed_bids[i][0],
+                    'volume': processed_bids[i][1],
+                    'ratio': processed_bids[i][1] / avg_neighbor_volume,
+                    'type': 'volume_spike'
+                })
+                logger.debug(f"Technique 1: Bid volume spike detected at price {processed_bids[i][0]:.2f}, volume {processed_bids[i][1]:.2f}")
+                
+        for i in range(1, len(processed_asks)-1):
+            avg_neighbor_volume = (processed_asks[i-1][1] + processed_asks[i+1][1]) / 2
+            if processed_asks[i][1] > avg_neighbor_volume * large_volume_threshold:
+                large_asks.append({
+                    'price': processed_asks[i][0],
+                    'volume': processed_asks[i][1],
+                    'ratio': processed_asks[i][1] / avg_neighbor_volume,
+                    'type': 'volume_spike'
+                })
+                logger.debug(f"Technique 1: Ask volume spike detected at price {processed_asks[i][0]:.2f}, volume {processed_asks[i][1]:.2f}")
+                
+        # TECHNIQUE 2: Detect orders that stand out from global average (overall standouts)
+        # Calculate global volume statistics
+        if len(processed_bids) > 5:
+            # Calculate statistics excluding the top and bottom 10% to avoid skew
+            top_10_pct = max(1, int(len(processed_bids) * 0.1))
+            usable_bids = processed_bids[top_10_pct:-top_10_pct] if len(processed_bids) > 20 else processed_bids
+            
+            bid_volumes = [order[1] for order in usable_bids]
+            avg_bid_volume = sum(bid_volumes) / len(bid_volumes) if bid_volumes else 0
+            
+            # Calculate standard deviation of volumes
+            bid_volume_variance = sum((v - avg_bid_volume) ** 2 for v in bid_volumes) / len(bid_volumes) if bid_volumes else 0
+            bid_volume_std = math.sqrt(bid_volume_variance)
+            
+            # Log the statistical information
+            logger.info(f"Bid volume statistics: avg={avg_bid_volume:.2f}, std_dev={bid_volume_std:.2f}")
+            
+            # Look for orders that are more than 1.5 standard deviations above average (reduced from 2.0)
+            statistical_outlier_threshold = 1.5  # Reduced from 2.0 to be more sensitive
+            
+            if bid_volume_std > 0:
+                for i, (price, volume) in enumerate(processed_bids):
+                    z_score = (volume - avg_bid_volume) / bid_volume_std
+                    if z_score > statistical_outlier_threshold:  # More than 1.5 standard deviations above average
+                        # Check if this order is already captured by technique 1
+                        if not any(abs(existing['price'] - price) < 0.001 for existing in large_bids):
+                            large_bids.append({
+                                'price': price,
+                                'volume': volume,
+                                'ratio': volume / avg_bid_volume,
+                                'type': 'statistical_outlier',
+                                'z_score': z_score
+                            })
+                            logger.debug(f"Technique 2: Bid statistical outlier detected at price {price:.2f}, volume {volume:.2f}, z-score {z_score:.2f}")
+        
+        # Similar analysis for asks
+        if len(processed_asks) > 5:
+            top_10_pct = max(1, int(len(processed_asks) * 0.1))
+            usable_asks = processed_asks[top_10_pct:-top_10_pct] if len(processed_asks) > 20 else processed_asks
+            
+            ask_volumes = [order[1] for order in usable_asks]
+            avg_ask_volume = sum(ask_volumes) / len(ask_volumes) if ask_volumes else 0
+            
+            ask_volume_variance = sum((v - avg_ask_volume) ** 2 for v in ask_volumes) / len(ask_volumes) if ask_volumes else 0
+            ask_volume_std = math.sqrt(ask_volume_variance)
+            
+            # Log the statistical information for asks
+            logger.info(f"Ask volume statistics: avg={avg_ask_volume:.2f}, std_dev={ask_volume_std:.2f}")
+            
+            # Ensure we use the same threshold value (1.5) for consistency
+            statistical_outlier_threshold = 1.5  # Match the same value used for bids
+            
+            # Use same threshold for consistency across bids and asks
+            if ask_volume_std > 0:
+                for i, (price, volume) in enumerate(processed_asks):
+                    z_score = (volume - avg_ask_volume) / ask_volume_std
+                    if z_score > statistical_outlier_threshold:  # Using same threshold as bids (1.5)
+                        if not any(abs(existing['price'] - price) < 0.001 for existing in large_asks):
+                            large_asks.append({
+                                'price': price,
+                                'volume': volume,
+                                'ratio': volume / avg_ask_volume,
+                                'type': 'statistical_outlier',
+                                'z_score': z_score
+                            })
+                            logger.debug(f"Technique 2: Ask statistical outlier detected at price {price:.2f}, volume {volume:.2f}, z-score {z_score:.2f}")
+                            
+        # TECHNIQUE 3: Detect potential iceberg orders (repeated orders at same price level)
+        # This requires time-series data which we may not have, but we can approximate
+        # by looking for multiple orders with very similar volumes at the same price
+        
+        # Sort by largest orders first
+        large_bids = sorted(large_bids, key=lambda x: x['volume'], reverse=True)[:10]  # Limit to top 10
+        large_asks = sorted(large_asks, key=lambda x: x['volume'], reverse=True)[:10]  # Limit to top 10
+        
+        logger.debug(f"Detected {len(large_bids)} large bid orders and {len(large_asks)} large ask orders")
         
         # Create bid bins to cluster orders at similar price levels
         bid_bins = {}
@@ -364,11 +519,11 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         avg_bid_bin_volume = sum(b['total_volume'] for b in bid_bins.values()) / len(bid_bins) if bid_bins else 0
         avg_ask_bin_volume = sum(b['total_volume'] for b in ask_bins.values()) / len(ask_bins) if ask_bins else 0
         
-        # Define cluster thresholds based on averages
-        bid_cluster_threshold = avg_bid_bin_volume * 1.8  # 1.8x average for significant support
-        ask_cluster_threshold = avg_ask_bin_volume * 1.8  # 1.8x average for significant resistance
-        bid_gap_threshold = avg_bid_bin_volume * 0.3     # 0.3x average for bid gaps
-        ask_gap_threshold = avg_ask_bin_volume * 0.3     # 0.3x average for ask gaps
+        # Define cluster thresholds based on averages - enhanced with more sensitive detection
+        bid_cluster_threshold = avg_bid_bin_volume * 1.5  # 1.5x average for significant support (was 1.8x)
+        ask_cluster_threshold = avg_ask_bin_volume * 1.5  # 1.5x average for significant resistance (was 1.8x)
+        bid_gap_threshold = avg_bid_bin_volume * 0.25    # 0.25x average for bid gaps (was 0.3x)
+        ask_gap_threshold = avg_ask_bin_volume * 0.25    # 0.25x average for ask gaps (was 0.3x)
         
         # Identify support clusters (significant bid walls)
         support_clusters = []
@@ -467,7 +622,9 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             ],
             "support_prices": support_cluster_prices,
             "resistance_prices": resistance_cluster_prices,
-            "gaps": gaps
+            "gaps": gaps,
+            "large_bids": large_bids,
+            "large_asks": large_asks
         }
         
         # Perform sanity check on the results
@@ -582,12 +739,13 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         # All checks passed, the result is sane
         return True, None
         
-    def _generate_signal(self, metrics: Dict[str, Any]) -> Tuple[str, int, str]:
+    def _generate_signal(self, metrics: Dict[str, Any], market_context=None) -> Tuple[str, int, str]:
         """
         Generate a trading signal based on liquidity analysis.
         
         Args:
             metrics: Liquidity metrics
+            market_context: Optional MarketContext object containing additional market data
             
         Returns:
             Tuple of (signal, confidence, explanation)
@@ -603,6 +761,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         liquidity_zones = metrics.get('liquidity_zones', {})
         support_clusters = liquidity_zones.get('support_clusters', [])
         resistance_clusters = liquidity_zones.get('resistance_clusters', [])
+        large_bids = liquidity_zones.get('large_bids', [])
+        large_asks = liquidity_zones.get('large_asks', [])
         gaps = liquidity_zones.get('gaps', [])
         
         # Get entry and stop-loss suggestions
@@ -617,11 +777,6 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         top_bids_str = ", ".join([f"{price:.2f}: {vol:.2f}" for price, vol in top_bids[:3]]) if top_bids else "None"
         top_asks_str = ", ".join([f"{price:.2f}: {vol:.2f}" for price, vol in top_asks[:3]]) if top_asks else "None"
         
-        # Default to neutral
-        signal = "NEUTRAL"
-        confidence = 50
-        explanation = "Market liquidity is balanced"
-        
         # Check sanity status first
         agent_sane = metrics.get('agent_sane', True)
         sanity_message = metrics.get('sanity_message', None)
@@ -631,34 +786,238 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             explanation = f"⚠️ Abnormal liquidity structure detected: {sanity_message}. "
             explanation += "Defaulting to NEUTRAL signal with reduced confidence."
             return "NEUTRAL", 50, explanation
+            
+        # Attempt to use LLM for enhanced analysis if available
+        try:
+            if self.llm_client:
+                # Try to get additional market context
+                symbol_str = "Unknown"
+                current_price = 0
+                market_phase = "Unknown"
+                volatility = 0
+                
+                if market_context:
+                    symbol_str = market_context.symbol if hasattr(market_context, 'symbol') else "Unknown"
+                    current_price = market_context.price if hasattr(market_context, 'price') else 0
+                    market_phase = market_context.market_phase if hasattr(market_context, 'market_phase') else "Unknown"
+                    
+                    # Get volatility info
+                    if hasattr(market_context, 'volatility_1h'):
+                        volatility = market_context.volatility_1h
+                    elif hasattr(market_context, 'volatility'):
+                        volatility = market_context.volatility
+                
+                # Format support clusters for prompt
+                support_str = ""
+                if support_clusters:
+                    support_str = "\n".join([f"- Price: {c['price']:.2f}, Volume: {c['volume']:.2f}, Strength: {c['strength']:.2f}x" 
+                                         for c in support_clusters[:5]])
+                else:
+                    support_str = "No significant support clusters detected."
+                    
+                # Format resistance clusters for prompt
+                resistance_str = ""
+                if resistance_clusters:
+                    resistance_str = "\n".join([f"- Price: {c['price']:.2f}, Volume: {c['volume']:.2f}, Strength: {c['strength']:.2f}x" 
+                                           for c in resistance_clusters[:5]])
+                else:
+                    resistance_str = "No significant resistance clusters detected."
+                    
+                # Format large orders for prompt
+                large_orders_str = ""
+                if large_bids:
+                    large_orders_str += "\nLarge bid orders (potential institutional buying):\n"
+                    large_orders_str += "\n".join([f"- Price: {o['price']:.2f}, Volume: {o['volume']:.2f}, Size ratio: {o['ratio']:.2f}x" 
+                                               for o in large_bids[:3]])
+                if large_asks:
+                    large_orders_str += "\nLarge ask orders (potential institutional selling):\n"
+                    large_orders_str += "\n".join([f"- Price: {o['price']:.2f}, Volume: {o['volume']:.2f}, Size ratio: {o['ratio']:.2f}x" 
+                                               for o in large_asks[:3]])
+                if not large_bids and not large_asks:
+                    large_orders_str = "\nNo significant large orders detected."
+
+                # Create a prompt for liquidity analysis
+                prompt = f"""
+                You are an expert cryptocurrency market liquidity analyst. Analyze the following order book and liquidity metrics to produce a trading signal:
+
+                MARKET OVERVIEW:
+                Symbol: {symbol_str}
+                Current Price: {current_price}
+                Market Phase: {market_phase}
+                Volatility: {volatility}
+                Spread: {spread_pct:.4f}%
+                Liquidity Score: {liquidity_score:.2f}/100 (higher is more liquid)
+                Bid-to-Ask Ratio: {bid_ask_ratio:.4f} (>1 means more buying than selling pressure)
+                Total Bid Depth: {bid_depth:.2f} USDT
+                Total Ask Depth: {ask_depth:.2f} USDT
+
+                SUPPORT ZONES:
+                {support_str}
+
+                RESISTANCE ZONES:
+                {resistance_str}
+
+                NOTABLE ORDER PATTERN ANALYSIS:
+                {large_orders_str}
+
+                Based on this liquidity analysis, determine:
+                1. Trading signal: BUY, SELL, or NEUTRAL
+                2. Confidence percentage (50-95%, with 50% being low confidence and 95% being high confidence)
+                3. Concise explanation of your conclusion (1-2 sentences)
+
+                FORMAT YOUR RESPONSE AS:
+                Signal: [BUY/SELL/NEUTRAL]
+                Confidence: [number between 50-95]
+                Explanation: [your analysis]
+                """
+                
+                # Get LLM response (with temperature 0.2 for more consistent outputs)
+                try:
+                    llm_response = self.llm_client.generate(prompt, temperature=0.2)
+                    
+                    # Handle different response formats from various LLM clients
+                    if isinstance(llm_response, dict):
+                        if 'content' in llm_response:
+                            response_text = llm_response['content']
+                        elif 'response' in llm_response:
+                            response_text = llm_response['response']
+                        elif 'choices' in llm_response and llm_response['choices'] and isinstance(llm_response['choices'][0], dict):
+                            if 'message' in llm_response['choices'][0] and 'content' in llm_response['choices'][0]['message']:
+                                response_text = llm_response['choices'][0]['message']['content']
+                            elif 'text' in llm_response['choices'][0]:
+                                response_text = llm_response['choices'][0]['text']
+                        else:
+                            logger.warning(f"Unknown dict response format: {list(llm_response.keys())}")
+                            raise ValueError("Unrecognized LLM response dictionary format")
+                    elif isinstance(llm_response, str):
+                        response_text = llm_response
+                    else:
+                        logger.warning(f"Unexpected LLM response format: {type(llm_response)}")
+                        raise ValueError("Unexpected LLM response format")
+                        
+                    # Parse the response
+                    signal_match = re.search(r"Signal:\s*(BUY|SELL|NEUTRAL)", response_text, re.IGNORECASE)
+                    confidence_match = re.search(r"Confidence:\s*(\d+)", response_text)
+                    explanation_match = re.search(r"Explanation:\s*(.+?)(?:\n|$)", response_text, re.DOTALL)
+                    
+                    if signal_match and confidence_match and explanation_match:
+                        llm_signal = signal_match.group(1).upper()
+                        llm_confidence = int(confidence_match.group(1))
+                        llm_explanation = explanation_match.group(1).strip()
+                        
+                        # Validate confidence within bounds
+                        llm_confidence = max(50, min(95, llm_confidence))
+                        
+                        logger.info(f"LLM liquidity analysis: {llm_signal} ({llm_confidence}%): {llm_explanation}")
+                        
+                        # Add detail about entry/stop-loss if available
+                        additional_detail = ""
+                        if suggested_entry is not None and suggested_stop_loss is not None:
+                            entry_str = f"{suggested_entry:.2f}"
+                            sl_str = f"{suggested_stop_loss:.2f}"
+                            
+                            if llm_signal == "BUY":
+                                additional_detail = f" Suggested entry: {entry_str} (above support), stop-loss: {sl_str}"
+                            elif llm_signal == "SELL":
+                                additional_detail = f" Suggested entry: {entry_str} (below resistance), stop-loss: {sl_str}"
+                        
+                        # Return the LLM-generated signal with enhanced detail
+                        return llm_signal, llm_confidence, llm_explanation + additional_detail
+                except Exception as e:
+                    logger.warning(f"Error generating LLM liquidity analysis: {str(e)}")
+                    # Continue with rule-based approach as fallback
+        except Exception as e:
+            logger.warning(f"Failed to use LLM for liquidity analysis: {str(e)}")
+
+        # Default to rule-based approach if LLM fails or is not available
+        # Default to neutral
+        signal = "NEUTRAL"
+        confidence = 50
+        explanation = "Market liquidity is balanced"
         
-        # Check for strong imbalances
-        if bid_ask_ratio > 2.0 and ask_depth < self.thresholds['medium_depth']:
+        # Log the bid/ask ratio for debugging
+        logger.info(f"LiquidityAnalystAgent bid/ask ratio: {bid_ask_ratio:.4f}, bid_depth: {bid_depth:.2f}, ask_depth: {ask_depth:.2f}")
+            
+        # Check for strong imbalances - lower the threshold for strong buying pressure
+        if bid_ask_ratio > 1.8 and ask_depth < self.thresholds['medium_depth']:  # Reduced from 2.0 to 1.8
             signal = "BUY"
             confidence = self.high_confidence
             explanation = f"Strong buying pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
-        elif bid_ask_ratio < 0.5 and bid_depth < self.thresholds['medium_depth']:
+            logger.info(f"Strong buying signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
+        elif bid_ask_ratio < 0.55 and bid_depth < self.thresholds['medium_depth']:  # Increased from 0.5 to 0.55
             signal = "SELL"
             confidence = self.high_confidence
             explanation = f"Strong selling pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
+            logger.info(f"Strong selling signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
         
-        # Check for moderate imbalances
-        elif bid_ask_ratio > 1.5:
+        # Check for moderate imbalances - make it more sensitive
+        elif bid_ask_ratio > 1.3:  # Reduced from 1.5 to 1.3
             signal = "BUY"
             confidence = self.medium_confidence
             explanation = f"Moderate buying pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
-        elif bid_ask_ratio < 0.67:
+            logger.info(f"Moderate buying signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
+        elif bid_ask_ratio < 0.77:  # Increased from 0.67 to 0.77
             signal = "SELL"
             confidence = self.medium_confidence
             explanation = f"Moderate selling pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
+            logger.info(f"Moderate selling signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
         
-        # Check for support/resistance clusters
+        # Log enhanced debug information
+        logger.info(f"LiquidityAnalystAgent fallback analysis: bid_ask_ratio={bid_ask_ratio:.2f}, large_bids={len(large_bids)}, large_asks={len(large_asks)}")
+        logger.info(f"Support clusters: {len(support_clusters)}, Resistance clusters: {len(resistance_clusters)}")
+        
+        # Check for institutions - analyze the large orders we detected
+        if large_bids and not large_asks and signal == "NEUTRAL":
+            # We have large buys but no large sells - bullish signal
+            signal = "BUY"
+            confidence = self.medium_confidence
+            explanation = f"Institutional buying detected with {len(large_bids)} large bid orders"
+            logger.info(f"Generating BUY signal based on institutional buying detection")
+        elif large_asks and not large_bids and signal == "NEUTRAL":
+            # We have large sells but no large buys - bearish signal
+            signal = "SELL"
+            confidence = self.medium_confidence
+            explanation = f"Institutional selling detected with {len(large_asks)} large ask orders"
+            logger.info(f"Generating SELL signal based on institutional selling detection")
+        elif large_bids and large_asks and signal == "NEUTRAL":
+            # If we have both, check which side has more volume or larger orders
+            bid_volume = sum(order['volume'] for order in large_bids)
+            ask_volume = sum(order['volume'] for order in large_asks)
+            
+            if bid_volume > ask_volume * 1.5:  # 50% more volume on the buy side
+                signal = "BUY"
+                confidence = self.medium_confidence
+                explanation = f"Net institutional buying detected with {bid_volume:.2f} vs {ask_volume:.2f} USDT"
+                logger.info(f"Generating BUY signal based on net institutional order imbalance")
+            elif ask_volume > bid_volume * 1.5:  # 50% more volume on the sell side
+                signal = "SELL"
+                confidence = self.medium_confidence
+                explanation = f"Net institutional selling detected with {ask_volume:.2f} vs {bid_volume:.2f} USDT"
+                logger.info(f"Generating SELL signal based on net institutional order imbalance")
+            else:
+                # Still neutral but with higher confidence due to institutional activity
+                confidence = 60
+                explanation = f"Mixed institutional orders detected with balanced volume"
+                logger.info(f"Maintaining NEUTRAL signal but increased confidence due to balanced institutional orders")
+        
+        # Check for support/resistance clusters with enhanced strength analysis
         if signal == "BUY" and support_clusters:
-            explanation += f", strong support detected at {support_clusters[0]}"
-            confidence = min(95, confidence + 5)
+            avg_strength = sum(cluster['strength'] for cluster in support_clusters) / len(support_clusters)
+            if avg_strength > 2.5:  # Strong support (2.5x average volume)
+                confidence = min(95, confidence + 10)
+                explanation += f", very strong support detected (avg {avg_strength:.1f}x normal volume)"
+            else:
+                explanation += f", support detected at {support_clusters[0]['price']:.2f}"
+                confidence = min(95, confidence + 5)
+                
         elif signal == "SELL" and resistance_clusters:
-            explanation += f", strong resistance detected at {resistance_clusters[0]}"
-            confidence = min(95, confidence + 5)
+            avg_strength = sum(cluster['strength'] for cluster in resistance_clusters) / len(resistance_clusters)
+            if avg_strength > 2.5:  # Strong resistance (2.5x average volume)
+                confidence = min(95, confidence + 10)
+                explanation += f", very strong resistance detected (avg {avg_strength:.1f}x normal volume)"
+            else:
+                explanation += f", resistance detected at {resistance_clusters[0]['price']:.2f}"
+                confidence = min(95, confidence + 5)
         
         # Check spread conditions
         if spread_pct > self.thresholds['wide_spread']:
@@ -699,7 +1058,9 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             else:
                 # For NEUTRAL signals, suggest based on order book structure
                 if support_clusters and resistance_clusters:
-                    explanation += f". Watch support at {support_clusters[0]:.2f} and resistance at {resistance_clusters[0]:.2f}"
+                    support_price = support_clusters[0]['price'] if isinstance(support_clusters[0], dict) else support_clusters[0]
+                    resistance_price = resistance_clusters[0]['price'] if isinstance(resistance_clusters[0], dict) else resistance_clusters[0]
+                    explanation += f". Watch support at {support_price:.2f} and resistance at {resistance_price:.2f}"
         
         # Add relevant liquidity detail to the explanation (top order book levels)
         explanation += f". Top bids: [{top_bids_str}], top asks: [{top_asks_str}]"

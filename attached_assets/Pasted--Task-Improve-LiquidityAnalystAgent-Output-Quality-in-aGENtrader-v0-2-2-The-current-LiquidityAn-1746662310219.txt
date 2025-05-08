@@ -1,0 +1,88 @@
+### Task: Improve LiquidityAnalystAgent Output Quality in aGENtrader v0.2.2
+
+The current LiquidityAnalystAgent frequently returns "neutral" signals due to failed zone clustering and produces low-informative analysis. You’ll enhance both rule-based and LLM-based logic to deliver more actionable and accurate insights.
+
+---
+
+### ✅ Fix Objectives
+
+#### 1. **Enhance Liquidity Zone Detection**
+- Improve `cluster_liquidity_zones()` logic to detect:
+  - Dense price walls (same price, multiple orders)
+  - Volume “gaps” for breakout zones
+- If <3 zones detected:
+  - Run a **fallback scan** for:
+    - Closest bid wall
+    - Closest ask wall
+    - Imbalance area
+  - Log: `"Zone fallback logic used"`
+
+#### 2. **Inject MarketContext**
+- Accept `market_context` input (price, volume, volatility)
+- Use it in:
+  - LLM prompts
+  - Entry/exit zone scoring
+  - Sanity checks (e.g., "price doesn't sit between top bid/ask")
+
+#### 3. **Redesign LLM Prompt**
+Include in the prompt:
+```text
+Current price: $97255.11
+Spread: 0.01
+Bid/Ask depth: 2.5M / 1.3M
+Liquidity score: 72.91
+No liquidity zones detected.
+
+What can we infer about market microstructure?
+Are we in a thin book scenario?
+How would a market maker position here?
+Ask for:
+
+Liquidity phase: [thick/thin/stable]
+
+Bias: bid-heavy, ask-heavy, or balanced
+
+Confidence rating
+
+Suggested action: BUY, SELL, HOLD
+
+Reasoning + notable risk zones
+
+4. Add Soft Entry/Exit Recommendations
+If clustering fails but data is good:
+
+Use bid wall or top-of-book for:
+
+Suggested entry
+
+Suggested SL/TP zone (±1.5% from key levels)
+
+Add to output:
+
+json
+Copy
+Edit
+{
+  "suggested_entry": 97120.0,
+  "suggested_stop_loss": 96600.0,
+  "suggested_take_profit": 98500.0
+}
+5. Stronger Sanity Check
+Fail sanity if:
+
+Spread > 1% or = 0
+
+Depth is missing or zero
+
+No top-of-book price is valid
+
+🧪 Test Case
+Feed a real BTC/USDT order book with decent spread and volume
+
+Confirm: ✅ Analysis includes signal, reasoning, bias, and price zones
+
+This will make LiquidityAnalystAgent a far more intelligent microstructure analyst, useful even when clustering fails.
+
+yaml
+Copy
+Edit

@@ -353,9 +353,17 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 
                 # Get entry condition if available
                 entry_condition = results.get("metrics", {}).get("entry_condition", "market_entry")
-                entry_condition_display = ""
-                if entry_condition != "market_entry":
-                    entry_condition_display = f" ({entry_condition})"
+                
+                # Map entry conditions to more descriptive display text
+                entry_condition_display_map = {
+                    "market_entry": "",
+                    "pullback_long": " (Buy pullback)",
+                    "pullback_short": " (Sell pullback)",
+                    "breakout_long": " (Buy breakout)",
+                    "breakdown_short": " (Sell breakdown)"
+                }
+                
+                entry_condition_display = entry_condition_display_map.get(entry_condition, f" ({entry_condition})")
                 
                 log_message += f"  - Entry: {formatted_entry}{entry_condition_display}\n"
                 
@@ -2165,14 +2173,14 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             sl_description = "from entry"
             tp_description = "from entry"
         
-        # Determine entry condition based on price relationship
+        # Determine entry condition based on price relationship and trade direction
         entry_price = entry_exit_levels.get("entry", current_price)
         entry_condition = "market_entry"  # Default value
         
-        if entry_price < current_price:
-            entry_condition = "pullback_short"
-        elif entry_price > current_price:
-            entry_condition = "pullback_long"
+        if direction == "SELL":
+            entry_condition = "pullback_short" if entry_price <= current_price else "breakdown_short"
+        else:  # BUY or NEUTRAL
+            entry_condition = "pullback_long" if entry_price >= current_price else "breakout_long"
         
         # Create improved detailed reason based on market context
         detailed_reason = reason
@@ -2240,6 +2248,12 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         bids = order_book.get('bids', [])
         asks = order_book.get('asks', [])
         
+        # Calculate bid/ask depth and ratio (for use in _generate_macro_signal)
+        # These calculations match how they're done in _analyze_order_book
+        bid_depth_usdt = sum(float(b[0]) * float(b[1]) for b in bids) if bids else 0
+        ask_depth_usdt = sum(float(a[0]) * float(a[1]) for a in asks) if asks else 0
+        bid_ask_ratio = bid_depth_usdt / ask_depth_usdt if ask_depth_usdt > 0 else 1.0
+        
         # Find price levels with higher than average volume
         if bids:
             bid_volumes = [float(bid[1]) for bid in bids]
@@ -2300,7 +2314,10 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
         return {
             "levels": sorted(levels, key=lambda x: x["price"]),
-            "count": len(levels)
+            "count": len(levels),
+            "bid_depth_usdt": bid_depth_usdt,
+            "ask_depth_usdt": ask_depth_usdt,
+            "bid_ask_ratio": bid_ask_ratio
         }
         
     def _identify_liquidity_pools(self, order_book, historical_data, current_price):
@@ -2716,6 +2733,29 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         signal = "HOLD"
         confidence = 58
         reason = "Insufficient data for macro liquidity analysis"
+        
+        # Check for extreme order book imbalance first (just like in micro mode)
+        # This ensures consistency across both modes for extreme market conditions
+        bid_depth = resting_liquidity.get("bid_depth_usdt", 0)
+        ask_depth = resting_liquidity.get("ask_depth_usdt", 0) 
+        bid_ask_ratio = bid_depth / ask_depth if ask_depth > 0 else 1.0
+        
+        # If we have a valid bid_ask_ratio from the order book data
+        if bid_depth > 0 and ask_depth > 0:
+            # Check for extreme imbalance thresholds that force a signal
+            if bid_ask_ratio < 0.75:
+                # Heavy selling pressure - bearish
+                signal = "SELL"
+                confidence = 80
+                reason = f"Strong selling pressure with bid/ask ratio of {bid_ask_ratio:.2f} (below 0.75 threshold)"
+                return signal, confidence, reason
+                
+            elif bid_ask_ratio > 1.25:
+                # Heavy buying pressure - bullish
+                signal = "BUY"
+                confidence = 80
+                reason = f"Strong buying pressure with bid/ask ratio of {bid_ask_ratio:.2f} (above 1.25 threshold)"
+                return signal, confidence, reason
         
         # Determine if we have useful data
         has_resting_levels = len(resting_liquidity.get("levels", [])) > 0

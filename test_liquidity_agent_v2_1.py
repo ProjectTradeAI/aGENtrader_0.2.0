@@ -57,6 +57,19 @@ def test_micro_mode():
     logger.info(f"Take-Profit: ${results.get('metrics', {}).get('suggested_take_profit', 'N/A')}")
     logger.info(f"Bid/Ask Ratio: {results.get('metrics', {}).get('bid_ask_ratio', 'N/A')}")
     
+    # Print direction-aware SL/TP information
+    metrics = results.get("metrics", {})
+    trade_direction = metrics.get("trade_direction", "NEUTRAL")
+    risk_reward_ratio = metrics.get("risk_reward_ratio", 0)
+    sl_description = metrics.get("sl_description", "")
+    tp_description = metrics.get("tp_description", "")
+    
+    logger.info(f"Trade Direction: {trade_direction}")
+    if trade_direction in ["BUY", "SELL"]:
+        logger.info(f"Risk:Reward Ratio: 1:{risk_reward_ratio}")
+        logger.info(f"SL Position: {sl_description}")
+        logger.info(f"TP Position: {tp_description}")
+    
     # Save results to a file for inspection
     with open("micro_liquidity_analysis_result.json", "w") as f:
         json.dump(results, f, indent=2)
@@ -109,6 +122,19 @@ def test_macro_mode():
     logger.info(f"Entry: ${results.get('entry_zone', 'N/A')}")
     logger.info(f"Stop-Loss: ${results.get('stop_loss_zone', 'N/A')}")
     logger.info(f"Take-Profit: ${results.get('metrics', {}).get('suggested_take_profit', 'N/A')}")
+    
+    # Print direction-aware SL/TP information
+    metrics = results.get("metrics", {})
+    trade_direction = metrics.get("trade_direction", "NEUTRAL")
+    risk_reward_ratio = metrics.get("risk_reward_ratio", 0)
+    sl_description = metrics.get("sl_description", "")
+    tp_description = metrics.get("tp_description", "")
+    
+    logger.info(f"Trade Direction: {trade_direction}")
+    if trade_direction in ["BUY", "SELL"]:
+        logger.info(f"Risk:Reward Ratio: 1:{risk_reward_ratio}")
+        logger.info(f"SL Position: {sl_description}")
+        logger.info(f"TP Position: {tp_description}")
     
     # Print macro-specific data
     volume_profile = results.get("volume_profile", {})

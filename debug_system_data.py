@@ -145,9 +145,10 @@ def main():
         original_analyze = agent.analyze
         
         # Replace with debug version that logs input
-        def debug_analyze(symbol=None, market_data=None, **kwargs):
+        def debug_analyze(symbol=None, market_data=None, interval=None, **kwargs):
             logger.info("INTERCEPTED ANALYZE CALL:")
             logger.info(f"symbol = {symbol}")
+            logger.info(f"interval = {interval}")
             logger.info(f"market_data keys = {list(market_data.keys()) if market_data else 'None'}")
             
             # Check if market_data contains order_book
@@ -161,7 +162,7 @@ def main():
                     logger.info("Agent will attempt to use data_fetcher")
             
             # Call original method and return result
-            result = original_analyze(symbol=symbol, market_data=market_data, **kwargs)
+            result = original_analyze(symbol=symbol, market_data=market_data, interval=interval, **kwargs)
             logger.info(f"ORIGINAL METHOD RETURNED: signal={result.get('signal')}, confidence={result.get('confidence')}")
             return result
         

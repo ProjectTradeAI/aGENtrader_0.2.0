@@ -208,6 +208,21 @@ class TestLiquidityAnalystAgent(unittest.TestCase):
         self.assertTrue(metrics['bid_ask_ratio'] > 1.5, 
                        f"Expected bid_ask_ratio > 1.5 but got {metrics['bid_ask_ratio']}")
         
+        # Check for direction-aware details in macro mode
+        if result.get('analysis_mode') == 'macro':
+            self.assertIn('trade_direction', metrics)
+            self.assertEqual(metrics['trade_direction'], "BUY")
+            
+            # Check for SL/TP descriptions
+            self.assertIn('sl_description', metrics)
+            self.assertIn('tp_description', metrics)
+            self.assertEqual(metrics['sl_description'], "below entry")
+            self.assertEqual(metrics['tp_description'], "above entry")
+            
+            # Check risk-reward ratio exists
+            self.assertIn('risk_reward_ratio', metrics)
+            self.assertIsInstance(metrics['risk_reward_ratio'], (int, float))
+        
     def test_analysis_with_ask_heavy_orderbook(self):
         """Test analysis results with ask-heavy order book."""
         agent = LiquidityAnalystAgent(data_fetcher=MockAskHeavyDataFetcher())
@@ -224,6 +239,21 @@ class TestLiquidityAnalystAgent(unittest.TestCase):
         self.assertIn('bid_ask_ratio', metrics)
         self.assertTrue(metrics['bid_ask_ratio'] < 0.67,
                        f"Expected bid_ask_ratio < 0.67 but got {metrics['bid_ask_ratio']}")
+        
+        # Check for direction-aware details in macro mode
+        if result.get('analysis_mode') == 'macro':
+            self.assertIn('trade_direction', metrics)
+            self.assertEqual(metrics['trade_direction'], "SELL")
+            
+            # Check for SL/TP descriptions
+            self.assertIn('sl_description', metrics)
+            self.assertIn('tp_description', metrics)
+            self.assertEqual(metrics['sl_description'], "above entry")
+            self.assertEqual(metrics['tp_description'], "below entry")
+            
+            # Check risk-reward ratio exists
+            self.assertIn('risk_reward_ratio', metrics)
+            self.assertIsInstance(metrics['risk_reward_ratio'], (int, float))
         
     def test_analysis_with_balanced_orderbook(self):
         """Test analysis results with balanced order book."""
@@ -251,6 +281,48 @@ class TestLiquidityAnalystAgent(unittest.TestCase):
         self.assertIn('spread_pct', metrics)
         self.assertIsInstance(metrics['spread'], (int, float))
         self.assertIsInstance(metrics['spread_pct'], (int, float))
+        
+    def test_direction_aware_sl_tp(self):
+        """Test if SL/TP are properly direction-aware in macro mode."""
+        # Test with ask-heavy (SELL) data
+        agent = LiquidityAnalystAgent(data_fetcher=MockAskHeavyDataFetcher())
+        # Force macro mode with 4h interval
+        sell_result = agent.analyze(symbol="BTC/USDT", interval="4h")
+        
+        # Test with bid-heavy (BUY) data
+        agent = LiquidityAnalystAgent(data_fetcher=MockBidHeavyDataFetcher())
+        # Force macro mode with 4h interval
+        buy_result = agent.analyze(symbol="BTC/USDT", interval="4h") 
+        
+        # Check if both results use macro mode
+        self.assertEqual(sell_result.get('analysis_mode'), 'macro', 
+                        "SELL test should use macro mode with 4h interval")
+        self.assertEqual(buy_result.get('analysis_mode'), 'macro',
+                        "BUY test should use macro mode with 4h interval")
+        
+        # For SELL signals, SL should be above entry and TP below entry
+        if sell_result['signal'] == 'SELL':
+            self.assertEqual(sell_result['metrics'].get('trade_direction'), 'SELL')
+            self.assertEqual(sell_result['metrics'].get('sl_description'), 'above entry')
+            self.assertEqual(sell_result['metrics'].get('tp_description'), 'below entry')
+            # Stop loss should be numerically greater than entry for SELL
+            self.assertGreater(sell_result.get('stop_loss_zone', 0), 
+                              sell_result.get('entry_zone', 0))
+            # Take profit should be numerically less than entry for SELL
+            self.assertLess(sell_result['metrics'].get('suggested_take_profit', 999999), 
+                           sell_result.get('entry_zone', 999999))
+        
+        # For BUY signals, SL should be below entry and TP above entry
+        if buy_result['signal'] == 'BUY':
+            self.assertEqual(buy_result['metrics'].get('trade_direction'), 'BUY')
+            self.assertEqual(buy_result['metrics'].get('sl_description'), 'below entry')
+            self.assertEqual(buy_result['metrics'].get('tp_description'), 'above entry')
+            # Stop loss should be numerically less than entry for BUY
+            self.assertLess(buy_result.get('stop_loss_zone', 999999), 
+                           buy_result.get('entry_zone', 0))
+            # Take profit should be numerically greater than entry for BUY
+            self.assertGreater(buy_result['metrics'].get('suggested_take_profit', 0), 
+                              buy_result.get('entry_zone', 999999))
 
 def main():
     """Run the test suite."""

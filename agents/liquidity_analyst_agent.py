@@ -235,15 +235,28 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                     current_price = (best_bid + best_ask) / 2
             
             # Generate a trading signal based on the liquidity analysis
-            # OVERRIDE FOR REPLIT: Always produce a SELL signal
-            logger.critical("OVERRIDE LIQUIDITY AGENT ON REPLIT - Forcing SELL signal")
-            signal = "SELL"  
-            confidence = 87
-            explanation = "High selling pressure detected with significant order book imbalance. Current market structure shows increasing selling activity at key support levels."
+            if self.analysis_mode == 'micro':
+                # For micro mode, use the normal _generate_signal method with bid/ask ratio analysis
+                signal, confidence, explanation = self._generate_signal(analysis_result, market_context)
+                logger.info(f"Generated signal from microstructure analysis: {signal} with {confidence}% confidence")
+            else:
+                # For macro mode, use the signal already determined by direction-aware calculation
+                signal = analysis_result.get("signal", "NEUTRAL")
+                confidence = analysis_result.get("confidence", 65)
+                explanation = analysis_result.get("reason", "Macro liquidity analysis")
+                logger.info(f"Using signal from macrostructure analysis: {signal} with {confidence}% confidence")
+                
+                # Add direction-aware SL/TP description to explanation
+                trade_direction = analysis_result.get("trade_direction", "NEUTRAL")
+                sl_description = analysis_result.get("sl_description", "")
+                tp_description = analysis_result.get("tp_description", "")
+                r_r_ratio = analysis_result.get("risk_reward_ratio", 0)
+                
+                if trade_direction in ("BUY", "SELL") and sl_description and tp_description:
+                    direction_detail = f" SL {sl_description}, TP {tp_description} with R:R 1:{r_r_ratio}"
+                    explanation += direction_detail
             
-            # Log the forced signal
-            logger.critical(f"FORCED SIGNAL: {signal} with confidence {confidence}")
-            
+            # Record execution time
             execution_time = time.time() - start_time
             
             # Normalize confidence for SELL signals when there are conflicting BUY consensus
@@ -338,10 +351,24 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             
             if entry and stop_loss:
                 log_message += f"  - Entry: ${entry:.2f}\n" 
-                log_message += f"  - SL: ${stop_loss:.2f}"
+                
+                # Get direction-aware descriptions for SL/TP
+                sl_description = "from entry"
+                tp_description = "from entry"
+                
+                if self.analysis_mode == "macro":
+                    sl_description = results.get("metrics", {}).get("sl_description", "from entry")
+                    tp_description = results.get("metrics", {}).get("tp_description", "from entry")
+                    log_message += f"  - SL: ${stop_loss:.2f} ({sl_description})"
+                else:
+                    log_message += f"  - SL: ${stop_loss:.2f}"
                 
                 if take_profit:
-                    log_message += f" | TP: ${take_profit:.2f}\n"
+                    log_message += f" | TP: ${take_profit:.2f}"
+                    if self.analysis_mode == "macro":
+                        log_message += f" ({tp_description})"
+                    log_message += "\n"
+                    
                     # Calculate risk-reward ratio
                     if entry != stop_loss:
                         risk = abs(entry - stop_loss)
@@ -2055,15 +2082,25 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             vwap_data=vwap_data
         )
         
-        # Generate signal based on the macro liquidity structure
-        signal, confidence, reason = self._generate_macro_signal(
-            current_price=current_price,
-            resting_liquidity=resting_liquidity_zones,
-            liquidity_pools=liquidity_pools,
-            imbalance_zones=imbalance_zones,
-            volume_profile=volume_profile,
-            vwap_data=vwap_data
-        )
+        # Get signal from entry_exit_levels (calculated with direction-aware logic)
+        # This ensures SL/TP and signal direction are consistent
+        signal = entry_exit_levels.get("signal", "NEUTRAL")
+        if signal == "NEUTRAL":
+            # Only if entry_exit_levels didn't determine a signal, use the standalone analysis
+            signal, confidence, reason = self._generate_macro_signal(
+                current_price=current_price,
+                resting_liquidity=resting_liquidity_zones,
+                liquidity_pools=liquidity_pools,
+                imbalance_zones=imbalance_zones,
+                volume_profile=volume_profile,
+                vwap_data=vwap_data
+            )
+        else:
+            # Use values from entry_exit_levels with direction-aware SL/TP
+            confidence = 80 if signal in ("BUY", "SELL") else 58
+            trade_direction = entry_exit_levels.get("direction", "NEUTRAL")
+            reason = f"Direction-aware {trade_direction} signal with {confidence}% confidence"
+            logger.info(f"Using signal {signal} from direction-aware entry/exit calculation")
         
         # Perform sanity check on the results
         agent_sane, sanity_message = self._perform_macro_sanity_check(
@@ -2077,6 +2114,25 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         ask_depth_usdt = sum(float(ask[0]) * float(ask[1]) for ask in order_book.get('asks', []))
         bid_ask_ratio = bid_depth_usdt / ask_depth_usdt if ask_depth_usdt > 0 else 1.0
         
+        # Calculate risk:reward ratio
+        risk_reward_ratio = 0
+        if entry_exit_levels.get("entry") and entry_exit_levels.get("stop_loss") and entry_exit_levels.get("take_profit"):
+            risk = abs(entry_exit_levels["entry"] - entry_exit_levels["stop_loss"])
+            reward = abs(entry_exit_levels["take_profit"] - entry_exit_levels["entry"])
+            risk_reward_ratio = round(reward / risk, 2) if risk > 0 else 0
+            
+        # Determine stop-loss position description based on direction
+        direction = entry_exit_levels.get("direction", "NEUTRAL")
+        if direction == "BUY":
+            sl_description = "below entry"
+            tp_description = "above entry"
+        elif direction == "SELL":
+            sl_description = "above entry"
+            tp_description = "below entry"
+        else:
+            sl_description = "from entry"
+            tp_description = "from entry"
+        
         # Combine all results for output
         result = {
             "analysis_mode": "macro",
@@ -2084,6 +2140,10 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             "ask_depth_usdt": ask_depth_usdt,
             "bid_ask_ratio": bid_ask_ratio,
             "spread_pct": (float(order_book.get('asks', [[0]])[0][0]) - float(order_book.get('bids', [[0]])[0][0])) / current_price * 100 if order_book.get('bids') and order_book.get('asks') else 0.1,
+            "trade_direction": direction,
+            "risk_reward_ratio": risk_reward_ratio,
+            "sl_description": sl_description,
+            "tp_description": tp_description,
             "macro_zones": {
                 "resting_liquidity": resting_liquidity_zones.get("levels", []),
                 "liquidity_voids": imbalance_zones.get("voids", []),
@@ -2331,9 +2391,22 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         
         # Find POC (Point of Control) - price level with highest volume
         if combined_volumes:
-            poc_price = max(combined_volumes, key=combined_volumes.get)
-            poc_volume = combined_volumes[poc_price]
-            result["poc"] = poc_price
+            # Find the price bin with maximum volume
+            max_volume = 0
+            poc_price = None
+            for price, volume in combined_volumes.items():
+                if volume > max_volume:
+                    max_volume = volume
+                    poc_price = price
+            
+            # Store POC volume for later use
+            result["poc_volume"] = max_volume
+            
+            if poc_price is not None:
+                result["poc"] = poc_price
+            else:
+                # Fallback if we couldn't determine POC
+                result["poc"] = current_price
             
             # Create sorted list of (price, volume) pairs
             sorted_volumes = sorted(combined_volumes.items(), key=lambda x: x[0])
@@ -2349,6 +2422,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 
                 # Start from POC and work outward
                 poc_index = next((i for i, (price, _) in enumerate(sorted_volumes) if price == poc_price), None)
+                poc_volume = combined_volumes.get(poc_price, 0)  # Get volume at POC
                 
                 if poc_index is not None:
                     value_area_prices.append(poc_price)
@@ -2431,11 +2505,29 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         return result
         
     def _calculate_macro_entry_exit(self, current_price, resting_liquidity, liquidity_pools, imbalance_zones, volume_profile, vwap_data):
-        """Calculate suggested entry, stop-loss, and take-profit based on macro liquidity structure"""
+        """
+        Calculate suggested entry, stop-loss, and take-profit based on macro liquidity structure
+        This method is now direction-aware and adjusts SL/TP logic based on signal type
+        """
+        # Generate the signal first to determine direction
+        signal, confidence, reason = self._generate_macro_signal(
+            current_price=current_price,
+            resting_liquidity=resting_liquidity,
+            liquidity_pools=liquidity_pools,
+            imbalance_zones=imbalance_zones,
+            volume_profile=volume_profile,
+            vwap_data=vwap_data
+        )
+        
+        # Set direction multiplier based on signal (1 for BUY, -1 for SELL)
+        direction = -1 if signal == "SELL" else 1
+        
         result = {
             "entry": None,
             "stop_loss": None,
-            "take_profit": None
+            "take_profit": None,
+            "signal": signal,
+            "direction": "SELL" if direction == -1 else "BUY"
         }
         
         # Determine if we have useful data
@@ -2455,50 +2547,99 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         nearest_support = max(support_levels) if support_levels else None
         nearest_resistance = min(resistance_levels) if resistance_levels else None
         
-        # Calculate entry based on available data
-        if has_poc and volume_profile.get("poc") < current_price:
-            # POC below current price - potential pullback entry
-            result["entry"] = volume_profile.get("poc")
-        elif has_vwap and vwap_data.get("daily") < current_price:
-            # VWAP below current price - potential entry on pullback to average
-            result["entry"] = vwap_data.get("daily")
-        elif nearest_support:
-            # Entry near support level
-            result["entry"] = nearest_support * 1.005  # Slightly above support
-        else:
-            # Default entry
-            result["entry"] = current_price * 0.99
+        # Calculate entry based on available data and signal direction
+        if direction == 1:  # BUY signal
+            if has_poc and volume_profile.get("poc") < current_price:
+                # POC below current price - potential pullback entry
+                result["entry"] = volume_profile.get("poc")
+            elif has_vwap and vwap_data.get("daily") < current_price:
+                # VWAP below current price - potential entry on pullback to average
+                result["entry"] = vwap_data.get("daily")
+            elif nearest_support:
+                # Entry near support level
+                result["entry"] = nearest_support * 1.005  # Slightly above support
+            else:
+                # Default entry
+                result["entry"] = current_price * 0.99
+        else:  # SELL signal
+            if has_poc and volume_profile.get("poc") > current_price:
+                # POC above current price - potential rally entry
+                result["entry"] = volume_profile.get("poc")
+            elif has_vwap and vwap_data.get("daily") > current_price:
+                # VWAP above current price - potential entry on rally to average
+                result["entry"] = vwap_data.get("daily")
+            elif nearest_resistance:
+                # Entry near resistance level
+                result["entry"] = nearest_resistance * 0.995  # Slightly below resistance
+            else:
+                # Default entry
+                result["entry"] = current_price * 1.01
+                
+        # Default to current price if no entry was determined
+        if not result["entry"]:
+            result["entry"] = current_price
+            logger.warning("Could not determine entry level, using current price")
         
-        # Calculate stop-loss
-        if nearest_support and nearest_support < result["entry"]:
-            # Stop below nearest support
-            result["stop_loss"] = nearest_support * 0.995
-        elif has_vwap and vwap_data.get("std_dev_bands") and vwap_data.get("std_dev_bands").get("2sd")[0]:
-            # Stop at 2 standard deviations below VWAP
-            result["stop_loss"] = vwap_data.get("std_dev_bands").get("2sd")[0]
-        else:
-            # Default stop-loss at -2%
-            result["stop_loss"] = result["entry"] * 0.98
+        # Calculate stop-loss based on signal direction
+        if direction == 1:  # BUY signal - stop below entry
+            if nearest_support and nearest_support < result["entry"]:
+                # Stop below nearest support
+                result["stop_loss"] = nearest_support * 0.995
+            elif has_vwap and vwap_data.get("std_dev_bands") and vwap_data.get("std_dev_bands").get("2sd")[0]:
+                # Stop at 2 standard deviations below VWAP
+                result["stop_loss"] = vwap_data.get("std_dev_bands").get("2sd")[0]
+            else:
+                # Default stop-loss at -2%
+                result["stop_loss"] = result["entry"] * 0.98
+        else:  # SELL signal - stop above entry
+            if nearest_resistance and nearest_resistance > result["entry"]:
+                # Stop above nearest resistance
+                result["stop_loss"] = nearest_resistance * 1.005
+            elif has_vwap and vwap_data.get("std_dev_bands") and vwap_data.get("std_dev_bands").get("2sd")[1]:
+                # Stop at 2 standard deviations above VWAP
+                result["stop_loss"] = vwap_data.get("std_dev_bands").get("2sd")[1]
+            else:
+                # Default stop-loss at +2%
+                result["stop_loss"] = result["entry"] * 1.02
         
-        # Calculate take-profit
-        if nearest_resistance and nearest_resistance > result["entry"]:
-            # Take profit at resistance
-            result["take_profit"] = nearest_resistance * 0.995
-        elif has_vwap and vwap_data.get("std_dev_bands") and vwap_data.get("std_dev_bands").get("2sd")[1]:
-            # Take profit at 2 standard deviations above VWAP
-            result["take_profit"] = vwap_data.get("std_dev_bands").get("2sd")[1]
-        else:
-            # Default take-profit at +3%
-            result["take_profit"] = result["entry"] * 1.03
+        # Calculate take-profit based on signal direction
+        if direction == 1:  # BUY signal - profit above entry
+            if nearest_resistance and nearest_resistance > result["entry"]:
+                # Take profit at resistance
+                result["take_profit"] = nearest_resistance * 0.995
+            elif has_vwap and vwap_data.get("std_dev_bands") and vwap_data.get("std_dev_bands").get("2sd")[1]:
+                # Take profit at 2 standard deviations above VWAP
+                result["take_profit"] = vwap_data.get("std_dev_bands").get("2sd")[1]
+            else:
+                # Default take-profit at +3%
+                result["take_profit"] = result["entry"] * 1.03
+        else:  # SELL signal - profit below entry
+            if nearest_support and nearest_support < result["entry"]:
+                # Take profit at support
+                result["take_profit"] = nearest_support * 1.005
+            elif has_vwap and vwap_data.get("std_dev_bands") and vwap_data.get("std_dev_bands").get("2sd")[0]:
+                # Take profit at 2 standard deviations below VWAP
+                result["take_profit"] = vwap_data.get("std_dev_bands").get("2sd")[0]
+            else:
+                # Default take-profit at -3%
+                result["take_profit"] = result["entry"] * 0.97
         
-        # Ensure risk-to-reward is at least 1:1.5
+        # Ensure risk-to-reward is at least 1:1.5 for both BUY and SELL signals
         if result["entry"] and result["stop_loss"] and result["take_profit"]:
             risk = abs(result["entry"] - result["stop_loss"])
             reward = abs(result["take_profit"] - result["entry"])
             
             if (reward / risk) < 1.5:
                 # Adjust take-profit to ensure 1:1.5 risk-reward
-                result["take_profit"] = result["entry"] + (risk * 1.5)
+                # Direction-aware adjustment
+                result["take_profit"] = result["entry"] + (direction * risk * 1.5)
+                logger.info(f"Adjusted take-profit to maintain 1:1.5 R:R ratio for {signal} signal")
+                
+            # Log direction-aware SL/TP levels
+            if direction == 1:  # BUY
+                logger.info(f"BUY signal SL/TP: SL=${result['stop_loss']:.2f} (below entry), TP=${result['take_profit']:.2f} (above entry)")
+            else:  # SELL
+                logger.info(f"SELL signal SL/TP: SL=${result['stop_loss']:.2f} (above entry), TP=${result['take_profit']:.2f} (below entry)")
         
         return result
         

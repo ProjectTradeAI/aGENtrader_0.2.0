@@ -246,15 +246,12 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 explanation = analysis_result.get("reason", "Macro liquidity analysis")
                 logger.info(f"Using signal from macrostructure analysis: {signal} with {confidence}% confidence")
                 
-                # Add direction-aware SL/TP description to explanation
+                # Don't modify explanation here since we're now using the detailed reason from the result
+                # Just set placeholder variables for access later
                 trade_direction = analysis_result.get("trade_direction", "NEUTRAL")
                 sl_description = analysis_result.get("sl_description", "")
                 tp_description = analysis_result.get("tp_description", "")
                 r_r_ratio = analysis_result.get("risk_reward_ratio", 0)
-                
-                if trade_direction in ("BUY", "SELL") and sl_description and tp_description:
-                    direction_detail = f" SL {sl_description}, TP {tp_description} with R:R 1:{r_r_ratio}"
-                    explanation += direction_detail
             
             # Record execution time
             execution_time = time.time() - start_time
@@ -350,7 +347,17 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             log_message += f"💧 LIQUIDITY ANALYST V2.1 {mode_label} DECISION: {signal} ({confidence}%)\n"
             
             if entry and stop_loss:
-                log_message += f"  - Entry: ${entry:.2f}\n" 
+                # Add commas for better readability in price display
+                formatted_entry = f"${entry:,.2f}"
+                formatted_sl = f"${stop_loss:,.2f}"
+                
+                # Get entry condition if available
+                entry_condition = results.get("metrics", {}).get("entry_condition", "market_entry")
+                entry_condition_display = ""
+                if entry_condition != "market_entry":
+                    entry_condition_display = f" ({entry_condition})"
+                
+                log_message += f"  - Entry: {formatted_entry}{entry_condition_display}\n"
                 
                 # Get direction-aware descriptions for SL/TP
                 sl_description = "from entry"
@@ -359,12 +366,13 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 if self.analysis_mode == "macro":
                     sl_description = results.get("metrics", {}).get("sl_description", "from entry")
                     tp_description = results.get("metrics", {}).get("tp_description", "from entry")
-                    log_message += f"  - SL: ${stop_loss:.2f} ({sl_description})"
+                    log_message += f"  - SL: {formatted_sl} ({sl_description})"
                 else:
-                    log_message += f"  - SL: ${stop_loss:.2f}"
+                    log_message += f"  - SL: {formatted_sl}"
                 
                 if take_profit:
-                    log_message += f" | TP: ${take_profit:.2f}"
+                    formatted_tp = f"${take_profit:,.2f}"
+                    log_message += f" | TP: {formatted_tp}"
                     if self.analysis_mode == "macro":
                         log_message += f" ({tp_description})"
                     log_message += "\n"
@@ -404,7 +412,31 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                     if resistance_zones:
                         log_message += f"  - Key Resistance Zones: {', '.join(resistance_zones)}\n"
             
-            log_message += f"  - Reason: {explanation[0]}\n"
+            # Display improved reason from metrics if available for macro mode
+            if self.analysis_mode == "macro" and "metrics" in results and "reason" in results["metrics"]:
+                detailed_reason = results["metrics"]["reason"]
+                if len(detailed_reason) > 1:  # Only use if it's not a single character like "D"
+                    explanation = [detailed_reason]
+            
+            # Format the reason more clearly, wrap long lines
+            reason_text = explanation[0]
+            # Split into multiple lines if too long (over 70 chars)
+            if len(reason_text) > 70:
+                words = reason_text.split()
+                lines = []
+                current_line = "  - Reason: "
+                for word in words:
+                    if len(current_line + word) > 70:
+                        lines.append(current_line)
+                        current_line = "    " + word  # Indent continuation lines
+                    else:
+                        current_line += " " + word if current_line.endswith(":") else " " + word
+                lines.append(current_line)
+                for line in lines:
+                    log_message += f"{line}\n"
+            else:
+                log_message += f"  - Reason: {reason_text}\n"
+            
             log_message += f"{'='*80}"
             
             # Log the formatted output
@@ -2133,6 +2165,41 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             sl_description = "from entry"
             tp_description = "from entry"
         
+        # Determine entry condition based on price relationship
+        entry_price = entry_exit_levels.get("entry", current_price)
+        entry_condition = "market_entry"  # Default value
+        
+        if entry_price < current_price:
+            entry_condition = "pullback_short"
+        elif entry_price > current_price:
+            entry_condition = "pullback_long"
+        
+        # Create improved detailed reason based on market context
+        detailed_reason = reason
+        if direction == "BUY":
+            # More descriptive BUY reason
+            support_clusters = [z for z in resting_liquidity_zones.get("levels", []) if z.get("type") == "support"]
+            poc_price = volume_profile.get("poc")
+            
+            if support_clusters and entry_price in [s.get("price") for s in support_clusters]:
+                detailed_reason = f"Entry near strong support zone with volume confirmation. Stop placed below key structural level to avoid noise. Target at next resistance with {risk_reward_ratio}:1 reward potential."
+            elif poc_price and abs(entry_price - poc_price) / poc_price < 0.005:  # Within 0.5% of POC
+                detailed_reason = f"Entry at high volume node (POC) with value area support. Price showing absorption at key level. Stop placed at low volume area with clean target at next distribution zone."
+            else:
+                detailed_reason = f"Bullish market structure with liquidity pool above. Strong buying pressure detected at key price levels. Stop placed at safe distance below recent swing low."
+                
+        elif direction == "SELL":
+            # More descriptive SELL reason
+            resistance_clusters = [z for z in resting_liquidity_zones.get("levels", []) if z.get("type") == "resistance"]
+            vah_price = volume_profile.get("vah")
+            
+            if resistance_clusters and entry_price in [r.get("price") for r in resistance_clusters]:
+                detailed_reason = f"Entry at validated resistance zone showing rejection. Stop placed above structure to filter false breakouts. Target at next support level with {risk_reward_ratio}:1 potential."
+            elif vah_price and abs(entry_price - vah_price) / vah_price < 0.005:  # Within 0.5% of VAH
+                detailed_reason = f"Price rejected at Volume Area High with bearish confirmation. Clear imbalance between buyers and sellers. Stop placed above swing high with target at volume gap below."
+            else:
+                detailed_reason = f"Bearish market structure with increasing selling pressure. Order block overhead capping price advance. Target placed at untested support zone with clean risk-reward."
+        
         # Combine all results for output
         result = {
             "analysis_mode": "macro",
@@ -2144,6 +2211,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             "risk_reward_ratio": risk_reward_ratio,
             "sl_description": sl_description,
             "tp_description": tp_description,
+            "entry_condition": entry_condition,  # Added entry condition tag
             "macro_zones": {
                 "resting_liquidity": resting_liquidity_zones.get("levels", []),
                 "liquidity_voids": imbalance_zones.get("voids", []),
@@ -2154,7 +2222,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             "vwap": vwap_data,
             "signal": signal,
             "confidence": confidence,
-            "reason": reason,
+            "reason": detailed_reason,  # Use the new detailed reason
             "suggested_entry": entry_exit_levels.get("entry"),
             "suggested_stop_loss": entry_exit_levels.get("stop_loss"),
             "suggested_take_profit": entry_exit_levels.get("take_profit"),

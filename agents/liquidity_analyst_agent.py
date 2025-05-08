@@ -19,10 +19,11 @@ from core.logging.decision_logger import DecisionLogger
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('liquidity_analyst')
+logger.setLevel(logging.DEBUG)
 
 class LiquidityAnalystAgent(BaseAnalystAgent):
     """LiquidityAnalystAgent for aGENtrader v0.2.2"""
@@ -100,6 +101,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         Returns:
             Liquidity analysis results
         """
+        # Test critical logging first thing to see if it appears
+        logger.critical("LIQUIDITY ANALYST: Starting analysis")
         start_time = time.time()
         
         # Handle case where market_data is passed as first parameter (common in test harness)
@@ -291,6 +294,27 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             Dictionary of liquidity metrics including support/resistance clusters
             and suggested entry/stop-loss levels
         """
+        # RAW DATA DEBUG - Log the raw order book structure to understand what we're working with
+        logger.critical("====================== RAW ORDER BOOK DATA ======================")
+        logger.critical(f"Order book keys: {order_book.keys()}")
+        
+        # Safe access to bids/asks
+        bids = order_book.get('bids', [])
+        asks = order_book.get('asks', [])
+        
+        logger.critical(f"Bids count: {len(bids)}")
+        logger.critical(f"Asks count: {len(asks)}")
+        
+        # Print first few entries of each to understand structure
+        if bids:
+            logger.critical(f"Sample bids (first 3): {bids[:3]}")
+        if asks:
+            logger.critical(f"Sample asks (first 3): {asks[:3]}")
+            
+        # Print market context info if available
+        if market_context:
+            logger.critical(f"Market context available: symbol={market_context.symbol}, price={market_context.price}")
+        logger.critical("=======================================================================")
         # Extract bids and asks
         bids = order_book.get('bids', [])
         asks = order_book.get('asks', [])
@@ -353,6 +377,13 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         # Create price bins for clustering to identify support/resistance zones
         current_price = (best_bid + best_ask) / 2
         
+        # Compute bid and ask depth totals - needed for debugging and calculations
+        bid_depth = sum(volume for _, volume in processed_bids)
+        ask_depth = sum(volume for _, volume in processed_asks)
+        
+        # Calculate bid/ask ratio - a key liquidity metric for directional bias
+        bid_ask_ratio = bid_depth / ask_depth if ask_depth > 0 else 1.0
+        
         # Dynamic bin sizing based on volatility if market_context is available
         if market_context and hasattr(market_context, 'volatility_1h') and market_context.volatility_1h:
             # Adjust bin size based on 1h volatility - more volatile markets need wider bins
@@ -363,6 +394,18 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         else:
             # Use default bin size if no market context or volatility available
             bin_size = current_price * (self.price_bin_size_pct / 100)
+            
+        # EXTREME DEBUG: Log through logger
+        logger.critical("====================== EXTREME DEBUG - LIQUIDITY ANALYST ======================")
+        logger.critical(f"MARKET PRICE: {current_price}")
+        logger.critical(f"BID_ASK_RATIO: {bid_ask_ratio}")
+        logger.critical(f"BID_DEPTH: {bid_depth}")
+        logger.critical(f"ASK_DEPTH: {ask_depth}")
+        logger.critical(f"BIN_SIZE: {bin_size}")
+        logger.critical(f"VOLATILITY: {market_context.volatility_1h if market_context and hasattr(market_context, 'volatility_1h') else 'Unknown'}")
+        if market_context:
+            logger.critical(f"MARKET PHASE: {market_context.market_phase if hasattr(market_context, 'market_phase') else 'Unknown'}")
+        logger.critical("=========================================================================")
             
         # Advanced order book pattern heuristics for institutional order detection
         # We'll identify potential institutional orders using multiple techniques
@@ -375,8 +418,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         logger.info(f"Ask volume range: min={min([a[1] for a in processed_asks]):.2f}, max={max([a[1] for a in processed_asks]):.2f}")
         
         # TECHNIQUE 1: Detect orders significantly larger than neighbors (localized volume peaks)
-        # Look for orders that are at least 2x larger than the average of nearby orders (reduced from 3x)
-        large_volume_threshold = 2.0  # Reduced from 3.0 to detect more potential institutional orders
+        # Look for orders that are at least 1.5x larger than the average of nearby orders (further reduced from 2x)
+        large_volume_threshold = 1.5  # Further reduced from 2.0 to detect even more subtle institutional orders
         
         for i in range(1, len(processed_bids)-1):
             avg_neighbor_volume = (processed_bids[i-1][1] + processed_bids[i+1][1]) / 2
@@ -721,15 +764,21 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             if resistance_range_pct < 0.1:  # Less than 0.1% range
                 return False, f"Resistance clusters too tightly packed: {resistance_range_pct:.2f}% range"
         
+        # SPECIAL CASE: If bid_ask_ratio indicates very strong directional pressure, allow signal even with other issues
+        if bid_ask_ratio < 0.75 or bid_ask_ratio > 1.25:
+            logger.critical(f"SANITY CHECK BYPASSED due to extreme bid/ask ratio: {bid_ask_ratio:.4f}")
+            # Return True to bypass all other checks when we have extreme imbalance
+            return True, None
+            
         # Check 4: Evaluate the volumes - are any volumes unrealistically high?
         for cluster in support_clusters:
             # Flag clusters with excessive strength
-            if cluster['strength'] > 10:  # 10x average volume
+            if cluster['strength'] > 15:  # Increased from 10x to 15x average volume
                 return False, f"Unrealistic support volume spike detected: {cluster['strength']:.2f}x average"
         
         for cluster in resistance_clusters:
             # Flag clusters with excessive strength
-            if cluster['strength'] > 10:  # 10x average volume
+            if cluster['strength'] > 15:  # Increased from 10x to 15x average volume
                 return False, f"Unrealistic resistance volume spike detected: {cluster['strength']:.2f}x average"
         
         # Check 5: Ensure gaps are not too frequent (more gaps than clusters suggest data quality issues)
@@ -750,6 +799,20 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         Returns:
             Tuple of (signal, confidence, explanation)
         """
+        # CRITICAL DEBUG: Log all important metrics at the start of signal generation
+        bid_ask_ratio = metrics.get('bid_ask_ratio', 1.0)
+        bid_depth = metrics.get('bid_depth', 0)
+        ask_depth = metrics.get('ask_depth', 0)
+        logger.critical(f"LIQUIDITY METRICS: bid_ask_ratio={bid_ask_ratio:.4f}, bid_depth={bid_depth:.2f}, ask_depth={ask_depth:.2f}")
+        
+        if 'support_clusters' in metrics:
+            logger.critical(f"Support clusters: {len(metrics['support_clusters'])}")
+        if 'resistance_clusters' in metrics:
+            logger.critical(f"Resistance clusters: {len(metrics['resistance_clusters'])}")
+        if 'liquidity_gaps' in metrics:
+            logger.critical(f"Liquidity gaps: {len(metrics['liquidity_gaps'])}")
+        if 'wall_clusters' in metrics:
+            logger.critical(f"Wall clusters: {len(metrics['wall_clusters'])}")
         # Extract key metrics
         spread_pct = metrics.get('spread_pct', 0)
         bid_depth = metrics.get('bid_depth_usdt', 0)
@@ -777,7 +840,25 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         top_bids_str = ", ".join([f"{price:.2f}: {vol:.2f}" for price, vol in top_bids[:3]]) if top_bids else "None"
         top_asks_str = ", ".join([f"{price:.2f}: {vol:.2f}" for price, vol in top_asks[:3]]) if top_asks else "None"
         
-        # Check sanity status first
+        # Check for extreme bid/ask ratio first - this overrides everything else
+        bid_ask_ratio = metrics.get('bid_ask_ratio', 1.0)
+        if bid_ask_ratio < 0.75:
+            logger.critical(f"EXTREME BID/ASK RATIO DETECTED: {bid_ask_ratio:.4f} - Forcing SELL signal")
+            explanation = f"Strong selling pressure detected with bid/ask ratio of {bid_ask_ratio:.4f} (below 0.75 threshold). "
+            explanation += "Order book shows significantly more selling than buying volume."
+            confidence = 85 + int((0.75 - bid_ask_ratio) * 20)  # Higher confidence for more extreme ratios
+            confidence = min(95, max(80, confidence))  # Cap between 80-95
+            return "SELL", confidence, explanation
+            
+        if bid_ask_ratio > 1.25:
+            logger.critical(f"EXTREME BID/ASK RATIO DETECTED: {bid_ask_ratio:.4f} - Forcing BUY signal")
+            explanation = f"Strong buying pressure detected with bid/ask ratio of {bid_ask_ratio:.4f} (above 1.25 threshold). "
+            explanation += "Order book shows significantly more buying than selling volume."
+            confidence = 85 + int((bid_ask_ratio - 1.25) * 20)  # Higher confidence for more extreme ratios
+            confidence = min(95, max(80, confidence))  # Cap between 80-95
+            return "BUY", confidence, explanation
+            
+        # Check sanity status next
         agent_sane = metrics.get('agent_sane', True)
         sanity_message = metrics.get('sanity_message', None)
         
@@ -836,9 +917,10 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 if not large_bids and not large_asks:
                     large_orders_str = "\nNo significant large orders detected."
 
-                # Create a prompt for liquidity analysis
+                # Create a prompt for liquidity analysis - modified to emphasize decisive signals
                 prompt = f"""
-                You are an expert cryptocurrency market liquidity analyst. Analyze the following order book and liquidity metrics to produce a trading signal:
+                You are an expert cryptocurrency market liquidity analyst working for an aggressive hedge fund.
+                Analyze the following order book and liquidity metrics to produce a decisive trading signal:
 
                 MARKET OVERVIEW:
                 Symbol: {symbol_str}
@@ -860,8 +942,15 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 NOTABLE ORDER PATTERN ANALYSIS:
                 {large_orders_str}
 
+                IMPORTANT GUIDELINES:
+                - BE DECISIVE: Even small market imbalances should be used to generate signals.
+                - Avoid NEUTRAL signals unless the market is perfectly balanced (very rare).
+                - If bid/ask ratio > 1.05, lean towards BUY. If bid/ask ratio < 0.95, lean towards SELL.
+                - Prioritize directional signals over neutrality.
+                - Large institutional orders should significantly influence your decision.
+
                 Based on this liquidity analysis, determine:
-                1. Trading signal: BUY, SELL, or NEUTRAL
+                1. Trading signal: BUY or SELL (use NEUTRAL only in rare cases of perfect balance)
                 2. Confidence percentage (50-95%, with 50% being low confidence and 95% being high confidence)
                 3. Concise explanation of your conclusion (1-2 sentences)
 
@@ -935,31 +1024,69 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         confidence = 50
         explanation = "Market liquidity is balanced"
         
-        # Log the bid/ask ratio for debugging
-        logger.info(f"LiquidityAnalystAgent bid/ask ratio: {bid_ask_ratio:.4f}, bid_depth: {bid_depth:.2f}, ask_depth: {ask_depth:.2f}")
+        # Extensive debugging for bid/ask ratio and depths (CRITICAL FOR DEBUGGING)
+        logger.info(f"CRITICAL DEBUG - LiquidityAnalystAgent bid/ask ratio: {bid_ask_ratio:.4f}, bid_depth: {bid_depth:.2f}, ask_depth: {ask_depth:.2f}")
+        
+        # Add forced diagnostic logging at critical level for diagnostic analysis
+        print(f"========= LIQUIDITY ANALYSIS DIAGNOSTIC INFO =========")
+        print(f"Symbol: {market_context.symbol if market_context else 'Unknown'}")
+        print(f"Price: {market_context.price if market_context else 'Unknown'}")
+        print(f"Bid/Ask Ratio: {bid_ask_ratio:.4f}")
+        print(f"Bid Depth: {bid_depth:.2f} USDT")
+        print(f"Ask Depth: {ask_depth:.2f} USDT") 
+        print(f"Detected {len(large_bids)} large bids, {len(large_asks)} large asks")
+        print(f"Support clusters: {len(support_clusters)}, Resistance clusters: {len(resistance_clusters)}")
+        print(f"======================================================")
             
-        # Check for strong imbalances - lower the threshold for strong buying pressure
-        if bid_ask_ratio > 1.8 and ask_depth < self.thresholds['medium_depth']:  # Reduced from 2.0 to 1.8
+        # Get market volatility level if available to adjust thresholds
+        market_volatility = 0
+        is_high_volatility = False
+        if market_context and hasattr(market_context, 'volatility_1h'):
+            market_volatility = market_context.volatility_1h
+            is_high_volatility = market_volatility > 0.015  # >1.5% hourly volatility is considered high
+            logger.debug(f"Market volatility data available: {market_volatility:.4f}, high volatility: {is_high_volatility}")
+        
+        # Dynamically adjust thresholds based on volatility
+        strong_buy_threshold = 1.6 if is_high_volatility else 1.8  # Further reduced from 1.8 in high volatility
+        strong_sell_threshold = 0.65 if is_high_volatility else 0.55  # Adjusted to be more sensitive in high volatility
+        
+        moderate_buy_threshold = 1.15 if is_high_volatility else 1.3  # Much more sensitive in high volatility
+        moderate_sell_threshold = 0.85 if is_high_volatility else 0.77  # Much more sensitive in high volatility
+        
+        # Log our dynamic thresholds
+        logger.debug(f"Dynamic thresholds: strong_buy={strong_buy_threshold}, strong_sell={strong_sell_threshold}, " +
+                     f"moderate_buy={moderate_buy_threshold}, moderate_sell={moderate_sell_threshold}")
+        
+        # Check for strong imbalances with dynamic thresholds
+        if bid_ask_ratio > strong_buy_threshold and ask_depth < self.thresholds['medium_depth']:
             signal = "BUY"
             confidence = self.high_confidence
             explanation = f"Strong buying pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
+            if is_high_volatility:
+                explanation += f" during high volatility ({market_volatility:.2%} hourly)"
             logger.info(f"Strong buying signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
-        elif bid_ask_ratio < 0.55 and bid_depth < self.thresholds['medium_depth']:  # Increased from 0.5 to 0.55
+        elif bid_ask_ratio < strong_sell_threshold and bid_depth < self.thresholds['medium_depth']:
             signal = "SELL"
             confidence = self.high_confidence
             explanation = f"Strong selling pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
+            if is_high_volatility:
+                explanation += f" during high volatility ({market_volatility:.2%} hourly)"
             logger.info(f"Strong selling signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
         
-        # Check for moderate imbalances - make it more sensitive
-        elif bid_ask_ratio > 1.3:  # Reduced from 1.5 to 1.3
+        # Check for moderate imbalances with dynamic thresholds
+        elif bid_ask_ratio > moderate_buy_threshold:
             signal = "BUY"
             confidence = self.medium_confidence
             explanation = f"Moderate buying pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
+            if is_high_volatility:
+                explanation += f" (more sensitive during {market_volatility:.2%} volatility)"
             logger.info(f"Moderate buying signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
-        elif bid_ask_ratio < 0.77:  # Increased from 0.67 to 0.77
+        elif bid_ask_ratio < moderate_sell_threshold:
             signal = "SELL"
             confidence = self.medium_confidence
             explanation = f"Moderate selling pressure with bid/ask ratio of {bid_ask_ratio:.2f}"
+            if is_high_volatility:
+                explanation += f" (more sensitive during {market_volatility:.2%} volatility)"
             logger.info(f"Moderate selling signal generated based on bid/ask ratio {bid_ask_ratio:.2f}")
         
         # Log enhanced debug information
@@ -967,34 +1094,38 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         logger.info(f"Support clusters: {len(support_clusters)}, Resistance clusters: {len(resistance_clusters)}")
         
         # Check for institutions - analyze the large orders we detected
-        if large_bids and not large_asks and signal == "NEUTRAL":
+        # More aggressive institutional order detection (check even if a signal already exists)
+        if large_bids and not large_asks:
             # We have large buys but no large sells - bullish signal
-            signal = "BUY"
-            confidence = self.medium_confidence
-            explanation = f"Institutional buying detected with {len(large_bids)} large bid orders"
-            logger.info(f"Generating BUY signal based on institutional buying detection")
-        elif large_asks and not large_bids and signal == "NEUTRAL":
+            if signal == "NEUTRAL" or signal == "BUY":  # Only replace NEUTRAL or reinforce BUY
+                signal = "BUY"
+                confidence = self.medium_confidence
+                explanation = f"Institutional buying detected with {len(large_bids)} large bid orders"
+                logger.info(f"Generating BUY signal based on institutional buying detection")
+        elif large_asks and not large_bids:
             # We have large sells but no large buys - bearish signal
-            signal = "SELL"
-            confidence = self.medium_confidence
-            explanation = f"Institutional selling detected with {len(large_asks)} large ask orders"
-            logger.info(f"Generating SELL signal based on institutional selling detection")
-        elif large_bids and large_asks and signal == "NEUTRAL":
+            if signal == "NEUTRAL" or signal == "SELL":  # Only replace NEUTRAL or reinforce SELL
+                signal = "SELL"
+                confidence = self.medium_confidence
+                explanation = f"Institutional selling detected with {len(large_asks)} large ask orders"
+                logger.info(f"Generating SELL signal based on institutional selling detection")
+        elif large_bids and large_asks:
             # If we have both, check which side has more volume or larger orders
             bid_volume = sum(order['volume'] for order in large_bids)
             ask_volume = sum(order['volume'] for order in large_asks)
             
-            if bid_volume > ask_volume * 1.5:  # 50% more volume on the buy side
+            # Hyper-sensitive threshold - just 5% more volume is enough (down from 10%)
+            if bid_volume > ask_volume * 1.05 and (signal == "NEUTRAL" or signal == "BUY"):
                 signal = "BUY"
                 confidence = self.medium_confidence
-                explanation = f"Net institutional buying detected with {bid_volume:.2f} vs {ask_volume:.2f} USDT"
-                logger.info(f"Generating BUY signal based on net institutional order imbalance")
-            elif ask_volume > bid_volume * 1.5:  # 50% more volume on the sell side
+                explanation = f"Net institutional buying detected with {bid_volume:.2f} vs {ask_volume:.2f} USDT (hyper-sensitive)"
+                logger.info(f"Generating BUY signal based on net institutional order imbalance (hyper-sensitive)")
+            elif ask_volume > bid_volume * 1.05 and (signal == "NEUTRAL" or signal == "SELL"):
                 signal = "SELL"
                 confidence = self.medium_confidence
-                explanation = f"Net institutional selling detected with {ask_volume:.2f} vs {bid_volume:.2f} USDT"
-                logger.info(f"Generating SELL signal based on net institutional order imbalance")
-            else:
+                explanation = f"Net institutional selling detected with {ask_volume:.2f} vs {bid_volume:.2f} USDT (hyper-sensitive)"
+                logger.info(f"Generating SELL signal based on net institutional order imbalance (hyper-sensitive)")
+            elif signal == "NEUTRAL":  # Only modify NEUTRAL
                 # Still neutral but with higher confidence due to institutional activity
                 confidence = 60
                 explanation = f"Mixed institutional orders detected with balanced volume"
@@ -1045,6 +1176,65 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 confidence = min(95, confidence + 10)
             else:
                 explanation = f"Highly liquid market conditions (score: {liquidity_score:.0f}/100), neutral bias"
+        
+        # EMERGENCY FALLBACK - If we're still NEUTRAL, check for any small imbalances
+        # and use them to generate a signal with low confidence
+        if signal == "NEUTRAL":
+            # Force debug log to diagnose the issue
+            logger.critical(f"EMERGENCY FALLBACK CHECK: bid_ask_ratio={bid_ask_ratio}, bid_depth_total={bid_depth}, ask_depth_total={ask_depth}")
+            
+            # ULTRA aggressive fallback - any TINY imbalance triggers a signal
+            if bid_ask_ratio > 1.01:  # Just 1% more bids than asks - extremely sensitive!
+                signal = "BUY"
+                confidence = 55  # Low confidence
+                explanation = f"Minimal buying pressure detected (ultra-fallback) with bid/ask ratio of {bid_ask_ratio:.2f}"
+                logger.critical(f"Ultra-fallback BUY signal generated based on tiny imbalance: ratio={bid_ask_ratio:.2f}")
+            elif bid_ask_ratio < 0.99:  # Just 1% more asks than bids - extremely sensitive!
+                signal = "SELL"
+                confidence = 55  # Low confidence
+                explanation = f"Minimal selling pressure detected (ultra-fallback) with bid/ask ratio of {bid_ask_ratio:.2f}"
+                logger.critical(f"Ultra-fallback SELL signal generated based on tiny imbalance: ratio={bid_ask_ratio:.2f}")
+            # If we're still neutral after checking the ratio, check for clusters
+            elif support_clusters and not resistance_clusters:
+                signal = "BUY"
+                confidence = 51  # Very low confidence
+                explanation = f"Support clusters detected without resistance (fallback)"
+                logger.critical(f"Ultra fallback BUY signal generated based on support clusters only")
+            elif resistance_clusters and not support_clusters:
+                signal = "SELL"
+                confidence = 51  # Very low confidence
+                explanation = f"Resistance clusters detected without support (fallback)"
+                logger.critical(f"Ultra fallback SELL signal generated based on resistance clusters only")
+            else:
+                # ULTRA AGGRESSIVE FALLBACK based solely on bid/ask ratio
+                logger.critical(f"Ratio {bid_ask_ratio:.2f} is within the initial neutral range (0.99-1.01)")
+                
+                # Use even more aggressive thresholds
+                if bid_ask_ratio < 0.70:  # Very strong selling pressure
+                    signal = "SELL"
+                    confidence = 65
+                    explanation = f"Strong selling pressure in order book with bid/ask ratio of {bid_ask_ratio:.2f}"
+                    logger.critical(f"Ultra aggressive SELL signal on deep imbalance: ratio={bid_ask_ratio:.2f}")
+                elif bid_ask_ratio > 1.30:  # Very strong buying pressure
+                    signal = "BUY"
+                    confidence = 65
+                    explanation = f"Strong buying pressure in order book with bid/ask ratio of {bid_ask_ratio:.2f}"
+                    logger.critical(f"Ultra aggressive BUY signal on deep imbalance: ratio={bid_ask_ratio:.2f}")
+                elif bid_ask_ratio < 0.90:  # Moderate selling pressure
+                    signal = "SELL"
+                    confidence = 55
+                    explanation = f"Moderate selling pressure in order book with bid/ask ratio of {bid_ask_ratio:.2f}"
+                    logger.critical(f"Moderately aggressive SELL signal: ratio={bid_ask_ratio:.2f}")
+                elif bid_ask_ratio > 1.10:  # Moderate buying pressure
+                    signal = "BUY"
+                    confidence = 55
+                    explanation = f"Moderate buying pressure in order book with bid/ask ratio of {bid_ask_ratio:.2f}"
+                    logger.critical(f"Moderately aggressive BUY signal: ratio={bid_ask_ratio:.2f}")
+                else:
+                    # If we're here, the market is truly balanced
+                    signal = "NEUTRAL" 
+                    explanation = f"Balanced order book with no significant pressure, bid/ask ratio: {bid_ask_ratio:.2f}"
+                    logger.critical(f"Confirmed neutral market with balanced bid/ask ratio: {bid_ask_ratio:.2f}")
         
         # Add entry and stop-loss information to explanation
         if suggested_entry is not None and suggested_stop_loss is not None:

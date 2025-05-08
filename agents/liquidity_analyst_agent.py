@@ -26,7 +26,7 @@ logger = logging.getLogger('liquidity_analyst')
 logger.setLevel(logging.DEBUG)
 
 class LiquidityAnalystAgent(BaseAnalystAgent):
-    """LiquidityAnalystAgent for aGENtrader v0.2.2"""
+    """LiquidityAnalystAgent for aGENtrader v2.0.0 - High-Fidelity Liquidity Intelligence"""
     
     def __init__(self, data_fetcher=None, config=None):
         """
@@ -36,7 +36,7 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             data_fetcher: Data fetcher for market data
             config: Configuration dictionary
         """
-        self.version = "v0.2.2"
+        self.version = "v2.0.0"
         super().__init__(agent_name="liquidity_analyst")
         self.name = "LiquidityAnalystAgent"
         self.description = "Analyzes market liquidity conditions"
@@ -71,8 +71,8 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
         # Price bin size for clustering (in % of price)
         self.price_bin_size_pct = self.config.get('price_bin_size_pct', 0.2)
         
-        # Sanity check parameters
-        self.min_liquidity_zones = self.config.get('min_liquidity_zones', 3)
+        # Sanity check parameters - decreased min_liquidity_zones to 2 as requested in v2.0 upgrade
+        self.min_liquidity_zones = self.config.get('min_liquidity_zones', 2)
         self.max_bid_ask_ratio = self.config.get('max_bid_ask_ratio', 100.0)
         self.min_bid_ask_ratio = self.config.get('min_bid_ask_ratio', 0.01)
         
@@ -726,16 +726,37 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
             Tuple of (is_sane, error_message) where error_message is None if is_sane is True
         """
         # Check 1: Are there at least a minimum number of support/resistance zones?
+        # V2.0 UPDATE: Reduced minimum zones from 3 to 2 and accept statistical outliers as valid
         total_zones = len(support_clusters) + len(resistance_clusters)
         if total_zones < self.min_liquidity_zones:
-            return False, f"Too few liquidity zones detected: {total_zones} (minimum: {self.min_liquidity_zones})"
+            # Before failing the sanity check, see if we at least have one of each type
+            # This is a softer criterion than the previous version
+            if support_clusters and resistance_clusters:
+                logger.info(f"Only {total_zones} liquidity zones detected but at least one support and one resistance, proceeding")
+                # We'll consider this acceptable but with reduced confidence
+                return True, None
+            else:
+                return False, f"Too few liquidity zones detected: {total_zones} (minimum: {self.min_liquidity_zones})"
         
         # Check 2: Are the bid/ask ratios within reasonable ranges?
+        # V2.0 UPDATE: More nuanced handling of extreme ratios
         if bid_ask_ratio > self.max_bid_ask_ratio:
-            return False, f"Bid/ask ratio too extreme (high): {bid_ask_ratio:.2f} (max allowed: {self.max_bid_ask_ratio})"
+            # Extremely high ratio (many more bids than asks)
+            if bid_ask_ratio > 1.25:
+                # This is a strong BUY signal, not an error
+                logger.critical(f"EXTREME BID/ASK RATIO DETECTED: {bid_ask_ratio:.4f} - Strong buying pressure")
+                return True, None
+            else:
+                return False, f"Bid/ask ratio too extreme (high): {bid_ask_ratio:.2f} (max allowed: {self.max_bid_ask_ratio})"
         
         if bid_ask_ratio < self.min_bid_ask_ratio:
-            return False, f"Bid/ask ratio too extreme (low): {bid_ask_ratio:.2f} (min allowed: {self.min_bid_ask_ratio})"
+            # Extremely low ratio (many more asks than bids)
+            if bid_ask_ratio < 0.75:
+                # This is a strong SELL signal, not an error
+                logger.critical(f"EXTREME BID/ASK RATIO DETECTED: {bid_ask_ratio:.4f} - Strong selling pressure")
+                return True, None
+            else:
+                return False, f"Bid/ask ratio too extreme (low): {bid_ask_ratio:.2f} (min allowed: {self.min_bid_ask_ratio})"
         
         # Check 3: Ensure that the price differences between clusters make sense
         if len(support_clusters) >= 2:
@@ -917,21 +938,29 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 if not large_bids and not large_asks:
                     large_orders_str = "\nNo significant large orders detected."
 
-                # Create a prompt for liquidity analysis - modified to emphasize decisive signals
+                # Format significant bids and asks for display
+                large_bids_str = ", ".join([f"{b['price']:.2f}" for b in large_bids[:3]]) if large_bids else "None"
+                large_asks_str = ", ".join([f"{a['price']:.2f}" for a in large_asks[:3]]) if large_asks else "None"
+                
+                # Calculate USDT values for display in prompt
+                bid_depth_usdt = metrics.get('bid_depth_usdt', 0) / 1000000  # Convert to millions for display
+                ask_depth_usdt = metrics.get('ask_depth_usdt', 0) / 1000000  # Convert to millions for display
+                
+                # V2.0 Enhanced LLM prompt with market microstructure focus
                 prompt = f"""
-                You are an expert cryptocurrency market liquidity analyst working for an aggressive hedge fund.
-                Analyze the following order book and liquidity metrics to produce a decisive trading signal:
+                You are an expert cryptocurrency market liquidity analyst specializing in high-frequency order book analysis.
+                Analyze this market microstructure data to produce tactical trading recommendations:
 
-                MARKET OVERVIEW:
+                MARKET MICROSTRUCTURE:
                 Symbol: {symbol_str}
-                Current Price: {current_price}
-                Market Phase: {market_phase}
-                Volatility: {volatility}
+                Current price: ${current_price:.2f}
                 Spread: {spread_pct:.4f}%
-                Liquidity Score: {liquidity_score:.2f}/100 (higher is more liquid)
-                Bid-to-Ask Ratio: {bid_ask_ratio:.4f} (>1 means more buying than selling pressure)
-                Total Bid Depth: {bid_depth:.2f} USDT
-                Total Ask Depth: {ask_depth:.2f} USDT
+                Bid/Ask depth: {bid_depth_usdt:.1f}M / {ask_depth_usdt:.1f}M USDT
+                Bid/Ask ratio: {bid_ask_ratio:.2f}
+                Large bids @ [{large_bids_str}]
+                Large asks @ [{large_asks_str}]
+                Market phase: {market_phase}
+                Volatility: {volatility:.2f}
 
                 SUPPORT ZONES:
                 {support_str}
@@ -942,22 +971,19 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                 NOTABLE ORDER PATTERN ANALYSIS:
                 {large_orders_str}
 
-                IMPORTANT GUIDELINES:
-                - BE DECISIVE: Even small market imbalances should be used to generate signals.
-                - Avoid NEUTRAL signals unless the market is perfectly balanced (very rare).
-                - If bid/ask ratio > 1.05, lean towards BUY. If bid/ask ratio < 0.95, lean towards SELL.
-                - Prioritize directional signals over neutrality.
-                - Large institutional orders should significantly influence your decision.
+                What is the market microstructure sentiment?
+                What tactical decision would a market maker make here?
+                Should we BUY, SELL, or HOLD?
 
-                Based on this liquidity analysis, determine:
-                1. Trading signal: BUY or SELL (use NEUTRAL only in rare cases of perfect balance)
-                2. Confidence percentage (50-95%, with 50% being low confidence and 95% being high confidence)
-                3. Concise explanation of your conclusion (1-2 sentences)
-
-                FORMAT YOUR RESPONSE AS:
-                Signal: [BUY/SELL/NEUTRAL]
-                Confidence: [number between 50-95]
-                Explanation: [your analysis]
+                Based on this microstructure analysis, provide your analysis in JSON format:
+                {{
+                  "signal": "[BUY/SELL/NEUTRAL]",
+                  "confidence": [number between 50-95],
+                  "reasoning": "[concise explanation based on microstructure]",
+                  "suggested_entry": [optimal entry price],
+                  "suggested_stop_loss": [appropriate stop-loss level],
+                  "suggested_take_profit": [profit target based on resistance or ask walls]
+                }}
                 """
                 
                 # Get LLM response (with temperature 0.2 for more consistent outputs)
@@ -984,7 +1010,50 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                         logger.warning(f"Unexpected LLM response format: {type(llm_response)}")
                         raise ValueError("Unexpected LLM response format")
                         
-                    # Parse the response
+                    # V2.0 Update: Try to parse JSON format first
+                    # Remove any leading/trailing whitespace and extract JSON content
+                    response_text = response_text.strip()
+                    
+                    # Try to extract JSON object if wrapped in text
+                    json_match = re.search(r'\{.*"signal".*"confidence".*\}', response_text, re.DOTALL)
+                    if json_match:
+                        json_str = json_match.group(0)
+                        try:
+                            # Parse the JSON response
+                            import json
+                            parsed_json = json.loads(json_str)
+                            
+                            # Extract fields
+                            llm_signal = parsed_json.get("signal", "").upper()
+                            llm_confidence = int(parsed_json.get("confidence", 50))
+                            llm_explanation = parsed_json.get("reasoning", "").strip()
+                            
+                            # Extract tactical recommendations (new in v2.0)
+                            suggested_entry = parsed_json.get("suggested_entry")
+                            suggested_stop_loss = parsed_json.get("suggested_stop_loss")
+                            suggested_take_profit = parsed_json.get("suggested_take_profit")
+                            
+                            # Save these to the metrics dict for return value
+                            metrics["suggested_entry"] = suggested_entry
+                            metrics["suggested_stop_loss"] = suggested_stop_loss
+                            metrics["suggested_take_profit"] = suggested_take_profit
+                            
+                            # Validate confidence within bounds
+                            llm_confidence = max(50, min(95, llm_confidence))
+                            
+                            logger.info(f"LLM liquidity analysis: {llm_signal} ({llm_confidence}%): {llm_explanation}")
+                            logger.info(f"Tactical recommendations: Entry=${suggested_entry}, SL=${suggested_stop_loss}, TP=${suggested_take_profit}")
+                            
+                            # Format the explanation with tactical levels
+                            explanation = f"{llm_explanation} Entry: ${suggested_entry}, SL: ${suggested_stop_loss}, TP: ${suggested_take_profit}"
+                            
+                            # Return the LLM-generated signal with tactical recommendations
+                            return llm_signal, llm_confidence, explanation
+                            
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Failed to parse JSON from LLM response: {e}")
+                    
+                    # Fallback to regex parsing for backward compatibility
                     signal_match = re.search(r"Signal:\s*(BUY|SELL|NEUTRAL)", response_text, re.IGNORECASE)
                     confidence_match = re.search(r"Confidence:\s*(\d+)", response_text)
                     explanation_match = re.search(r"Explanation:\s*(.+?)(?:\n|$)", response_text, re.DOTALL)
@@ -997,21 +1066,24 @@ class LiquidityAnalystAgent(BaseAnalystAgent):
                         # Validate confidence within bounds
                         llm_confidence = max(50, min(95, llm_confidence))
                         
-                        logger.info(f"LLM liquidity analysis: {llm_signal} ({llm_confidence}%): {llm_explanation}")
+                        logger.info(f"LLM liquidity analysis (legacy format): {llm_signal} ({llm_confidence}%): {llm_explanation}")
                         
-                        # Add detail about entry/stop-loss if available
-                        additional_detail = ""
+                        # Use fallback method for entry/stop-loss if available
                         if suggested_entry is not None and suggested_stop_loss is not None:
                             entry_str = f"{suggested_entry:.2f}"
                             sl_str = f"{suggested_stop_loss:.2f}"
+                            take_profit = current_price * (1.015 if llm_signal == "BUY" else 0.985)  # Default 1.5% TP
+                            tp_str = f"{take_profit:.2f}"
                             
-                            if llm_signal == "BUY":
-                                additional_detail = f" Suggested entry: {entry_str} (above support), stop-loss: {sl_str}"
-                            elif llm_signal == "SELL":
-                                additional_detail = f" Suggested entry: {entry_str} (below resistance), stop-loss: {sl_str}"
+                            metrics["suggested_entry"] = suggested_entry
+                            metrics["suggested_stop_loss"] = suggested_stop_loss
+                            metrics["suggested_take_profit"] = take_profit
+                            
+                            additional_detail = f" Entry: ${entry_str}, SL: ${sl_str}, TP: ${tp_str}"
+                            return llm_signal, llm_confidence, llm_explanation + additional_detail
                         
-                        # Return the LLM-generated signal with enhanced detail
-                        return llm_signal, llm_confidence, llm_explanation + additional_detail
+                        # Return the LLM-generated signal
+                        return llm_signal, llm_confidence, llm_explanation
                 except Exception as e:
                     logger.warning(f"Error generating LLM liquidity analysis: {str(e)}")
                     # Continue with rule-based approach as fallback
